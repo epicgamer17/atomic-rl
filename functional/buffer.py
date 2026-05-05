@@ -244,6 +244,10 @@ def sample_per(
     # 'indices' are now the tree indices (leaves). We need the data indices.
     data_indices = indices - (buffer_state.tree_capacity - 1)
 
+    # Clamp to handle potential precision issues leading to out-of-bounds indices
+    # TODO: why does this only seem to happen with ape-x?
+    data_indices = torch.clamp(data_indices, 0, buffer_state.capacity - 1)
+
     # Importance Sampling (IS) Weights
     leaf_priorities = buffer_state.sum_tree[indices]
     min_prob = buffer_state.min_tree[0] / total_priority

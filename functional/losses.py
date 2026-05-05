@@ -164,3 +164,28 @@ def cross_entropy_loss(
         "predictions": predictions.detach(),
     }
     return raw_losses, info
+
+
+def huber_loss(
+    predictions: torch.Tensor, targets: torch.Tensor, delta: float = 1.0
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Huber Loss (Smooth L1 Loss). Also returns priorities for PER.
+
+    Args:
+        predictions (torch.Tensor): Predicted Q-values.
+        targets (torch.Tensor): Target Q-values.
+        delta (float, optional): The threshold at which to change between L1 and L2 loss. Defaults to 1.0.
+
+    Returns:
+        Tuple[torch.Tensor, dict]: A tuple containing the raw losses and the info dictionary.
+    """
+    targets = targets.view_as(predictions)
+    raw_losses = F.huber_loss(predictions, targets, reduction="none", delta=delta)
+    priorities = torch.abs(predictions - targets).detach()
+
+    info = {
+        "priorities": priorities,
+        "loss/huber": raw_losses.mean().item(),
+    }
+    return raw_losses, info

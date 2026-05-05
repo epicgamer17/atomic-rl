@@ -139,12 +139,12 @@ for step in range(MAX_STEPS):
 
     # 3. Add to Buffer
     transition = {
-        "obs": obs[None, ...],
+        "obs": torch.from_numpy(obs[None, ...]).float(),
         "action": torch.tensor([[action]], dtype=torch.long),
         "reward": torch.tensor([[reward]], dtype=torch.float32),
         "terminated": torch.tensor([[terminated]], dtype=torch.float32),
         "truncated": torch.tensor([[truncated]], dtype=torch.float32),
-        "next_obs": next_obs[None, ...],
+        "next_obs": torch.from_numpy(next_obs[None, ...]).float(),
         "gamma": torch.tensor([[GAMMA]], dtype=torch.float32),
     }
     buffer_state, _ = circular_write_strategy(buffer_state, transition)
