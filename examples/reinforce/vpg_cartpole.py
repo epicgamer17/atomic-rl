@@ -1,11 +1,7 @@
 """
-Notes on REINFORCE:
+Notes on Vanilla Policy Gradient:
 
-A foundational Algorithm in RL. The base for most policy based methods and actor critics methods.
-
-Introduces policy gradient, simply put increase the probability of playing "good" actions. The hard part is figuring out what is a good action (credit assignment).
-
-On-Policy Algorithm so it can't store old data. Simple places for inovation and changes, data efficiency, baseline methods/advantage computation, adding a value network, more efficient data collection, allowing for trajectories instead of only episodes, relying on Monte Carlo returns (high variance), allowing for offline data, among many others.
+Essentially REINFORCE + a value function for the baseline to compute advantages. Or another way of putting it is REINFORCE with learned state dependant baseline.
 """
 
 import torch
@@ -22,22 +18,24 @@ from functools import partial
 from functional.action_selection import categorical_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
-from functional.losses import policy_gradient_loss
+from functional.losses import policy_gradient_loss, mse_loss
 from functional.utils import exponential_moving_average
-from functional.advantages import compute_mean_advantages, compute_ema_advantages
+from functional.visualization import compute_explained_variance
+from functional.advantages import compute_critic_advantages
 
 # Constants
 LEARNING_RATE = 1e-3
 MAX_EPISODES = 1_000
 GAMMA = 0.99
 SEED = 42
-
-global_ema_baseline = 0.0  # if using ema for baseline
+CRITIC_COEFF = 0.5
 
 # Seeding for reproducibility
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
+
+# NOTE: these can have a fused backbone and separate heads, for now we keep separate for simplicity
 
 
 class Actor(nn.Module):
@@ -54,6 +52,20 @@ class Actor(nn.Module):
         return x
 
 
+class Critic(nn.Module):
+    def __init__(self, input_shape: Tuple):
+        super().__init__()
+        self.l1 = nn.Linear(input_shape[0], 64)
+        self.l2 = nn.Linear(64, 64)
+        self.l3 = nn.Linear(64, 1)
+
+    def forward(self, x):
+        x = F.relu(self.l1(x))
+        x = F.relu(self.l2(x))
+        x = self.l3(x)
+        return x
+
+
 # --- 1. Initialization (Defining the State) ---
 env = gym.make("CartPole-v1")
 obs_shape = env.observation_space.shape
@@ -61,8 +73,12 @@ num_actions = env.action_space.n
 device = torch.device("cpu")
 
 actor = Actor(obs_shape, num_actions).to(device)
+critic = Critic(obs_shape).to(device)
 
-optimizer = optim.Adam(actor.parameters(), lr=LEARNING_RATE)
+# NOTE: we use a shared optimizer for both, but we could use separate ones
+optimizer = optim.Adam(
+    list(actor.parameters()) + list(critic.parameters()), lr=LEARNING_RATE
+)
 
 obs, info = env.reset(seed=SEED)
 terminated, truncated = False, False
@@ -71,17 +87,19 @@ rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
 # Initialize W&B
-wandb.init(project="reinforce-cartpole", config={"lr": LEARNING_RATE, "gamma": GAMMA})
+wandb.init(project="vpg-cartpole", config={"lr": LEARNING_RATE, "gamma": GAMMA})
 
 # Using full episodes
 # NOTE: we use episode returns, but we could also use trajectories, etc
 for episode in range(MAX_EPISODES):
-    # NOTE: Since pure REINFORCE relys on MC returns, there is not a clean way to preallocate a buffer or use a circular buffer like we can do for PPO so we just use lists
+    # NOTE: Since pure Vanilla Policy Gradient relies on MC returns, there is not a clean way to preallocate a buffer or use a circular buffer like we can do for PPO so we just use lists
     rewards = []
     log_probs = []
+    values = []
     while not (terminated or truncated):
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
         logits = actor(obs_tensor)
+        value = critic(obs_tensor)
         action, log_prob = categorical_sampling_selector(logits, temperature=1.0)
         action = action.item()
 
@@ -92,6 +110,7 @@ for episode in range(MAX_EPISODES):
         # 3. Add to "online" buffers
         rewards.append(reward)
         log_probs.append(log_prob)
+        values.append(value)
 
         # Update state for next tick
         obs = next_obs
@@ -110,27 +129,43 @@ for episode in range(MAX_EPISODES):
         torch.tensor(rewards, dtype=torch.float32, device=device), GAMMA
     )
 
-    # METHOD A: Mean baseline
-    # advantages = compute_mean_advantages(returns).detach()
-    # METHOD B: EMA baseline
-    global_ema_baseline = exponential_moving_average(
-        torch.tensor(global_ema_baseline, device=device), returns.mean(), alpha=0.01
-    ).item()
-    advantages = compute_ema_advantages(returns, global_ema_baseline).detach()
+    values = torch.stack(values).view_as(returns)
+    advantages = compute_critic_advantages(returns, values)
 
+    # Handle scaling
     # Others: learn a baseline with a neural network (advantage) (not done here)
-    loss, info_dict = policy_gradient_loss(
+    pg_loss, info_dict = policy_gradient_loss(
         advantages=advantages,  # NOTE: calculate this outside
         log_probs=torch.stack(log_probs),
     )
+    pg_loss = pg_loss.mean()
 
-    loss = loss.mean()
+    # NOTE: i use my mse_loss from losses.py, but we don't need priorities here since it's not off policy.
+    critic_loss, _ = mse_loss(values, returns)
+    critic_loss = critic_loss.mean()
+
+    loss = pg_loss + CRITIC_COEFF * critic_loss
 
     # Apply Updates
     optimizer = apply_gradients(optimizer, loss)
 
     if episode % 100 == 0:
+        # Calculate explained variance
+        explained_var = compute_explained_variance(
+            returns.detach().cpu().numpy(), values.detach().cpu().numpy()
+        )
+
         # W&B handles scalars and histograms of tensors (like priorities) automatically.
         log_dict = info_dict.copy()
-        log_dict.update({"loss": loss.item()})
+        log_dict.update(
+            {
+                "loss/total": loss.item(),
+                "loss/critic": critic_loss.mean().item(),
+                "value/mean": values.mean().item(),
+                "value/return_mean": returns.mean().item(),
+                "value/explained_variance": explained_var,
+                "advantages/mean": advantages.mean().item(),
+                "advantages/std": advantages.std().item(),
+            }
+        )
         wandb.log(log_dict, step=episode)

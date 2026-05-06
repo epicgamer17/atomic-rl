@@ -25,7 +25,6 @@ def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Te
     return values
 
 
-# TODO: what is the point of this do we even need/want this? its just an argmax wrapper?
 def argmax_selector(
     predictions: torch.Tensor,
     extractor_fn: Optional[Callable] = None,
@@ -47,28 +46,79 @@ def argmax_selector(
     return torch.argmax(vals, dim=1, keepdim=True)
 
 
-# TODO: does this need an extractor_fn?
 # TODO: write now this only handles logits, muzero with need to be able to handle probs.
-# TODO: do we even need this or should we just inline it into the loops/code? its basically a torch dists wrapper.
 def categorical_sampling_selector(
     predictions: torch.Tensor,
     extractor_fn: Optional[Callable] = None,
     temperature: float = 1.0,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Samples an action from a categorical distribution.
 
     Args:
         predictions (torch.Tensor): The model predictions (logits).
-        extractor_fn (Optional[Callable]): Unused for now.
+        extractor_fn (Optional[Callable]): Not often used, but could be used to extract Q-values from a Categorical DQN for Boltzman exploration (for example).
+        temperature (float): The temperature for the Boltzman exploration.
 
     Returns:
-        torch.Tensor: The sampled actions.
+        Tuple[torch.Tensor, torch.Tensor]: A tuple containing the sampled actions and the log probabilities.
     """
-    assert extractor_fn is None  # For now no extractors
-    temperature_logits = predictions / temperature
+    if temperature == 0.0:
+        return argmax_selector(predictions, extractor_fn)
+
+    if extractor_fn is not None:
+        vals = extractor_fn(predictions)
+    else:
+        vals = predictions
+
+    temperature_logits = vals / temperature
     dist = torch.distributions.Categorical(logits=temperature_logits)
-    return dist.sample()
+
+    action = dist.sample().unsqueeze(-1)
+    log_prob = dist.log_prob(action).unsqueeze(-1)
+    # If it's a standard discrete env, log_prob shape is [Batch] or [Batch, 1]
+    # If multi-discrete, it might be [Batch, Num_Categorical_Variables]
+    if log_prob.dim() > 1 and log_prob.shape[-1] > 1:
+        log_prob = log_prob.sum(dim=-1, keepdim=True)
+    else:
+        log_prob = log_prob.view(-1, 1)  # Ensure [Batch, 1] for consistency
+        action = action.view(-1, 1)
+
+    return action, log_prob
+
+
+def gaussian_sampling_selector(
+    action_mean: torch.Tensor, action_std: torch.Tensor, explore: bool = True
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Samples from a Gaussian policy for continuous actions.
+
+    Args:
+        action_mean (torch.Tensor): The mean of the Gaussian distribution.
+        action_std (torch.Tensor): The standard deviation of the Gaussian distribution.
+        explore (bool): Whether to explore or not.
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: A tuple containing the sampled actions and the log probabilities.
+    """
+    if not explore:
+        return action_mean, torch.zeros_like(
+            action_mean
+        )  # Log prob is 0 for deterministic
+
+    dist = torch.distributions.Normal(action_mean, action_std)
+    action = dist.sample()
+    log_prob = dist.log_prob(action)
+    # NOTE: Many continuous envs have an action dimension (multiple values per step). In other words the action is a vector.
+    # If the action space has multiple dimensions (e.g., [Batch, 6]),
+    # we sum the log probs of each independent joint to get the total joint probability.
+    # keepdim=True ensures the output is [Batch, 1] rather than [Batch]
+    if log_prob.dim() > 1 and log_prob.shape[-1] > 1:
+        log_prob = log_prob.sum(dim=-1, keepdim=True)
+    else:
+        # If it's a 1D action space, just ensure it's explicitly [Batch, 1]
+        log_prob = log_prob.view(-1, 1)
+    return action, log_prob
 
 
 def with_epsilon_greedy(selector_fn: Callable) -> Callable:
@@ -91,6 +141,10 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
         generator: torch.Generator = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Generator]:
         greedy_actions = selector_fn(predictions)
+
+        if epsilon <= 0.0:
+            return greedy_actions, generator
+
         batch_size = predictions.shape[0]
 
         random_actions = torch.randint(
@@ -111,6 +165,7 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
     return epsilon_greedy_selector
 
 
+# TODO: should we generalize this in utils?
 def get_linear_epsilon(
     step: int, start_eps: float, end_eps: float, decay_steps: int
 ) -> float:
@@ -128,6 +183,7 @@ def get_linear_epsilon(
     return start_eps - fraction * (start_eps - end_eps)
 
 
+# TODO: should we generalize this in utils?
 def get_exponential_epsilon(
     step: int, start_eps: float, end_eps: float, decay_rate: float
 ) -> float:

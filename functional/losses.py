@@ -83,27 +83,6 @@ def bellman_error(
     return loss, info
 
 
-def policy_gradient_loss(
-    advantages: torch.Tensor,
-    log_probs: torch.Tensor,
-) -> Tuple[torch.Tensor, dict]:
-    """
-    Calculate the policy gradient loss for a batch of transitions.
-
-    Args:
-        advantages (torch.Tensor): Tensor of advantages.
-        log_probs (torch.Tensor): Tensor of log probabilities of actions.
-
-    Returns:
-        torch.Tensor: The loss for the batch.
-    """
-    # NOTE: doesnt follow the exact policy gradient of returns - baseline but we calculate the baseline outside. Optionally could move into here and do: -log_probs * (returns - baseline) instead
-    loss = -log_probs * advantages.detach()
-    info = {"loss/policy_gradient": loss.mean().item()}
-
-    return loss, info
-
-
 def with_per_weights(base_loss_fn: Callable, is_weights: torch.Tensor) -> Callable:
     """
     Higher-order function that wraps a standard loss function to apply
@@ -220,3 +199,33 @@ def huber_loss(
         "loss/huber": raw_losses.mean().item(),
     }
     return raw_losses, info
+
+
+# TODO: clean up our contract, do we need the view_as? should we not just say both are expected to be shape X? could we instead of view_as do a view(-1)? what is best? what is cleanest?
+def policy_gradient_loss(
+    advantages: torch.Tensor,
+    log_probs: torch.Tensor,
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Calculate the policy gradient loss for a batch of transitions.
+
+    Args:
+        advantages (torch.Tensor): Tensor of advantages.
+        log_probs (torch.Tensor): Tensor of log probabilities of actions.
+
+    Returns:
+        torch.Tensor: The loss for the batch.
+
+    Note: log_probs must be shape [T, ] (advantages will to match it)
+    """
+    # NOTE: doesnt follow the exact policy gradient of returns - baseline but we calculate the baseline outside. Optionally could move into here and do: -log_probs * (returns - baseline) instead
+    # Ensure advantages matches the shape of log_probs for element-wise multiplication
+    assert log_probs.ndim == 1, f"Expected [T], got {log_probs.shape}"
+    advantages = advantages.view_as(log_probs)
+
+    loss = -log_probs * advantages.detach()
+    # NOTE: no priorities, PG is on-policy and so PE,R doesn't really apply.abs
+    # TODO: what about A-PPO or A3C?
+    info = {"loss/policy_gradient": loss.mean().item()}
+
+    return loss, info

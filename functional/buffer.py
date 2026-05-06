@@ -245,11 +245,12 @@ def sample_per(
     data_indices = indices - (buffer_state.tree_capacity - 1)
 
     # Clamp to handle potential precision issues leading to out-of-bounds indices
-    # TODO: why does this only seem to happen with ape-x?
+    # TODO: why does this only seem to be needed with ape-x?
     data_indices = torch.clamp(data_indices, 0, buffer_state.capacity - 1)
 
     # Importance Sampling (IS) Weights
     leaf_priorities = buffer_state.sum_tree[indices]
+    # TODOL is there a NaN risk here?
     min_prob = buffer_state.min_tree[0] / total_priority
 
     probs = leaf_priorities / total_priority

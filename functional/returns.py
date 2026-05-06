@@ -2,6 +2,7 @@ import torch
 from typing import List, Tuple
 
 
+# TODO: should this live in targets.py?
 def compute_mc_returns(rewards: torch.Tensor, gamma: float) -> torch.Tensor:
     """
     Computes standard Monte Carlo discounted returns.
