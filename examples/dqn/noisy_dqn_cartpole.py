@@ -23,6 +23,7 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
+from tensordict import TensorDict
 from functools import partial
 
 from functional.buffer import init_buffer, circular_write_strategy, uniform_sample
@@ -30,8 +31,6 @@ from functional.losses import bellman_error, mse_loss
 from functional.targets import standard_td_target
 from functional.action_selection import (
     argmax_selector,
-    with_epsilon_greedy,
-    get_linear_epsilon,
 )
 from functional.optimizer import apply_gradients
 from functional.network import hard_update_target_network
@@ -91,12 +90,12 @@ buffer_state = init_buffer(
     capacity=BUFFER_CAPACITY,
     shapes={
         "obs": obs_shape,
-        "action": (1,),
-        "reward": (1,),
-        "terminated": (1,),
-        "truncated": (1,),
+        "action": (),
+        "reward": (),
+        "terminated": (),
+        "truncated": (),
         "next_obs": obs_shape,
-        "gamma": (1,),
+        "gamma": (),
     },
     device=device,
 )
@@ -140,14 +139,14 @@ for step in range(MAX_STEPS):
     # 3. Add to Buffer
     transition = {
         "obs": torch.from_numpy(obs[None, ...]).float(),
-        "action": torch.tensor([[action]], dtype=torch.long),
-        "reward": torch.tensor([[reward]], dtype=torch.float32),
-        "terminated": torch.tensor([[terminated]], dtype=torch.float32),
-        "truncated": torch.tensor([[truncated]], dtype=torch.float32),
+        "action": torch.tensor([action], dtype=torch.long),
+        "reward": torch.tensor([reward], dtype=torch.float32),
+        "terminated": torch.tensor([terminated], dtype=torch.float32),
+        "truncated": torch.tensor([truncated], dtype=torch.float32),
         "next_obs": torch.from_numpy(next_obs[None, ...]).float(),
-        "gamma": torch.tensor([[GAMMA]], dtype=torch.float32),
+        "gamma": torch.tensor([GAMMA], dtype=torch.float32),
     }
-    buffer_state, _ = circular_write_strategy(buffer_state, transition)
+    buffer_state, _ = circular_write_strategy(buffer_state, TensorDict(transition, batch_size=[1]))
 
     # Update state for next tick
     obs = next_obs

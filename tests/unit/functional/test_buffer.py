@@ -12,7 +12,6 @@ from functional.buffer import (
     sample_per,
     update_priorities,
     with_per_tracking,
-    get_linear_beta,
     make_n_step_accumulator,
 )
 
@@ -51,7 +50,7 @@ def test_circular_write_strategy():
     state = init_buffer(capacity, shapes)
 
     # 1. Write 3 items
-    batch = {"data": torch.tensor([[1.0], [2.0], [3.0]])}
+    batch = TensorDict({"data": torch.tensor([[1.0], [2.0], [3.0]])}, batch_size=[3])
     state, indices = circular_write_strategy(state, batch)
 
     assert state.size == 3
@@ -60,7 +59,7 @@ def test_circular_write_strategy():
     torch.testing.assert_close(state.data["data"][:3], batch["data"])
 
     # 2. Write 4 items (should wrap around)
-    batch2 = {"data": torch.tensor([[4.0], [5.0], [6.0], [7.0]])}
+    batch2 = TensorDict({"data": torch.tensor([[4.0], [5.0], [6.0], [7.0]])}, batch_size=[4])
     state, indices2 = circular_write_strategy(state, batch2)
 
     assert state.size == 5  # capped at capacity
@@ -90,7 +89,7 @@ def test_reservoir_write_strategy():
     )
 
     # Write 10 items
-    batch = {"data": torch.arange(10, dtype=torch.float32).view(-1, 1)}
+    batch = TensorDict({"data": torch.arange(10, dtype=torch.float32).reshape(-1, 1)}, batch_size=[10])
     state, indices = reservoir_write_strategy(state, batch)
 
     assert state.total_steps_seen == 10
@@ -104,7 +103,7 @@ def test_uniform_sample():
     capacity = 10
     state = init_buffer(capacity, {"data": (1,)})
     state.size = 5
-    state.data["data"][:5] = torch.arange(5, dtype=torch.float32).view(-1, 1)
+    state.data["data"][:5] = torch.arange(5, dtype=torch.float32).reshape(-1, 1)
 
     gen = torch.Generator()
     gen.manual_seed(42)
@@ -147,7 +146,7 @@ def test_sample_per():
     capacity = 4
     state = init_per_buffer(capacity, {"data": (1,)})
     state.size = 4
-    state.data["data"][:] = torch.arange(4, dtype=torch.float32).view(-1, 1)
+    state.data["data"][:] = torch.arange(4, dtype=torch.float32).reshape(-1, 1)
 
     # Set priorities such that the last one is very likely
     tree_indices = torch.tensor([3, 4, 5, 6], dtype=torch.long)
@@ -174,7 +173,7 @@ def test_with_per_tracking():
     wrapped_write = with_per_tracking(circular_write_strategy)
 
     # 1. Automatic max priority
-    batch = {"data": torch.tensor([[10.0]])}
+    batch = TensorDict({"data": torch.tensor([[10.0]])}, batch_size=[1])
     state = wrapped_write(state, batch)
 
     assert state.size == 1
@@ -184,7 +183,7 @@ def test_with_per_tracking():
     assert state.sum_tree[0] == state.max_priority
 
     # 2. Explicit priority override
-    batch_prio = {"data": torch.tensor([[20.0]]), "priority": torch.tensor([[5.0]])}
+    batch_prio = TensorDict({"data": torch.tensor([[20.0]]), "priority": torch.tensor([[5.0]])}, batch_size=[1])
     state = wrapped_write(state, batch_prio)
     # pointer was 1, so written to index 1, tree index 1 + 4 - 1 = 4
     assert state.sum_tree[4] == 5.0

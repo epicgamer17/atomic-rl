@@ -13,6 +13,7 @@ import gymnasium as gym
 import numpy as np
 import random
 import wandb
+from tensordict import TensorDict
 from functools import partial
 from typing import Tuple, Dict, Any, Callable, List
 
@@ -110,14 +111,14 @@ class SharedPERBuffer:
         # Re-initialize the local function after unpickling
         self.per_add = with_per_tracking(circular_write_strategy)
 
-    def add_transitions(self, transitions_dict: Dict[str, torch.Tensor]):
+    def add_transitions(self, transitions: TensorDict):
         with self.lock:
             # Sync state from shared scalars
             self.buffer_state.pointer = self._pointer.value
             self.buffer_state.size = self._size.value
             self.buffer_state.max_priority = self._max_priority.value
 
-            self.buffer_state = self.per_add(self.buffer_state, transitions_dict)
+            self.buffer_state = self.per_add(self.buffer_state, transitions)
 
             # Sync back to shared scalars
             self._pointer.value = self.buffer_state.pointer
@@ -229,9 +230,13 @@ def actor_worker(
 
         # Push to buffer
         if len(local_batch) >= ACTOR_BATCH_SIZE:
-            collated = {
-                k: torch.cat([t[k] for t in local_batch]) for k in local_batch[0].keys()
-            }
+            collated = TensorDict(
+                {
+                    k: torch.cat([t[k] for t in local_batch])
+                    for k in local_batch[0].keys()
+                },
+                batch_size=[len(local_batch)],
+            )
             with torch.no_grad():
                 _, info_dict = bellman_error(
                     local_model,
@@ -241,7 +246,7 @@ def actor_worker(
                     eval_model=local_target_model,
                     loss_fn=loss_fn,
                 )
-            collated["priority"] = info_dict["priorities"].unsqueeze(-1)
+            collated["priority"] = info_dict["priorities"]
             buffer.add_transitions(collated)
             local_batch = []
 
@@ -290,7 +295,7 @@ def learner_worker(
             continue
 
         batch, indices, is_weights = result
-        batch = {k: v.to(device) for k, v in batch.items()}
+        batch = batch.to(device)
         indices = indices.to(device)
         is_weights = is_weights.to(device)
 
@@ -364,13 +369,13 @@ def main():
     # Shared buffer
     buffer_shapes = {
         "obs": obs_shape,
-        "action": (1,),
-        "reward": (1,),
-        "terminated": (1,),
-        "truncated": (1,),
+        "action": (),
+        "reward": (),
+        "terminated": (),
+        "truncated": (),
         "next_obs": obs_shape,
-        "gamma": (1,),
-        "priority": (1,),
+        "gamma": (),
+        "priority": (),
     }
     buffer = SharedPERBuffer(BUFFER_CAPACITY, buffer_shapes)
 

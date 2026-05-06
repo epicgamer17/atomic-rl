@@ -41,7 +41,7 @@ def log_distributional_metrics(info_dict: dict, support: torch.Tensor, step: int
         # 2. Calculate the Expected Q-value (Mean of the distribution)
         # E[Q] = sum(prob * support)
         expected_q_batch = (probs * support.to(probs.device)).sum(dim=-1)
-        metrics["metrics/expected_q_value"] = expected_q_batch.mean().item()
+        metrics["metrics/expected_q_value"] = expected_q_batch.mean().detach()
         
         if log_chart:
             # 3. Average probabilities over the batch for the distribution curve

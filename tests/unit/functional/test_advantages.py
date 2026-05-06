@@ -33,6 +33,24 @@ def test_compute_mean_advantages():
     single_advantage = compute_mean_advantages(single_return)
     assert torch.all(single_advantage == 0.0)
 
+def test_compute_advantages_identical_returns():
+    """
+    Test that identical returns result in zero advantages (no NaNs).
+    """
+    returns = torch.tensor([[10.0, 10.0, 10.0]])
+    
+    # Test all functions
+    adv_mean = compute_mean_advantages(returns)
+    adv_ema = compute_ema_advantages(returns, ema_baseline=10.0)
+    adv_critic = compute_critic_advantages(returns, values=torch.tensor([[10.0, 10.0, 10.0]]))
+    
+    assert torch.all(adv_mean == 0.0)
+    assert torch.all(adv_ema == 0.0)
+    assert torch.all(adv_critic == 0.0)
+    assert not torch.any(torch.isnan(adv_mean))
+    assert not torch.any(torch.isnan(adv_ema))
+    assert not torch.any(torch.isnan(adv_critic))
+
 def test_compute_ema_advantages():
     """
     Test advantage computation with EMA baseline.

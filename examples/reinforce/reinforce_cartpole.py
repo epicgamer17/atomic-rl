@@ -17,6 +17,7 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
+from einops import rearrange
 from functools import partial
 
 from functional.action_selection import categorical_sampling_selector
@@ -79,6 +80,7 @@ for episode in range(MAX_EPISODES):
     # NOTE: Since pure REINFORCE relys on MC returns, there is not a clean way to preallocate a buffer or use a circular buffer like we can do for PPO so we just use lists
     rewards = []
     log_probs = []
+    terminals = []
     while not (terminated or truncated):
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
         logits = actor(obs_tensor)
@@ -92,6 +94,7 @@ for episode in range(MAX_EPISODES):
         # 3. Add to "online" buffers
         rewards.append(reward)
         log_probs.append(log_prob)
+        terminals.append(terminated)
 
         # Update state for next tick
         obs = next_obs
@@ -107,8 +110,10 @@ for episode in range(MAX_EPISODES):
 
     # Calculate Loss & Gradients
     returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device), GAMMA
-    )
+        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
+        torch.tensor(terminals, dtype=torch.float32, device=device).unsqueeze(0),
+        GAMMA,
+    ).squeeze(0)
 
     # METHOD A: Mean baseline
     # advantages = compute_mean_advantages(returns).detach()
@@ -121,7 +126,7 @@ for episode in range(MAX_EPISODES):
     # Others: learn a baseline with a neural network (advantage) (not done here)
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,  # NOTE: calculate this outside
-        log_probs=torch.stack(log_probs),
+        log_probs=rearrange(torch.stack(log_probs), 't 1 1 -> t'),
     )
 
     loss = loss.mean()

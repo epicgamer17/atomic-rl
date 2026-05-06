@@ -15,6 +15,7 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
+from einops import rearrange
 
 from functional.action_selection import gaussian_sampling_selector
 from functional.optimizer import apply_gradients
@@ -112,6 +113,7 @@ for episode in range(MAX_EPISODES):
     rewards = []
     log_probs = []
     values = []
+    terminals = []
 
     while not (terminated or truncated):
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
@@ -131,6 +133,7 @@ for episode in range(MAX_EPISODES):
         rewards.append(reward)
         log_probs.append(log_prob)
         values.append(value)
+        terminals.append(terminated)
 
         # Update state
         obs = next_obs
@@ -143,16 +146,19 @@ for episode in range(MAX_EPISODES):
 
     # --- 3. The Update Loop ---
     returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device), GAMMA
-    )
+        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
+        torch.tensor(terminals, dtype=torch.float32, device=device).unsqueeze(0),
+        GAMMA,
+    ).squeeze(
+        0
+    )  # TODO: replace with rearrange
 
-    values_tensor = torch.stack(values).view_as(returns)
+    values_tensor = rearrange(torch.stack(values), "t 1 1 -> t")
     advantages = compute_critic_advantages(returns, values_tensor)
 
     pg_loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        # TODO: more consistent log_prob shape my selectors give [T, 1] and here i expect [T, ]
-        log_probs=torch.stack(log_probs).view(-1),
+        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
     )
     pg_loss = pg_loss.mean()
 

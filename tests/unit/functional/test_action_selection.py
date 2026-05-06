@@ -8,10 +8,9 @@ from functional.action_selection import (
     categorical_sampling_selector,
     gaussian_sampling_selector,
     with_epsilon_greedy,
-    get_linear_epsilon,
-    get_exponential_epsilon,
     get_ape_x_epsilon,
 )
+from functional.schedules import get_linear_schedule, get_exponential_schedule
 
 pytestmark = pytest.mark.unit
 
@@ -152,24 +151,24 @@ def test_with_epsilon_greedy():
     assert actions.shape == (2, 1)
 
 
-def test_linear_epsilon():
-    """Test linear epsilon decay."""
+def test_linear_schedule():
+    """Test linear schedule decay."""
     # start 1.0, end 0.1, decay_steps 10
-    assert math.isclose(get_linear_epsilon(0, 1.0, 0.1, 10), 1.0)
-    assert math.isclose(get_linear_epsilon(5, 1.0, 0.1, 10), 0.55)  # 1.0 - 0.5 * (0.9)
-    assert math.isclose(get_linear_epsilon(10, 1.0, 0.1, 10), 0.1)
+    assert math.isclose(get_linear_schedule(0, 1.0, 0.1, 10), 1.0)
+    assert math.isclose(get_linear_schedule(5, 1.0, 0.1, 10), 0.55)  # 1.0 + 0.5 * (-0.9)
+    assert math.isclose(get_linear_schedule(10, 1.0, 0.1, 10), 0.1)
     assert math.isclose(
-        get_linear_epsilon(20, 1.0, 0.1, 10), 0.1
+        get_linear_schedule(20, 1.0, 0.1, 10), 0.1
     )  # Capped at 1.0 fraction
 
 
-def test_exponential_epsilon():
-    """Test exponential epsilon decay."""
+def test_exponential_schedule():
+    """Test exponential schedule decay."""
     # start 1.0, end 0.1, decay_rate 10
-    # eps = end + (start - end) * exp(-step/rate)
-    assert math.isclose(get_exponential_epsilon(0, 1.0, 0.1, 10), 1.0)
+    # val = end + (start - end) * exp(-step/rate)
+    assert math.isclose(get_exponential_schedule(0, 1.0, 0.1, 10), 1.0)
     expected_middle = 0.1 + 0.9 * math.exp(-5 / 10)
-    assert math.isclose(get_exponential_epsilon(5, 1.0, 0.1, 10), expected_middle)
+    assert math.isclose(get_exponential_schedule(5, 1.0, 0.1, 10), expected_middle)
 
 
 def test_ape_x_epsilon():

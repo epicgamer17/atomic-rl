@@ -27,8 +27,8 @@ from functional.buffer import (
     circular_write_strategy,
     with_per_tracking,
     make_n_step_accumulator,
-    get_linear_beta,
 )
+from functional.schedules import get_linear_schedule
 from functional.losses import bellman_error, with_per_weights, cross_entropy_loss
 from functional.targets import categorical_td_target
 from functional.action_selection import (
@@ -153,12 +153,12 @@ buffer_state = init_per_buffer(
     capacity=BUFFER_CAPACITY,
     shapes={
         "obs": obs_shape,
-        "action": (1,),
-        "reward": (1,),
-        "terminated": (1,),
-        "truncated": (1,),
+        "action": (),
+        "reward": (),
+        "terminated": (),
+        "truncated": (),
         "next_obs": obs_shape,
-        "gamma": (1,),
+        "gamma": (),
     },
     device=device,
 )
@@ -230,7 +230,7 @@ for step in range(MAX_STEPS):
     # --- 3. Update Loop ---
     if step > MIN_BUFFER_SIZE and step % UPDATE_FREQ == 0:
         # Anneal PER Beta
-        beta = get_linear_beta(step, BETA_START, 1.0, BETA_FRAMES)
+        beta = get_linear_schedule(step, BETA_START, 1.0, BETA_FRAMES)
         beta_tensor = torch.tensor(beta, dtype=torch.float32, device=device)
 
         # 2. Sample with Prioritization

@@ -14,6 +14,7 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
+from einops import rearrange
 
 from functional.action_selection import gaussian_sampling_selector
 from functional.optimizer import apply_gradients
@@ -86,6 +87,7 @@ wandb.init(project="reinforce-pendulum", config={"lr": LEARNING_RATE, "gamma": G
 for episode in range(MAX_EPISODES):
     rewards = []
     log_probs = []
+    terminals = []
 
     while not (terminated or truncated):
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
@@ -106,6 +108,7 @@ for episode in range(MAX_EPISODES):
         # 3. Add to buffers
         rewards.append(reward)
         log_probs.append(log_prob)
+        terminals.append(terminated)
 
         # Update state
         obs = next_obs
@@ -118,8 +121,10 @@ for episode in range(MAX_EPISODES):
 
     # --- 3. The Update Loop ---
     returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device), GAMMA
-    )
+        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
+        torch.tensor(terminals, dtype=torch.float32, device=device).unsqueeze(0),
+        GAMMA,
+    ).squeeze(0) # TODO: replace with rearrange
 
     # Use EMA baseline for variance reduction
     global_ema_baseline = exponential_moving_average(
@@ -129,8 +134,7 @@ for episode in range(MAX_EPISODES):
 
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        # TODO: more consistent log_prob shape my selectors give [T, 1] and here i expect [T, ]
-        log_probs=torch.stack(log_probs).view(-1),
+        log_probs=rearrange(torch.stack(log_probs), 't 1 1 -> t'),
     )
     loss = loss.mean()
 

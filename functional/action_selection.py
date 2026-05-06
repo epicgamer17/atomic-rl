@@ -3,7 +3,8 @@ from typing import Tuple, Callable, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functional.utils import get_linear_epsilon, get_exponential_epsilon
+from einops import rearrange
+
 
 
 def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
@@ -88,8 +89,8 @@ def categorical_sampling_selector(
         # action keeps its [Batch, Num_Vars] shape
     else:
         # Standard discrete: ensure [Batch, 1]
-        log_prob = log_prob.unsqueeze(-1)
-        action = action.unsqueeze(-1)
+        log_prob = rearrange(log_prob, 'b -> b 1')
+        action = rearrange(action, 'b -> b 1')
 
     return action, log_prob
 
@@ -126,11 +127,11 @@ def gaussian_sampling_selector(
         log_prob = log_prob.sum(dim=-1, keepdim=True)
     else:
         # If it's a 1D action space, just ensure it's explicitly [Batch, 1]
-        log_prob = log_prob.view(-1, 1)
+        log_prob = rearrange(log_prob, 'b -> b 1')
     return action, log_prob
 
 
-# TODO: make this also work with selection functions that return log probs
+# TODO: make this also work with selection functions that return log_prob.
 def with_epsilon_greedy(selector_fn: Callable) -> Callable:
     """
     Higher-order function that augments a selector with epsilon-greedy logic.

@@ -1,7 +1,9 @@
 import torch
 
 
-# TODO once we implement it replace the inlined version in reinforce_cartpole
+EPS = 1e-8
+
+
 def compute_mean_advantages(returns: torch.Tensor) -> torch.Tensor:
     """
     Compute advantage function as return minus the mean return.
@@ -15,8 +17,12 @@ def compute_mean_advantages(returns: torch.Tensor) -> torch.Tensor:
     """
     advantages = returns - returns.mean(dim=-1, keepdim=True)
     if advantages.numel() > 1:
-        # Mean center and scale
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        std = advantages.std()
+        if std > EPS:
+            # Mean center and scale
+            advantages = (advantages - advantages.mean()) / std
+        else:
+            advantages = torch.zeros_like(advantages)
     else:
         # NOTE if only 1 step was taken, advantage is 0 (just skip that update not enough info to learn from)
         advantages = torch.zeros_like(advantages)
@@ -37,8 +43,12 @@ def compute_ema_advantages(returns: torch.Tensor, ema_baseline: float) -> torch.
     """
     advantages = returns - ema_baseline
     if advantages.numel() > 1:
-        # Only scale by std, do not subtract the mean!
-        advantages = advantages / (advantages.std() + 1e-8)
+        std = advantages.std()
+        if std > EPS:
+            # Only scale by std, do not subtract the mean!
+            advantages = advantages / std
+        else:
+            advantages = torch.zeros_like(advantages)
     else:
         # NOTE if only 1 step was taken, advantage is 0 (just skip that update not enough info to learn from)
         advantages = torch.zeros_like(advantages)
@@ -64,8 +74,12 @@ def compute_critic_advantages(
     # Values are detached to treat the baseline as a constant for the policy gradient.
     advantages = returns - values.detach()
     if advantages.numel() > 1:
-        # Mean center and scale
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        std = advantages.std()
+        if std > EPS:
+            # Mean center and scale
+            advantages = (advantages - advantages.mean()) / std
+        else:
+            advantages = torch.zeros_like(advantages)
     else:
         # NOTE if only 1 step was taken, advantage is 0 (just skip that update not enough info to learn from)
         advantages = torch.zeros_like(advantages)

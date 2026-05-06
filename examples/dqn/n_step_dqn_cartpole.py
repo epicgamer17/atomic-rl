@@ -29,8 +29,8 @@ from functional.targets import n_step_td_target
 from functional.action_selection import (
     argmax_selector,
     with_epsilon_greedy,
-    get_linear_epsilon,
 )
+from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
 from functional.network import hard_update_target_network
 
@@ -85,12 +85,12 @@ buffer_state = init_buffer(
     capacity=BUFFER_CAPACITY,
     shapes={
         "obs": obs_shape,
-        "action": (1,),
-        "reward": (1,),
-        "terminated": (1,),
-        "truncated": (1,),
+        "action": (),
+        "reward": (),
+        "terminated": (),
+        "truncated": (),
         "next_obs": obs_shape,
-        "gamma": (1,),
+        "gamma": (),
     },
     device=device,
 )
@@ -123,7 +123,7 @@ wandb.init(
 for step in range(MAX_STEPS):
 
     # 1. Calculate Epsilon dynamically for this step
-    current_epsilon = get_linear_epsilon(step, EPS_START, EPS_END, EPS_DECAY_FRAMES)
+    current_epsilon = get_linear_schedule(step, EPS_START, EPS_END, EPS_DECAY_FRAMES)
 
     # 2. Act (Pure function)
     with torch.inference_mode():

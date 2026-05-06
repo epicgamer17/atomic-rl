@@ -42,6 +42,7 @@ import gymnasium as gym
 import numpy as np
 import random
 import wandb
+from tensordict import TensorDict
 from functools import partial
 from typing import Tuple, Dict, Any, Callable
 
@@ -115,8 +116,8 @@ class ReplayBufferActor:
         # Tracking logic initialized once locally
         self.per_add = with_per_tracking(circular_write_strategy)
 
-    def add_transitions(self, transitions_dict: Dict[str, torch.Tensor]):
-        self.buffer_state = self.per_add(self.buffer_state, transitions_dict)
+    def add_transitions(self, transitions: TensorDict):
+        self.buffer_state = self.per_add(self.buffer_state, transitions)
 
     def sample_batch(
         self, batch_size: int, beta: float, min_size: int = 0
@@ -254,10 +255,13 @@ class ActorActor:
             # 6. Batched Priority Calculation and Push to remote buffer
             if len(self.local_batch) >= ACTOR_BATCH_SIZE:
                 # Collate into a single batch
-                collated = {
-                    k: torch.cat([t[k] for t in self.local_batch])
-                    for k in self.local_batch[0].keys()
-                }
+                collated = TensorDict(
+                    {
+                        k: torch.cat([t[k] for t in self.local_batch])
+                        for k in self.local_batch[0].keys()
+                    },
+                    batch_size=[len(self.local_batch)],
+                )
                 # TODO: calling bellman_error leads to an extra forward pass to calculate priorities.
                 # Compute Initial Priorities in one batched forward pass
                 with torch.no_grad():
@@ -270,7 +274,7 @@ class ActorActor:
                         loss_fn=self.loss_fn,
                     )
 
-                collated["priority"] = info_dict["priorities"].unsqueeze(-1)
+                collated["priority"] = info_dict["priorities"]
 
                 # Push the prioritized batch to the buffer
                 self.buffer.add_transitions.remote(collated)
@@ -339,7 +343,7 @@ class LearnerActor:
             return None
 
         batch, indices, is_weights = result
-        batch = {k: v.to(self.device) for k, v in batch.items()}
+        batch = batch.to(self.device)
         indices = indices.to(self.device)
         is_weights = is_weights.to(self.device)
 
@@ -396,13 +400,13 @@ def main():
     # 3. Initialize Buffer
     buffer_shapes = {
         "obs": obs_shape,
-        "action": (1,),
-        "reward": (1,),
-        "terminated": (1,),
-        "truncated": (1,),
+        "action": (),
+        "reward": (),
+        "terminated": (),
+        "truncated": (),
         "next_obs": obs_shape,
-        "gamma": (1,),
-        "priority": (1,),
+        "gamma": (),
+        "priority": (),
     }
     buffer = ReplayBufferActor.remote(BUFFER_CAPACITY, buffer_shapes)
 

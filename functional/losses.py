@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 from tensordict import TensorDict
 from typing import Callable, Tuple, Optional, Union
 from functional.action_selection import argmax_selector
@@ -8,7 +9,7 @@ from functional.action_selection import argmax_selector
 
 def bellman_error(
     model: torch.nn.Module,
-    batch: dict,
+    batch: TensorDict,
     selector_model: torch.nn.Module,
     target_calculator_fn: Callable,
     eval_model: Optional[torch.nn.Module] = None,
@@ -45,7 +46,7 @@ def bellman_error(
     pred_sa = predictions[batch_idx, actions]
 
     # 2. Next State Evaluation (Inlined q_value_bootstrapping_evaluator)
-    with torch.inference_mode():
+    with torch.no_grad():
         # NOTE: Noisy DQN with Double DQN/Dueling samples a 3rd epsilon here but we do not, and neither do most implementations online.
         next_obs = batch["next_obs"]
         selector_predictions = selector_model(next_obs)
@@ -63,20 +64,24 @@ def bellman_error(
 
     # 4. Compute Loss (Force shape alignment to prevent broadcasting)
     if loss_fn is None:
-        from functional.losses import mse_loss
-
         loss_fn = mse_loss
 
-    loss, info = loss_fn(pred_sa, td_target.view_as(pred_sa))
+    # The Polymorphic Bouncer:
+    # If standard DQN [B, 1] -> safely becomes [B]
+    # If C51 [B, 51] -> safely ignores the squeeze, stays [B, 51]
+    td_target = td_target.squeeze(-1)
+    pred_sa = pred_sa.squeeze(-1)  # Do this to pred_sa too just to be perfectly safe!
+
+    loss, info = loss_fn(pred_sa, td_target)
 
     # 5. Augment info with orchestration-level metrics for W&B
     info.update(
         {
-            "q_values/mean": pred_sa.mean().item(),
-            "q_values/min": pred_sa.min().item(),
-            "q_values/max": pred_sa.max().item(),
-            "td_targets/mean": td_target.mean().item(),
-            "rewards/mean": batch["reward"].mean().item(),
+            "q_values/mean": pred_sa.mean().detach(),
+            "q_values/min": pred_sa.min().detach(),
+            "q_values/max": pred_sa.max().detach(),
+            "td_targets/mean": td_target.mean().detach(),
+            "rewards/mean": batch["reward"].mean().detach(),
         }
     )
 
@@ -118,7 +123,7 @@ def with_per_weights(base_loss_fn: Callable, is_weights: torch.Tensor) -> Callab
         weighted_loss = (raw_losses * is_weights).mean()
 
         # Update info with weighted loss and priorities
-        info_dict["loss/weighted"] = weighted_loss.item()
+        info_dict["loss/weighted"] = weighted_loss.detach()
 
         return weighted_loss, info_dict
 
@@ -138,13 +143,13 @@ def mse_loss(
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A tuple containing the raw losses and the info dictionary.
     """
-    targets = targets.view_as(predictions)
+    targets = rearrange(targets, "b -> b")
     raw_losses = F.mse_loss(predictions, targets, reduction="none")
     priorities = torch.abs(predictions - targets).detach()
 
     info = {
         "priorities": priorities,
-        "loss/mse": raw_losses.mean().item(),
+        "loss/mse": raw_losses.mean().detach(),
     }
     return raw_losses, info
 
@@ -162,14 +167,14 @@ def cross_entropy_loss(
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A tuple containing the raw losses and the info dictionary.
     """
-    targets = targets.view_as(predictions)
+    targets = rearrange(targets, "b a -> b a")
     log_probs = F.log_softmax(predictions, dim=-1)
     # Cross-entropy: - sum(p_target * log(p_online))
     raw_losses = -(targets * log_probs).sum(dim=-1)
 
     info = {
         "priorities": raw_losses.detach(),
-        "loss/cross_entropy": raw_losses.mean().item(),
+        "loss/cross_entropy": raw_losses.mean().detach(),
         # Functional tensor for plotting
         "predictions": predictions.detach(),
     }
@@ -190,18 +195,17 @@ def huber_loss(
     Returns:
         Tuple[torch.Tensor, dict]: A tuple containing the raw losses and the info dictionary.
     """
-    targets = targets.view_as(predictions)
+    targets = rearrange(targets, "b -> b")
     raw_losses = F.huber_loss(predictions, targets, reduction="none", delta=delta)
     priorities = torch.abs(predictions - targets).detach()
 
     info = {
         "priorities": priorities,
-        "loss/huber": raw_losses.mean().item(),
+        "loss/huber": raw_losses.mean().detach(),
     }
     return raw_losses, info
 
 
-# TODO: clean up our contract, do we need the view_as? should we not just say both are expected to be shape X? could we instead of view_as do a view(-1)? what is best? what is cleanest?
 def policy_gradient_loss(
     advantages: torch.Tensor,
     log_probs: torch.Tensor,
@@ -220,12 +224,12 @@ def policy_gradient_loss(
     """
     # NOTE: doesnt follow the exact policy gradient of returns - baseline but we calculate the baseline outside. Optionally could move into here and do: -log_probs * (returns - baseline) instead
     # Ensure advantages matches the shape of log_probs for element-wise multiplication
-    assert log_probs.ndim == 1, f"Expected [T], got {log_probs.shape}"
-    advantages = advantages.view_as(log_probs)
+    advantages = rearrange(advantages, "t -> t")
+    log_probs = rearrange(log_probs, "t -> t")
 
     loss = -log_probs * advantages.detach()
-    # NOTE: no priorities, PG is on-policy and so PE,R doesn't really apply.abs
+    # NOTE: no priorities, PG is on-policy and so PER doesn't really apply.abs
     # TODO: what about A-PPO or A3C?
-    info = {"loss/policy_gradient": loss.mean().item()}
+    info = {"loss/policy_gradient": loss.mean().detach()}
 
     return loss, info

@@ -13,6 +13,7 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
+from einops import rearrange
 from functools import partial
 
 from functional.action_selection import categorical_sampling_selector
@@ -96,6 +97,7 @@ for episode in range(MAX_EPISODES):
     rewards = []
     log_probs = []
     values = []
+    terminals = []
     while not (terminated or truncated):
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
         logits = actor(obs_tensor)
@@ -111,6 +113,7 @@ for episode in range(MAX_EPISODES):
         rewards.append(reward)
         log_probs.append(log_prob)
         values.append(value)
+        terminals.append(terminated)
 
         # Update state for next tick
         obs = next_obs
@@ -126,17 +129,20 @@ for episode in range(MAX_EPISODES):
 
     # Calculate Loss & Gradients
     returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device), GAMMA
-    )
+        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
+        torch.tensor(terminals, dtype=torch.float32, device=device).unsqueeze(0),
+        GAMMA,
+    ).squeeze(0)
+    # returns is [T]
 
-    values = torch.stack(values).view_as(returns)
+    values = rearrange(torch.stack(values), "t 1 1 -> t")
     advantages = compute_critic_advantages(returns, values)
 
     # Handle scaling
     # Others: learn a baseline with a neural network (advantage) (not done here)
     pg_loss, info_dict = policy_gradient_loss(
         advantages=advantages,  # NOTE: calculate this outside
-        log_probs=torch.stack(log_probs),
+        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
     )
     pg_loss = pg_loss.mean()
 

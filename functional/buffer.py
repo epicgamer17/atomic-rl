@@ -3,8 +3,9 @@ from dataclasses import dataclass
 from tensordict import TensorDict
 import random
 import numpy as np
+from einops import rearrange
 from typing import Tuple, Callable, List, Dict, Any, Optional, Union
-from functional.utils import get_linear_beta
+
 
 
 @dataclass(kw_only=True)
@@ -79,7 +80,7 @@ def init_per_buffer(capacity: int, shapes: dict, device="cpu") -> PERBufferState
 
 
 def circular_write_strategy(
-    buffer_state: BufferState, batch_dict: Dict[str, torch.Tensor]
+    buffer_state: BufferState, batch: TensorDict
 ) -> Tuple[BufferState, torch.Tensor]:
     """
     Unified write strategy. Always expects batched inputs.
@@ -93,17 +94,14 @@ def circular_write_strategy(
         Tuple[BufferState, torch.Tensor]: The updated buffer state and the indices where data was written.
     """
     # Assuming all tensors in batch_dict have the same batch size
-    first_key = next(iter(batch_dict))
-    batch_size = batch_dict[first_key].shape[0]
+    batch_size = batch.batch_size[0]
 
     start_idx = buffer_state.pointer
     end_idx = start_idx + batch_size
 
     if end_idx <= buffer_state.capacity:
         indices = torch.arange(start_idx, end_idx, dtype=torch.long)
-        for k, v in batch_dict.items():
-            if k in buffer_state.data.keys():
-                buffer_state.data[k][start_idx:end_idx] = v
+        buffer_state.data[start_idx:end_idx] = batch
     else:
         # Wrap-around logic
         overflow = end_idx - buffer_state.capacity
@@ -116,12 +114,8 @@ def circular_write_strategy(
             ]
         )
 
-        for k, v in batch_dict.items():
-            if k in buffer_state.data.keys():
-                buffer_state.data[k][start_idx : buffer_state.capacity] = v[
-                    :first_chunk_size
-                ]
-                buffer_state.data[k][0:overflow] = v[first_chunk_size:]
+        buffer_state.data[start_idx : buffer_state.capacity] = batch[:first_chunk_size]
+        buffer_state.data[0:overflow] = batch[first_chunk_size:]
 
     buffer_state.pointer = end_idx % buffer_state.capacity
     buffer_state.size = min(buffer_state.size + batch_size, buffer_state.capacity)
@@ -130,7 +124,7 @@ def circular_write_strategy(
 
 
 def reservoir_write_strategy(
-    buffer_state: ReservoirBufferState, batch_dict: Dict[str, torch.Tensor]
+    buffer_state: ReservoirBufferState, batch: TensorDict
 ) -> Tuple[ReservoirBufferState, torch.Tensor]:
     """
     Writes data using Reservoir Sampling (uniform probability over infinite stream).
@@ -138,13 +132,12 @@ def reservoir_write_strategy(
 
     Args:
         buffer_state (ReservoirBufferState): The reservoir buffer state.
-        batch_dict (dict): A dictionary of batched tensors to write.
+        batch (TensorDict): A TensorDict of batched tensors to write.
 
     Returns:
         Tuple[ReservoirBufferState, torch.Tensor]: The updated reservoir buffer state and indices.
     """
-    first_key = next(iter(batch_dict))
-    batch_size = batch_dict[first_key].shape[0]
+    batch_size = batch.batch_size[0]
 
     written_indices = []
     for i in range(batch_size):
@@ -161,13 +154,7 @@ def reservoir_write_strategy(
 
         if idx is not None:
             # 2. Write to TensorDict
-            single_transition = {k: v[i] for k, v in batch_dict.items()}
-            filtered_transition = {
-                k: v if isinstance(v, torch.Tensor) else torch.tensor(v)
-                for k, v in single_transition.items()
-                if k in buffer_state.data.keys()
-            }
-            buffer_state.data[idx] = TensorDict(filtered_transition, batch_size=[])
+            buffer_state.data[idx] = batch[i]
             written_indices.append(idx)
 
         buffer_state.total_steps_seen += 1
@@ -355,18 +342,18 @@ def with_per_tracking(write_strategy_fn: Callable) -> Callable:
     """
 
     def per_add(
-        buffer_state: PERBufferState, batch_dict: Dict[str, torch.Tensor]
+        buffer_state: PERBufferState, batch: TensorDict
     ) -> PERBufferState:
         # 1. Execute the base writing strategy
-        new_state, written_indices = write_strategy_fn(buffer_state, batch_dict)
+        new_state, written_indices = write_strategy_fn(buffer_state, batch)
 
         # 2. If data was actually written, update the PER sum/min trees
         if written_indices is not None and written_indices.numel() > 0:
             tree_indices = written_indices + new_state.tree_capacity - 1
 
             # Check for explicit priorities in the batch
-            if "priority" in batch_dict:
-                priorities = batch_dict["priority"]
+            if "priority" in batch.keys():
+                priorities = batch["priority"]
                 if priorities.ndim == 2:
                     priorities = priorities.squeeze(-1)
             else:
@@ -423,7 +410,7 @@ def make_n_step_accumulator(n_steps: int, gamma: float) -> Callable:
         next_obs: torch.Tensor,
         terminated: torch.Tensor,
         truncated: torch.Tensor,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[TensorDict]:
         history.append((obs, action, reward, next_obs, terminated, truncated))
         transitions_to_yield = []
 
@@ -435,17 +422,20 @@ def make_n_step_accumulator(n_steps: int, gamma: float) -> Callable:
             _, _, _, final_next_obs, final_terminated, final_truncated = history[-1]
 
             transitions_to_yield.append(
-                {
-                    "obs": torch.as_tensor(first_obs).unsqueeze(0),
-                    "action": torch.tensor([[first_action]], dtype=torch.long),
-                    "reward": torch.tensor([[n_step_reward]], dtype=torch.float32),
-                    "terminated": torch.tensor(
-                        [[final_terminated]], dtype=torch.float32
-                    ),
-                    "truncated": torch.tensor([[final_truncated]], dtype=torch.float32),
-                    "next_obs": torch.as_tensor(final_next_obs).unsqueeze(0),
-                    "gamma": torch.tensor([[gamma**n_steps]], dtype=torch.float32),
-                }
+                TensorDict(
+                    {
+                        "obs": rearrange(torch.as_tensor(first_obs), "... -> 1 ..."),
+                        "action": torch.tensor([first_action], dtype=torch.long),
+                        "reward": torch.tensor([n_step_reward], dtype=torch.float32),
+                        "terminated": torch.tensor([final_terminated], dtype=torch.float32),
+                        "truncated": torch.tensor([final_truncated], dtype=torch.float32),
+                        "next_obs": rearrange(
+                            torch.as_tensor(final_next_obs), "... -> 1 ..."
+                        ),
+                        "gamma": torch.tensor([gamma**n_steps], dtype=torch.float32),
+                    },
+                    batch_size=[1],
+                )
             )
             history.popleft()
 
@@ -459,21 +449,26 @@ def make_n_step_accumulator(n_steps: int, gamma: float) -> Callable:
                 _, _, _, final_next_obs, final_terminated, final_truncated = history[-1]
 
                 transitions_to_yield.append(
-                    {
-                        "obs": torch.as_tensor(first_obs).unsqueeze(0),
-                        "action": torch.tensor([[first_action]], dtype=torch.long),
-                        "reward": torch.tensor([[n_step_reward]], dtype=torch.float32),
-                        "terminated": torch.tensor(
-                            [[final_terminated]], dtype=torch.float32
-                        ),
-                        "truncated": torch.tensor(
-                            [[final_truncated]], dtype=torch.float32
-                        ),
-                        "next_obs": torch.as_tensor(final_next_obs).unsqueeze(0),
-                        "gamma": torch.tensor(
-                            [[gamma ** len(history)]], dtype=torch.float32
-                        ),
-                    }
+                    TensorDict(
+                        {
+                            "obs": rearrange(torch.as_tensor(first_obs), "... -> 1 ..."),
+                            "action": torch.tensor([first_action], dtype=torch.long),
+                            "reward": torch.tensor([n_step_reward], dtype=torch.float32),
+                            "terminated": torch.tensor(
+                                [final_terminated], dtype=torch.float32
+                            ),
+                            "truncated": torch.tensor(
+                                [final_truncated], dtype=torch.float32
+                            ),
+                            "next_obs": rearrange(
+                                torch.as_tensor(final_next_obs), "... -> 1 ..."
+                            ),
+                            "gamma": torch.tensor(
+                                [gamma ** len(history)], dtype=torch.float32
+                            ),
+                        },
+                        batch_size=[1],
+                    )
                 )
                 history.popleft()  # Shrink the window until empty
 
