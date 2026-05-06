@@ -32,8 +32,8 @@ from functional.buffer import (
 from functional.losses import bellman_error, with_per_weights, cross_entropy_loss
 from functional.targets import categorical_td_target
 from functional.action_selection import (
-    double_selector,
-    categorical_extractor,
+    argmax_selector,
+    expected_value,
 )
 from functional.optimizer import apply_gradients
 from functional.network import hard_update_target_network
@@ -174,11 +174,6 @@ stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
-# Rainbow uses Double DQN and Categorical Extraction
-rainbow_selector = partial(
-    double_selector,
-    extractor_fn=partial(categorical_extractor, support=SUPPORT.to(device)),
-)
 
 # Initialize W&B
 wandb.init(
@@ -203,10 +198,9 @@ for step in range(MAX_STEPS):
         # Resample noise for the actor
         model.reset_noise()
 
-        _, action = rainbow_selector(
-            model=model,
-            target_model=None,
-            obs=obs_tensor,
+        predictions = model(obs_tensor)
+        action = argmax_selector(
+            predictions, extractor_fn=partial(expected_value, support=SUPPORT)
         )
         action = action.item()
 
@@ -253,9 +247,8 @@ for step in range(MAX_STEPS):
 
         loss, info_dict = bellman_error(
             model,
-            target_model,
             batch.to(device),
-            rainbow_selector,
+            model,
             partial(
                 categorical_td_target,
                 gamma=batch["gamma"].to(device),
@@ -264,7 +257,9 @@ for step in range(MAX_STEPS):
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,
             ),
+            eval_model=target_model,
             loss_fn=per_loss_fn,
+            extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
         )
 
         # Apply Gradients

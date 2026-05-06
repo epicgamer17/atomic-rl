@@ -29,8 +29,7 @@ from functional.buffer import init_buffer, circular_write_strategy, uniform_samp
 from functional.losses import bellman_error, mse_loss
 from functional.targets import standard_td_target
 from functional.action_selection import (
-    standard_selector,
-    scalar_extractor,
+    argmax_selector,
     with_epsilon_greedy,
     get_linear_epsilon,
 )
@@ -107,7 +106,7 @@ stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
-action_selector = partial(standard_selector, extractor_fn=scalar_extractor)
+# Noisy DQN doesn't need a separate epsilon-greedy action_selector as exploration is handled by noise in the network.
 
 # Initialize W&B
 wandb.init(
@@ -130,11 +129,8 @@ for step in range(MAX_STEPS):
         # Resample noisy nets if using them!
         model.reset_noise()
 
-        _, action = action_selector(
-            model=model,
-            target_model=None,
-            obs=obs_tensor,
-        )
+        predictions = model(obs_tensor)
+        action = argmax_selector(predictions)
         action = action.item()
 
     # 2. Step Env
@@ -173,9 +169,8 @@ for step in range(MAX_STEPS):
         # Calculate Loss & Gradients
         loss, info_dict = bellman_error(
             model,
-            target_model,
             batch,
-            action_selector,
+            target_model,
             partial(standard_td_target, gamma=batch["gamma"].to(device)),
             loss_fn=mse_loss,
         )

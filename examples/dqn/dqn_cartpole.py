@@ -10,6 +10,8 @@ Additionally, the paper introduced the concept of a separate target network to s
 
 End to end learning is now essentially standard practice, and tabular methods are rarely used in deep RL. Additionally Experience Replay is used in MANY deep RL algorithms, and target networks are very commonly used (although not always, e.g. in actor-critic methods).
 
+Note: DQN is fundamentally on off-policy algorithm and in theory works well with offline data. However, in practice, DQN can only be slightly off-policy without performance degradation. There are papers that improve DQNs ability with offline data.
+
 """
 
 import torch
@@ -27,8 +29,7 @@ from functional.buffer import init_buffer, circular_write_strategy, uniform_samp
 from functional.losses import bellman_error, mse_loss
 from functional.targets import standard_td_target
 from functional.action_selection import (
-    standard_selector,
-    scalar_extractor,
+    argmax_selector,
     with_epsilon_greedy,
     get_linear_epsilon,
 )
@@ -100,8 +101,7 @@ stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
-dqn_selector = partial(standard_selector, extractor_fn=scalar_extractor)
-action_selector = with_epsilon_greedy(dqn_selector)
+action_selector = with_epsilon_greedy(argmax_selector)
 
 # Initialize W&B
 wandb.init(
@@ -123,10 +123,9 @@ for step in range(MAX_STEPS):
     with torch.inference_mode():
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
 
-        _, action, rng_key = action_selector(
-            model=model,
-            target_model=None,
-            obs=obs_tensor,
+        predictions = model(obs_tensor)
+        action, rng_key = action_selector(
+            predictions=predictions,
             epsilon=current_epsilon,
             num_actions=num_actions,
             generator=rng_key,
@@ -165,9 +164,8 @@ for step in range(MAX_STEPS):
         # Calculate Loss & Gradients
         loss, info_dict = bellman_error(
             model,
-            target_model,
             batch,
-            dqn_selector,
+            target_model,
             partial(standard_td_target, gamma=batch["gamma"].to(device)),
             loss_fn=mse_loss,
         )

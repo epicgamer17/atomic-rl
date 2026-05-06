@@ -252,10 +252,10 @@ def actor_worker(
             with torch.no_grad():
                 _, info_dict = bellman_error(
                     local_model,
-                    local_target_model,
                     collated,
-                    selector_fn,
+                    local_model,
                     partial(target_fn, gamma=collated["gamma"]),
+                    eval_model=local_target_model,
                     loss_fn=loss_fn,
                 )
             collated["priority"] = info_dict["priorities"].unsqueeze(-1)
@@ -309,10 +309,10 @@ def learner_worker(
 
         loss, info = bellman_error(
             local_model,
-            target_model,
             batch,
-            selector_fn,
+            local_model,
             partial(target_fn, gamma=batch["gamma"]),
+            eval_model=target_model,
             loss_fn=loss_fn,
         )
 

@@ -1,131 +1,114 @@
-import torch
-import torch.nn.functional as F
-from functools import partial
-from typing import Tuple, Callable
 import math
+from typing import Tuple, Callable, Optional
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 
-# TODO: at the moment algorithm specific in future try to fix, when needed. for now keep simple as is
-def scalar_extractor(predictions: torch.Tensor) -> torch.Tensor:
+def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
     """
-    Standard argmax over scalar Q-values.
+    Calculate expected values from a distribution, then argmax.
+    Useful for distributional value prediction methods like Categorical DQN, Dreamer, MuZero, etc.
 
     Args:
-        predictions (torch.Tensor): The predictions from the model.
-
-    Returns:
-        torch.Tensor: The actions selected by the model.
-    """
-    return torch.argmax(predictions, dim=1, keepdim=True)
-
-
-def categorical_extractor(
-    predictions: torch.Tensor, support: torch.Tensor
-) -> torch.Tensor:
-    """
-    Calculate expected Q-values from a distribution, then argmax.
-
-    Args:
-        predictions (torch.Tensor): The predictions from the model.
+        predictions (torch.Tensor): The logits output from the model for the distribution.
         support (torch.Tensor): The support for the distribution.
 
     Returns:
-        torch.Tensor: The actions selected by the model.
+        torch.Tensor: the expected values of the distributions
     """
+    # B x A x N
     probs = F.softmax(predictions, dim=-1)
-    q_values = (probs * support).sum(dim=-1)
-    return torch.argmax(q_values, dim=1, keepdim=True)
+    # B x A x N @ B x A x N -> B x A x N
+    # NOTE: support must be same shape as predictions (B x A x N) to compute correctly
+    values = (probs * support).sum(dim=-1)
+    return values
 
 
-def standard_selector(
-    model: torch.nn.Module,
-    target_model: torch.nn.Module,
-    obs: torch.Tensor,
-    extractor_fn: Callable,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+# TODO: what is the point of this do we even need/want this? its just an argmax wrapper?
+def argmax_selector(
+    predictions: torch.Tensor,
+    extractor_fn: Optional[Callable] = None,
+) -> torch.Tensor:
     """
-    Standard DQN: Target network picks and evaluates.
+    Selects the action with the maximum value.
 
     Args:
-        model (nn.Module): The model to use for action selection.
-        target_model (nn.Module): The target model to use for action selection.
-        obs (torch.Tensor): The observations to use for action selection.
-        extractor_fn (Callable): The function to use for action selection.
+        predictions (torch.Tensor): The model predictions (e.g. Q-values or logits).
+        extractor_fn (Optional[Callable]): Function to extract scalar values from predictions.
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor]: A tuple containing the target predictions and the actions selected by the model.
+        torch.Tensor: The selected actions.
     """
-    # Skip target compute during actor rollout
-    target_preds = target_model(obs) if target_model is not None else None
-
-    # If we don't have a target model (inference), the live model MUST pick the action
-    acting_preds = target_preds if target_preds is not None else model(obs)
-    actions = extractor_fn(acting_preds)
-
-    return target_preds, actions
+    if extractor_fn is not None:
+        vals = extractor_fn(predictions)
+    else:
+        vals = predictions
+    return torch.argmax(vals, dim=1, keepdim=True)
 
 
-def double_selector(
-    model: torch.nn.Module,
-    target_model: torch.nn.Module,
-    obs: torch.Tensor,
-    extractor_fn: Callable,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+# TODO: does this need an extractor_fn?
+# TODO: write now this only handles logits, muzero with need to be able to handle probs.
+# TODO: do we even need this or should we just inline it into the loops/code? its basically a torch dists wrapper.
+def categorical_sampling_selector(
+    predictions: torch.Tensor,
+    extractor_fn: Optional[Callable] = None,
+    temperature: float = 1.0,
+) -> torch.Tensor:
     """
-    Double DQN: Live model picks, Target model evaluates.
+    Samples an action from a categorical distribution.
 
     Args:
-        model (nn.Module): The model to use for action selection.
-        target_model (nn.Module): The target model to use for action selection.
-        obs (torch.Tensor): The observations to use for action selection.
-        extractor_fn (Callable): The function to use for action selection.
+        predictions (torch.Tensor): The model predictions (logits).
+        extractor_fn (Optional[Callable]): Unused for now.
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor]: A tuple containing the target predictions and the actions selected by the model.
+        torch.Tensor: The sampled actions.
     """
-    # Skip target compute during actor rollout
-    target_preds = target_model(obs) if target_model is not None else None
-
-    live_preds = model(obs)
-    actions = extractor_fn(live_preds)
-
-    return target_preds, actions
+    assert extractor_fn is None  # For now no extractors
+    temperature_logits = predictions / temperature
+    dist = torch.distributions.Categorical(logits=temperature_logits)
+    return dist.sample()
 
 
-def with_epsilon_greedy(action_selection_fn: Callable) -> Callable:
+def with_epsilon_greedy(selector_fn: Callable) -> Callable:
     """
     Higher-order function that augments a selector with epsilon-greedy logic.
 
     Args:
-        action_selection_fn (Callable): The function to use for action selection.
+        selector_fn (Callable): The function to use for action selection.
+            Must have the signature (predictions).
 
     Returns:
         Callable: The action selection function with epsilon-greedy logic.
+            (predictions, epsilon, num_actions, generator) -> (actions, generator)
     """
 
-    def wrapped_selector(
-        model: torch.nn.Module,
-        target_model: torch.nn.Module,
-        obs: torch.Tensor,
+    def epsilon_greedy_selector(
+        predictions: torch.Tensor,
         epsilon: float,
         num_actions: int,
         generator: torch.Generator = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Generator]:
-        q_values, greedy_actions = action_selection_fn(model, target_model, obs)
-        batch_size = obs.shape[0]
+        greedy_actions = selector_fn(predictions)
+        batch_size = predictions.shape[0]
 
         random_actions = torch.randint(
-            0, num_actions, (batch_size, 1), generator=generator, device=obs.device
+            0,
+            num_actions,
+            (batch_size, 1),
+            generator=generator,
+            device=predictions.device,
         )
         random_mask = (
-            torch.rand((batch_size, 1), generator=generator, device=obs.device)
+            torch.rand((batch_size, 1), generator=generator, device=predictions.device)
             < epsilon
         )
 
         final_actions = torch.where(random_mask, random_actions, greedy_actions)
-        return q_values, final_actions, generator
+        return final_actions, generator
 
-    return wrapped_selector
+    return epsilon_greedy_selector
 
 
 def get_linear_epsilon(

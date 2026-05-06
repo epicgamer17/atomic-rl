@@ -27,8 +27,7 @@ from functional.buffer import (
 from functional.losses import bellman_error, mse_loss
 from functional.targets import n_step_td_target
 from functional.action_selection import (
-    standard_selector,
-    scalar_extractor,
+    argmax_selector,
     with_epsilon_greedy,
     get_linear_epsilon,
 )
@@ -101,8 +100,7 @@ stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
-dqn_selector = partial(standard_selector, extractor_fn=scalar_extractor)
-action_selector = with_epsilon_greedy(dqn_selector)
+action_selector = with_epsilon_greedy(argmax_selector)
 
 # 1. Initialize the Accumulator before the loop
 accumulate_n_step, reset_accumulator = make_n_step_accumulator(
@@ -131,10 +129,9 @@ for step in range(MAX_STEPS):
     with torch.inference_mode():
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
 
-        _, action, rng_key = action_selector(
-            model=model,
-            target_model=None,
-            obs=obs_tensor,
+        predictions = model(obs_tensor)
+        action, rng_key = action_selector(
+            predictions=predictions,
             epsilon=current_epsilon,
             num_actions=num_actions,
             generator=rng_key,
@@ -169,10 +166,10 @@ for step in range(MAX_STEPS):
         # Calculate Loss & Gradients
         loss, info_dict = bellman_error(
             model,
-            target_model,
             batch,
-            dqn_selector,
+            model,
             partial(n_step_td_target, gamma=batch["gamma"].to(device)),
+            eval_model=target_model,
             loss_fn=mse_loss,
         )
         loss = loss.mean()

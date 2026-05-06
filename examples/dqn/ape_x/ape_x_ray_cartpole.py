@@ -56,8 +56,7 @@ from functional.buffer import (
 from functional.losses import bellman_error, mse_loss, huber_loss
 from functional.targets import standard_td_target
 from functional.action_selection import (
-    double_selector,
-    scalar_extractor,
+    argmax_selector,
     get_ape_x_epsilon,
 )
 from functional.optimizer import apply_gradients
@@ -209,8 +208,9 @@ class ActorActor:
             with torch.inference_mode():
                 obs_tensor = torch.from_numpy(self.obs).float().unsqueeze(0)
 
-                # Manual epsilon-greedy using the injected selector
-                _, greedy_actions = self.selector_fn(self.model, None, obs_tensor)
+                # Manual epsilon-greedy
+                predictions = self.model(obs_tensor)
+                greedy_actions = argmax_selector(predictions)
 
                 if random.random() < self.epsilon:
                     action = random.randint(0, self.num_actions - 1)
@@ -263,10 +263,10 @@ class ActorActor:
                 with torch.no_grad():
                     _, info_dict = bellman_error(
                         self.model,
-                        self.target_model,
                         collated,
-                        self.selector_fn,
+                        self.model,
                         partial(self.target_fn, gamma=collated["gamma"]),
+                        eval_model=self.target_model,
                         loss_fn=self.loss_fn,
                     )
 
@@ -346,10 +346,10 @@ class LearnerActor:
         # Calculate Loss using injected functions
         loss, info = bellman_error(
             self.model,
-            self.target_model,
             batch,
-            self.selector_fn,
+            self.model,
             partial(self.target_fn, gamma=batch["gamma"]),
+            eval_model=self.target_model,
             loss_fn=self.loss_fn,
         )
 
@@ -389,7 +389,7 @@ def main():
 
     # 2. Define the Algorithm Components (Transparent and Reusable)
     my_model_creator = lambda: DuelingDQN(obs_shape, num_actions)
-    my_selector_fn = partial(double_selector, extractor_fn=scalar_extractor)
+    my_selector_fn = argmax_selector
     my_target_fn = standard_td_target
     my_loss_fn = huber_loss
 

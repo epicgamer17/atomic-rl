@@ -2,27 +2,32 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from tensordict import TensorDict
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Optional, Union
+from functional.action_selection import argmax_selector
 
 
 def bellman_error(
     model: torch.nn.Module,
-    target_model: torch.nn.Module,
     batch: dict,
-    action_selector_fn,  # Inject the behavior
-    target_calculator_fn,  # Inject the behavior
-    loss_fn=None,  # Inject the behavior
+    selector_model: torch.nn.Module,
+    target_calculator_fn: Callable,
+    eval_model: Optional[torch.nn.Module] = None,
+    loss_fn: Optional[Callable] = None,
+    # TODO: should this just be part of a partial on the selector or be a "selector_fn" instead of argmax selector always?
+    extractor_fn: Optional[Callable] = None,
 ) -> Tuple[torch.Tensor, dict]:
     """
     Calculate the Bellman error for a batch of transitions.
 
     Args:
         model (nn.Module): The online Q-network.
-        target_model (nn.Module): The target Q-network.
         batch (dict): A dictionary containing the batch of transitions.
-        action_selector_fn (Callable): Function to select actions.
+        selector_model (nn.Module): Model used to select the best action for bootstrapping.
         target_calculator_fn (Callable): Function to calculate targets.
+        eval_model (Optional[nn.Module]): Model used to evaluate the selected action's value.
+            Defaults to selector_model.
         loss_fn (Callable): Function to calculate loss.
+        extractor_fn (Optional[Callable]): Function to extract scalar values for action selection.
 
     Returns:
         torch.Tensor: The loss for the batch.
@@ -39,14 +44,19 @@ def bellman_error(
     actions = batch["action"].long().squeeze(-1)
     pred_sa = predictions[batch_idx, actions]
 
-    # 2. Next State Evaluation (Delegated to injected function)
-    with torch.no_grad():
-        # NOTE: Noisy DQN with Double DQN/Dueling samples a 3rd epsilon here but we do not, and niether do most implementations online.
-        next_preds, next_actions = action_selector_fn(
-            model, target_model, batch["next_obs"]
-        )
+    # 2. Next State Evaluation (Inlined q_value_bootstrapping_evaluator)
+    with torch.inference_mode():
+        # NOTE: Noisy DQN with Double DQN/Dueling samples a 3rd epsilon here but we do not, and neither do most implementations online.
+        next_obs = batch["next_obs"]
+        selector_predictions = selector_model(next_obs)
+        if eval_model is None:
+            next_preds = selector_predictions
+        else:
+            next_preds = eval_model(next_obs)
 
-        # 3. Target Calculation (Delegated to injected function)
+        next_actions = argmax_selector(selector_predictions, extractor_fn)
+
+        # 3. Target Calculation
         td_target = target_calculator_fn(
             next_preds, next_actions, batch["reward"], batch["terminated"]
         )
@@ -69,6 +79,27 @@ def bellman_error(
             "rewards/mean": batch["reward"].mean().item(),
         }
     )
+
+    return loss, info
+
+
+def policy_gradient_loss(
+    advantages: torch.Tensor,
+    log_probs: torch.Tensor,
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Calculate the policy gradient loss for a batch of transitions.
+
+    Args:
+        advantages (torch.Tensor): Tensor of advantages.
+        log_probs (torch.Tensor): Tensor of log probabilities of actions.
+
+    Returns:
+        torch.Tensor: The loss for the batch.
+    """
+    # NOTE: doesnt follow the exact policy gradient of returns - baseline but we calculate the baseline outside. Optionally could move into here and do: -log_probs * (returns - baseline) instead
+    loss = -log_probs * advantages.detach()
+    info = {"loss/policy_gradient": loss.mean().item()}
 
     return loss, info
 

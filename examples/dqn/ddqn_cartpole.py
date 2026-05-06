@@ -22,8 +22,7 @@ from functional.buffer import init_buffer, circular_write_strategy, uniform_samp
 from functional.losses import bellman_error, mse_loss
 from functional.targets import standard_td_target
 from functional.action_selection import (
-    double_selector,
-    scalar_extractor,
+    argmax_selector,
     with_epsilon_greedy,
     get_linear_epsilon,
 )
@@ -95,8 +94,7 @@ stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
-ddqn_selector = partial(double_selector, extractor_fn=scalar_extractor)
-action_selector = with_epsilon_greedy(ddqn_selector)
+action_selector = with_epsilon_greedy(argmax_selector)
 
 # Initialize W&B
 wandb.init(
@@ -120,10 +118,9 @@ for step in range(MAX_STEPS):
     with torch.inference_mode():
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
 
-        _, action, rng_key = action_selector(
-            model=model,
-            target_model=None,
-            obs=obs_tensor,
+        predictions = model(obs_tensor)
+        action, rng_key = action_selector(
+            predictions=predictions,
             epsilon=current_epsilon,
             num_actions=num_actions,
             generator=rng_key,
@@ -162,10 +159,10 @@ for step in range(MAX_STEPS):
         # Calculate Loss & Gradients
         loss, info_dict = bellman_error(
             model,
-            target_model,
             batch,
-            ddqn_selector,
+            model,
             partial(standard_td_target, gamma=batch["gamma"].to(device)),
+            eval_model=target_model,
             loss_fn=mse_loss,
         )
         loss = loss.mean()

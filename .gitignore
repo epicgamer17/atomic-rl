@@ -33,3 +33,7 @@ experiments/catan/offline_data/games.tar.gz
 *.pt
 /.local_lib
 /wandb
+/wandb
+/wandb
+/wandb
+/wandb

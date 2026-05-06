@@ -286,10 +286,10 @@ class ActorActor:
                 with torch.no_grad():
                     _, info_dict = bellman_error(
                         self.model,
-                        self.target_model,
                         collated,
-                        self.selector_fn,
+                        self.model,
                         partial(self.target_fn, gamma=collated["gamma"]),
+                        eval_model=self.target_model,
                         loss_fn=self.loss_fn,
                     )
 
@@ -391,10 +391,10 @@ class LearnerActor:
 
         loss, info = bellman_error(
             self.model,
-            self.target_model,
             batch,
-            self.selector_fn,
+            self.model,
             partial(self.target_fn, gamma=batch["gamma"]),
+            eval_model=self.target_model,
             loss_fn=self.loss_fn,
         )
 

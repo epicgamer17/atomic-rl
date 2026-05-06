@@ -28,8 +28,7 @@ from functional.buffer import (
 from functional.losses import bellman_error, huber_loss
 from functional.targets import standard_td_target
 from functional.action_selection import (
-    double_selector,
-    scalar_extractor,
+    argmax_selector,
     get_ape_x_epsilon,
 )
 from functional.optimizer import apply_gradients
@@ -195,7 +194,9 @@ def actor_worker(
         # Act
         with torch.inference_mode():
             obs_tensor = torch.from_numpy(obs).float().unsqueeze(0)
-            _, greedy_actions = selector_fn(local_model, None, obs_tensor)
+            predictions = local_model(obs_tensor)
+            greedy_actions = argmax_selector(predictions)
+            # TODO: Remove this and use epsilon-greedy selector function.
             if random.random() < epsilon:
                 action = random.randint(0, num_actions - 1)
             else:
@@ -234,10 +235,10 @@ def actor_worker(
             with torch.no_grad():
                 _, info_dict = bellman_error(
                     local_model,
-                    local_target_model,
                     collated,
-                    selector_fn,
+                    local_model,
                     partial(target_fn, gamma=collated["gamma"]),
+                    eval_model=local_target_model,
                     loss_fn=loss_fn,
                 )
             collated["priority"] = info_dict["priorities"].unsqueeze(-1)
@@ -296,10 +297,10 @@ def learner_worker(
         # Loss
         loss, info = bellman_error(
             local_model,
-            target_model,
             batch,
-            selector_fn,
+            local_model,
             partial(target_fn, gamma=batch["gamma"]),
+            eval_model=target_model,
             loss_fn=loss_fn,
         )
 
@@ -352,7 +353,7 @@ def main():
     my_model_creator = partial(
         model_creator_fn, obs_shape=obs_shape, num_actions=num_actions
     )
-    my_selector_fn = partial(double_selector, extractor_fn=scalar_extractor)
+    my_selector_fn = argmax_selector
     my_target_fn = standard_td_target
     my_loss_fn = huber_loss
 

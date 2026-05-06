@@ -33,8 +33,8 @@ from functools import partial
 from functional.buffer import init_buffer, circular_write_strategy, uniform_sample
 from functional.losses import bellman_error, cross_entropy_loss
 from functional.action_selection import (
-    standard_selector,
-    categorical_extractor,
+    argmax_selector,
+    expected_value,
     with_epsilon_greedy,
     get_linear_epsilon,
 )
@@ -116,10 +116,10 @@ stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
-categorical_selector = partial(
-    standard_selector, extractor_fn=partial(categorical_extractor, support=SUPPORT)
+# 1. Initialize the Distributional DQN rollout selector
+action_selector = with_epsilon_greedy(
+    partial(argmax_selector, extractor_fn=partial(expected_value, support=SUPPORT))
 )
-action_selector = with_epsilon_greedy(categorical_selector)
 
 # Initialize W&B
 wandb.init(
@@ -143,10 +143,9 @@ for step in range(MAX_STEPS):
     with torch.inference_mode():
         obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
 
-        _, action, rng_key = action_selector(
-            model=model,
-            target_model=None,
-            obs=obs_tensor,
+        predictions = model(obs_tensor)
+        action, rng_key = action_selector(
+            predictions=predictions,
             epsilon=current_epsilon,
             num_actions=num_actions,
             generator=rng_key,
@@ -185,9 +184,8 @@ for step in range(MAX_STEPS):
         # Calculate Loss & Gradients
         loss, info_dict = bellman_error(
             model,
-            target_model,
             batch,
-            categorical_selector,
+            target_model,
             partial(
                 categorical_td_target,
                 gamma=batch["gamma"].to(device),
@@ -197,6 +195,7 @@ for step in range(MAX_STEPS):
                 atom_size=ATOM_SIZE,
             ),
             loss_fn=cross_entropy_loss,
+            extractor_fn=partial(expected_value, support=SUPPORT),
         )
         loss = loss.mean()
 

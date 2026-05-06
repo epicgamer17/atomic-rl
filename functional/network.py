@@ -16,7 +16,7 @@ def soft_update_target_network(
     """
     with torch.no_grad():
         for target_param, param in zip(target_model.parameters(), model.parameters()):
-            target_param.copy_(target_param * (1.0 - tau) + param * tau)
+            target_param.copy_(exponential_moving_average(target_param, param, tau))
 
 
 # TODO: is it okay that the function is not pure? ie it has side-effects
