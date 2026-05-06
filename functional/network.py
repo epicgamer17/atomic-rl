@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from functional.utils import exponential_moving_average
 
 
 def soft_update_target_network(

@@ -14,7 +14,7 @@ def compute_mean_advantages(returns: torch.Tensor) -> torch.Tensor:
         torch.Tensor: The advantages for the episode.
     """
     advantages = returns - returns.mean(dim=-1, keepdim=True)
-    if len(advantages) > 1:
+    if advantages.numel() > 1:
         # Mean center and scale
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     else:
@@ -36,7 +36,7 @@ def compute_ema_advantages(returns: torch.Tensor, ema_baseline: float) -> torch.
         torch.Tensor: The advantages for the episode.
     """
     advantages = returns - ema_baseline
-    if len(advantages) > 1:
+    if advantages.numel() > 1:
         # Only scale by std, do not subtract the mean!
         advantages = advantages / (advantages.std() + 1e-8)
     else:
@@ -63,7 +63,7 @@ def compute_critic_advantages(
     # TODO: should values be detached here or in main loop? what about returns?
     # Values are detached to treat the baseline as a constant for the policy gradient.
     advantages = returns - values.detach()
-    if len(advantages) > 1:
+    if advantages.numel() > 1:
         # Mean center and scale
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     else:

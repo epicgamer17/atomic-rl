@@ -3,6 +3,7 @@ from typing import Tuple, Callable, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from functional.utils import get_linear_epsilon, get_exponential_epsilon
 
 
 def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
@@ -64,7 +65,9 @@ def categorical_sampling_selector(
         Tuple[torch.Tensor, torch.Tensor]: A tuple containing the sampled actions and the log probabilities.
     """
     if temperature == 0.0:
-        return argmax_selector(predictions, extractor_fn)
+        # TODO: how should log_prob be computed here?
+        action = argmax_selector(predictions, extractor_fn)
+        return action, torch.zeros_like(action, dtype=torch.float32)
 
     if extractor_fn is not None:
         vals = extractor_fn(predictions)
@@ -74,19 +77,24 @@ def categorical_sampling_selector(
     temperature_logits = vals / temperature
     dist = torch.distributions.Categorical(logits=temperature_logits)
 
-    action = dist.sample().unsqueeze(-1)
-    log_prob = dist.log_prob(action).unsqueeze(-1)
-    # If it's a standard discrete env, log_prob shape is [Batch] or [Batch, 1]
-    # If multi-discrete, it might be [Batch, Num_Categorical_Variables]
-    if log_prob.dim() > 1 and log_prob.shape[-1] > 1:
+    # log_prob will be [Batch] for standard, or [Batch, Num_Vars] for multi-discrete
+    # action will be [Batch] for standard, or [Batch, Num_Vars] for multi-discrete
+    action = dist.sample()
+    log_prob = dist.log_prob(action)
+
+    if log_prob.dim() > 1:
+        # Multi-discrete: sum log probs across variables to get joint log prob
         log_prob = log_prob.sum(dim=-1, keepdim=True)
+        # action keeps its [Batch, Num_Vars] shape
     else:
-        log_prob = log_prob.view(-1, 1)  # Ensure [Batch, 1] for consistency
-        action = action.view(-1, 1)
+        # Standard discrete: ensure [Batch, 1]
+        log_prob = log_prob.unsqueeze(-1)
+        action = action.unsqueeze(-1)
 
     return action, log_prob
 
 
+# TODO: CONSISTENT LOG PROB SHAPE ACROSS FUNCTIONAL LIBRARY. IN POLICY GRADIENT LOSS WE USE [T, ] for log_prob, NOT [T, 1]. WHY???.
 def gaussian_sampling_selector(
     action_mean: torch.Tensor, action_std: torch.Tensor, explore: bool = True
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -114,6 +122,7 @@ def gaussian_sampling_selector(
     # we sum the log probs of each independent joint to get the total joint probability.
     # keepdim=True ensures the output is [Batch, 1] rather than [Batch]
     if log_prob.dim() > 1 and log_prob.shape[-1] > 1:
+        # NOTE: sum assumes independant for each action in the vector, how to handle the case where they are not independant?
         log_prob = log_prob.sum(dim=-1, keepdim=True)
     else:
         # If it's a 1D action space, just ensure it's explicitly [Batch, 1]
@@ -121,6 +130,7 @@ def gaussian_sampling_selector(
     return action, log_prob
 
 
+# TODO: make this also work with selection functions that return log probs
 def with_epsilon_greedy(selector_fn: Callable) -> Callable:
     """
     Higher-order function that augments a selector with epsilon-greedy logic.
@@ -163,40 +173,6 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
         return final_actions, generator
 
     return epsilon_greedy_selector
-
-
-# TODO: should we generalize this in utils?
-def get_linear_epsilon(
-    step: int, start_eps: float, end_eps: float, decay_steps: int
-) -> float:
-    """
-    Linearly decays epsilon from start_eps to end_eps over decay_steps.
-
-    Args:
-        step (int): The current step.
-        start_eps (float): The starting epsilon.
-        end_eps (float): The ending epsilon.
-        decay_steps (int): The number of steps over which to decay epsilon.
-    """
-    # Calculate the fraction of the way through the decay period (capped at 1.0)
-    fraction = min(1.0, float(step) / decay_steps)
-    return start_eps - fraction * (start_eps - end_eps)
-
-
-# TODO: should we generalize this in utils?
-def get_exponential_epsilon(
-    step: int, start_eps: float, end_eps: float, decay_rate: float
-) -> float:
-    """
-    Exponentially decays epsilon, decay rate controls how fast it drops.
-
-    Args:
-        step (int): The current step.
-        start_eps (float): The starting epsilon.
-        end_eps (float): The ending epsilon.
-        decay_rate (float): The decay rate.
-    """
-    return end_eps + (start_eps - end_eps) * math.exp(-1.0 * step / decay_rate)
 
 
 def get_ape_x_epsilon(

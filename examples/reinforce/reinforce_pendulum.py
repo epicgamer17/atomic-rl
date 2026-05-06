@@ -129,6 +129,7 @@ for episode in range(MAX_EPISODES):
 
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,
+        # TODO: more consistent log_prob shape my selectors give [T, 1] and here i expect [T, ]
         log_probs=torch.stack(log_probs).view(-1),
     )
     loss = loss.mean()

@@ -2,7 +2,9 @@ import torch
 from dataclasses import dataclass
 from tensordict import TensorDict
 import random
-from typing import Tuple, Callable, List, Dict, Any
+import numpy as np
+from typing import Tuple, Callable, List, Dict, Any, Optional, Union
+from functional.utils import get_linear_beta
 
 
 @dataclass(kw_only=True)
@@ -394,15 +396,6 @@ def with_per_tracking(write_strategy_fn: Callable) -> Callable:
 from collections import deque
 
 
-def get_linear_beta(
-    step: int, start_beta: float, end_beta: float, anneal_steps: int
-) -> float:
-    """
-    Linearly anneals beta from start_beta to end_beta over anneal_steps.
-    Beta is used for Importance Sampling correction in PER.
-    """
-    fraction = min(1.0, float(step) / anneal_steps)
-    return start_beta + fraction * (end_beta - start_beta)
 
 
 def make_n_step_accumulator(n_steps: int, gamma: float) -> Callable:
