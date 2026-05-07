@@ -424,18 +424,16 @@ def make_n_step_accumulator(n_steps: int, gamma: float) -> Callable:
             transitions_to_yield.append(
                 TensorDict(
                     {
-                        "obs": rearrange(torch.as_tensor(first_obs), "... -> 1 ..."),
-                        "action": torch.tensor([first_action], dtype=torch.long),
-                        "reward": torch.tensor([n_step_reward], dtype=torch.float32),
-                        "terminated": torch.tensor([final_terminated], dtype=torch.float32),
-                        "truncated": torch.tensor([final_truncated], dtype=torch.float32),
-                        "next_obs": rearrange(
-                            torch.as_tensor(final_next_obs), "... -> 1 ..."
-                        ),
-                        "gamma": torch.tensor([gamma**n_steps], dtype=torch.float32),
+                        "obs": torch.as_tensor(first_obs, dtype=torch.float32),
+                        "action": torch.tensor(first_action, dtype=torch.long),
+                        "reward": torch.tensor(n_step_reward, dtype=torch.float32),
+                        "terminated": torch.tensor(final_terminated, dtype=torch.float32),
+                        "truncated": torch.tensor(final_truncated, dtype=torch.float32),
+                        "next_obs": torch.as_tensor(final_next_obs, dtype=torch.float32),
+                        "gamma": torch.tensor(gamma**n_steps, dtype=torch.float32),
                     },
-                    batch_size=[1],
-                )
+                    batch_size=[],
+                ).unsqueeze(0)
             )
             history.popleft()
 
@@ -451,24 +449,22 @@ def make_n_step_accumulator(n_steps: int, gamma: float) -> Callable:
                 transitions_to_yield.append(
                     TensorDict(
                         {
-                            "obs": rearrange(torch.as_tensor(first_obs), "... -> 1 ..."),
-                            "action": torch.tensor([first_action], dtype=torch.long),
-                            "reward": torch.tensor([n_step_reward], dtype=torch.float32),
+                            "obs": torch.as_tensor(first_obs, dtype=torch.float32),
+                            "action": torch.tensor(first_action, dtype=torch.long),
+                            "reward": torch.tensor(n_step_reward, dtype=torch.float32),
                             "terminated": torch.tensor(
-                                [final_terminated], dtype=torch.float32
+                                final_terminated, dtype=torch.float32
                             ),
                             "truncated": torch.tensor(
-                                [final_truncated], dtype=torch.float32
+                                final_truncated, dtype=torch.float32
                             ),
-                            "next_obs": rearrange(
-                                torch.as_tensor(final_next_obs), "... -> 1 ..."
-                            ),
+                            "next_obs": torch.as_tensor(final_next_obs, dtype=torch.float32),
                             "gamma": torch.tensor(
-                                [gamma ** len(history)], dtype=torch.float32
+                                gamma ** len(history), dtype=torch.float32
                             ),
                         },
-                        batch_size=[1],
-                    )
+                        batch_size=[],
+                    ).unsqueeze(0)
                 )
                 history.popleft()  # Shrink the window until empty
 

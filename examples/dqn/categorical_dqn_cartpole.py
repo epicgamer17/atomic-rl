@@ -143,7 +143,7 @@ for step in range(MAX_STEPS):
 
     # 2. Act (Pure function)
     with torch.inference_mode():
-        obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
+        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
 
         predictions = model(obs_tensor)
         action, rng_key = action_selector(
@@ -160,15 +160,15 @@ for step in range(MAX_STEPS):
 
     # 3. Add to Buffer
     transition = {
-        "obs": torch.from_numpy(obs[None, ...]).float(),
-        "action": torch.tensor([action], dtype=torch.long),
-        "reward": torch.tensor([reward], dtype=torch.float32),
-        "terminated": torch.tensor([terminated], dtype=torch.float32),
-        "truncated": torch.tensor([truncated], dtype=torch.float32),
-        "next_obs": torch.from_numpy(next_obs[None, ...]).float(),
-        "gamma": torch.tensor([GAMMA], dtype=torch.float32),
+        "obs": torch.as_tensor(obs, dtype=torch.float32),
+        "action": torch.tensor(action, dtype=torch.long),
+        "reward": torch.tensor(reward, dtype=torch.float32),
+        "terminated": torch.tensor(terminated, dtype=torch.float32),
+        "truncated": torch.tensor(truncated, dtype=torch.float32),
+        "next_obs": torch.as_tensor(next_obs, dtype=torch.float32),
+        "gamma": torch.tensor(GAMMA, dtype=torch.float32),
     }
-    buffer_state, _ = circular_write_strategy(buffer_state, TensorDict(transition, batch_size=[1]))
+    buffer_state, _ = circular_write_strategy(buffer_state, TensorDict(transition, batch_size=[]).unsqueeze(0))
 
     # Update state for next tick
     obs = next_obs
@@ -190,7 +190,7 @@ for step in range(MAX_STEPS):
             target_model,
             partial(
                 categorical_td_target,
-                gamma=batch["gamma"].to(device),
+                gamma=batch["gamma"],
                 support=SUPPORT,
                 v_min=V_MIN,
                 v_max=V_MAX,

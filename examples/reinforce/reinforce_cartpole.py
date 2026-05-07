@@ -82,7 +82,7 @@ for episode in range(MAX_EPISODES):
     log_probs = []
     terminals = []
     while not (terminated or truncated):
-        obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
+        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
         logits = actor(obs_tensor)
         action, log_prob = categorical_sampling_selector(logits, temperature=1.0)
         action = action.item()

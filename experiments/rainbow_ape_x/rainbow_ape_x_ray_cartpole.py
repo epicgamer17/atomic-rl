@@ -243,9 +243,7 @@ class ActorActor:
 
             # 3. Act
             with torch.inference_mode():
-                obs_tensor = (
-                    torch.from_numpy(self.obs).float().unsqueeze(0).to(self.device)
-                )
+                obs_tensor = torch.as_tensor(self.obs[None, ...], dtype=torch.float32, device=self.device)
                 _, actions = self.selector_fn(self.model, None, obs_tensor)
                 action = actions.item()
 

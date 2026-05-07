@@ -207,8 +207,8 @@ def test_n_step_accumulator():
     trans = process(obs, action, 1.0, next_obs, False, False)
     assert len(trans) == 1
     # reward = 1 + 0.9*1 + 0.9^2 * 1 = 1 + 0.9 + 0.81 = 2.71
-    torch.testing.assert_close(trans[0]["reward"], torch.tensor([[2.71]]))
-    torch.testing.assert_close(trans[0]["gamma"], torch.tensor([[gamma**3]]))
+    torch.testing.assert_close(trans[0]["reward"], torch.tensor([2.71]))
+    torch.testing.assert_close(trans[0]["gamma"], torch.tensor([gamma**3]))
 
     # 3. Terminate
     trans_term = process(obs, action, 1.0, next_obs, True, False)
@@ -218,7 +218,7 @@ def test_n_step_accumulator():
     # last one should have terminated=1.0
     assert trans_term[-1]["terminated"] == 1.0
     # last one's reward should be just the last step's reward
-    assert trans_term[-1]["gamma"] == torch.tensor([[gamma**1]])
+    torch.testing.assert_close(trans_term[-1]["gamma"], torch.tensor([gamma**1]))
 
     # 4. Reset
     process(obs, action, 1.0, next_obs, False, False)

@@ -127,7 +127,7 @@ for step in range(MAX_STEPS):
 
     # 2. Act (Pure function)
     with torch.inference_mode():
-        obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
+        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
 
         predictions = model(obs_tensor)
         action, rng_key = action_selector(
@@ -168,7 +168,7 @@ for step in range(MAX_STEPS):
             model,
             batch,
             model,
-            partial(n_step_td_target, gamma=batch["gamma"].to(device)),
+            partial(n_step_td_target, gamma=batch["gamma"]),
             eval_model=target_model,
             loss_fn=mse_loss,
         )

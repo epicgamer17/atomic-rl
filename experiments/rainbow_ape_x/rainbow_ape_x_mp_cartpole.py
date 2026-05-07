@@ -217,7 +217,7 @@ def actor_worker(
         local_model.reset_noise()
 
         with torch.inference_mode():
-            obs_tensor = torch.from_numpy(obs).float().unsqueeze(0)
+            obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32)
             _, actions = selector_fn(local_model, None, obs_tensor)
             action = actions.item()
 
@@ -388,13 +388,13 @@ def main():
 
     buffer_shapes = {
         "obs": obs_shape,
-        "action": (1,),
-        "reward": (1,),
-        "terminated": (1,),
-        "truncated": (1,),
+        "action": (),
+        "reward": (),
+        "terminated": (),
+        "truncated": (),
         "next_obs": obs_shape,
-        "gamma": (1,),
-        "priority": (1,),
+        "gamma": (),
+        "priority": (),
     }
     buffer = SharedPERBuffer(BUFFER_CAPACITY, buffer_shapes)
 

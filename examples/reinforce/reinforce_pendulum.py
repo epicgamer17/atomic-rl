@@ -90,7 +90,7 @@ for episode in range(MAX_EPISODES):
     terminals = []
 
     while not (terminated or truncated):
-        obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
+        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
         mu, std = actor(obs_tensor)
 
         # Sample action using Gaussian selector

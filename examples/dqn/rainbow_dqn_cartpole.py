@@ -193,7 +193,7 @@ for step in range(MAX_STEPS):
 
     # 1. Act (Noisy Nets handle exploration, no epsilon needed)
     with torch.inference_mode():
-        obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
+        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
 
         # Resample noise for the actor
         model.reset_noise()
@@ -243,15 +243,15 @@ for step in range(MAX_STEPS):
         target_model.reset_noise()
 
         # Calculate Loss & Gradients
-        per_loss_fn = with_per_weights(cross_entropy_loss, is_weights.to(device))
+        per_loss_fn = with_per_weights(cross_entropy_loss, is_weights)
 
         loss, info_dict = bellman_error(
             model,
-            batch.to(device),
+            batch,
             model,
             partial(
                 categorical_td_target,
-                gamma=batch["gamma"].to(device),
+                gamma=batch["gamma"],
                 support=SUPPORT.to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,

@@ -207,7 +207,7 @@ class ActorActor:
 
             # 2. Act
             with torch.inference_mode():
-                obs_tensor = torch.from_numpy(self.obs).float().unsqueeze(0)
+                obs_tensor = torch.as_tensor(self.obs[None, ...], dtype=torch.float32)
 
                 # Manual epsilon-greedy
                 predictions = self.model(obs_tensor)

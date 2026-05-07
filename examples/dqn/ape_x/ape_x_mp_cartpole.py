@@ -194,7 +194,7 @@ def actor_worker(
 
         # Act
         with torch.inference_mode():
-            obs_tensor = torch.from_numpy(obs).float().unsqueeze(0)
+            obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32)
             predictions = local_model(obs_tensor)
             greedy_actions = argmax_selector(predictions)
             # TODO: Remove this and use epsilon-greedy selector function.

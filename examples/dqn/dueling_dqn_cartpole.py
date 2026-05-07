@@ -57,12 +57,24 @@ torch.manual_seed(SEED)
 class DuelingDQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 512)
-        self.value_head = nn.Linear(512, 1)
-        self.advantage_head = nn.Linear(512, num_actions)
+        # Shared feature extractor
+        self.feature_layer = NoisyLinear(input_shape[0], 512)
+
+        # Dueling Heads: Value and Advantage
+        # Both output distributions over atoms
+        self.advantage_head = nn.Sequential(
+            NoisyLinear(512, 512),
+            nn.ReLU(),
+            NoisyLinear(512, num_actions),
+        )
+        self.value_head = nn.Sequential(
+            NoisyLinear(512, 512),
+            nn.ReLU(),
+            NoisyLinear(512, 1),
+        )
 
     def forward(self, x):
-        x = F.relu(self.l1(x))
+        x = F.relu(self.feature_layer(x))
         v = self.value_head(x)
         a = self.advantage_head(x)
         return v + a - a.mean(dim=1, keepdim=True)
@@ -121,7 +133,7 @@ for step in range(MAX_STEPS):
 
     # 2. Act (Pure function)
     with torch.inference_mode():
-        obs_tensor = torch.from_numpy(obs).float().unsqueeze(0).to(device)
+        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
 
         predictions = model(obs_tensor)
         action, rng_key = action_selector(
@@ -138,15 +150,17 @@ for step in range(MAX_STEPS):
 
     # 3. Add to Buffer
     transition = {
-        "obs": torch.from_numpy(obs[None, ...]).float(),
-        "action": torch.tensor([action], dtype=torch.long),
-        "reward": torch.tensor([reward], dtype=torch.float32),
-        "terminated": torch.tensor([terminated], dtype=torch.float32),
-        "truncated": torch.tensor([truncated], dtype=torch.float32),
-        "next_obs": torch.from_numpy(next_obs[None, ...]).float(),
-        "gamma": torch.tensor([GAMMA], dtype=torch.float32),
+        "obs": torch.as_tensor(obs, dtype=torch.float32),
+        "action": torch.tensor(action, dtype=torch.long),
+        "reward": torch.tensor(reward, dtype=torch.float32),
+        "terminated": torch.tensor(terminated, dtype=torch.float32),
+        "truncated": torch.tensor(truncated, dtype=torch.float32),
+        "next_obs": torch.as_tensor(next_obs, dtype=torch.float32),
+        "gamma": torch.tensor(GAMMA, dtype=torch.float32),
     }
-    buffer_state, _ = circular_write_strategy(buffer_state, TensorDict(transition, batch_size=[1]))
+    buffer_state, _ = circular_write_strategy(
+        buffer_state, TensorDict(transition, batch_size=[]).unsqueeze(0)
+    )
 
     # Update state for next tick
     obs = next_obs
@@ -166,7 +180,7 @@ for step in range(MAX_STEPS):
             model,
             batch,
             target_model,
-            partial(standard_td_target, gamma=batch["gamma"].to(device)),
+            partial(standard_td_target, gamma=batch["gamma"]),
             loss_fn=mse_loss,
         )
         loss = loss.mean()
