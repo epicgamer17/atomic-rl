@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributions as D
 from einops import rearrange
 from tensordict import TensorDict
 from typing import Callable, Tuple, Optional, Union
@@ -19,6 +20,10 @@ def bellman_error(
 ) -> Tuple[torch.Tensor, dict]:
     """
     Calculate the Bellman error for a batch of transitions.
+    The 'Imperative Shell' for DQN-style updates.
+
+    This function orchestrates the evaluation of next-states and target calculation,
+    ensuring that the pure math functions receive correctly formatted tensors.
 
     Args:
         model (nn.Module): The online Q-network.
@@ -26,18 +31,19 @@ def bellman_error(
         selector_model (nn.Module): Model used to select the best action for bootstrapping.
         target_calculator_fn (Callable): Function to calculate targets.
         eval_model (Optional[nn.Module]): Model used to evaluate the selected action's value.
-            Defaults to selector_model.
-        loss_fn (Callable): Function to calculate loss.
+            Defaults to selector_model (standard DQN).
+        loss_fn (Callable): Function to calculate loss (e.g. mse_loss).
         extractor_fn (Optional[Callable]): Function to extract scalar values for action selection.
 
     Returns:
         torch.Tensor: The loss for the batch.
+        dict: Information for logging and debugging.
 
     Note:
         - Assumes model.forward directly returns q-values for all actions for all observations.
     """
 
-    # 1. Current Q-values
+    # 1. Current Q-values (Prediction)
     predictions = model(batch["obs"])
 
     batch_size = predictions.shape[0]
@@ -45,36 +51,45 @@ def bellman_error(
     actions = batch["action"].long().squeeze(-1)
     pred_sa = predictions[batch_idx, actions]
 
-    # 2. Next State Evaluation (Inlined q_value_bootstrapping_evaluator)
+    # 2. Next State Evaluation
     with torch.no_grad():
-        # NOTE: Noisy DQN with Double DQN/Dueling samples a 3rd epsilon here but we do not, and neither do most implementations online.
+        # NOTE: Noisy DQN with Double DQN/Dueling samples a 3rd epsilon here but we do not,
+        # and neither do most implementations online.
         next_obs = batch["next_obs"]
         selector_predictions = selector_model(next_obs)
         if eval_model is None:
+            # Standard DQN
             next_preds = selector_predictions
         else:
+            # Double DQN
             next_preds = eval_model(next_obs)
 
-        next_actions = argmax_selector(selector_predictions, extractor_fn)
+        # Select the best next action using the selector model
+        next_actions, _ = argmax_selector(selector_predictions, extractor_fn)
 
         # 3. Target Calculation
+        # Ensure rewards and terminated are [B, 1] for target calculator
+        rewards = rearrange(batch["reward"], "b -> b 1")
+        terminated = rearrange(batch["terminated"], "b -> b 1")
+        truncated = rearrange(batch["truncated"], "b -> b 1")
+
+        # Calculate TD target (standard, n-step, or categorical)
         td_target = target_calculator_fn(
             next_preds,
             next_actions,
-            batch["reward"],
-            batch["terminated"],
-            batch["truncated"],
+            rewards,
+            terminated,
+            truncated,
         )
 
-    # 4. Compute Loss (Force shape alignment to prevent broadcasting)
+    # 4. Compute Loss (Force shape alignment to prevent broadcasting bugs)
     if loss_fn is None:
         loss_fn = mse_loss
 
-    # The Polymorphic Bouncer:
-    # If standard DQN [B, 1] -> safely becomes [B]
-    # If C51 [B, 51] -> safely ignores the squeeze, stays [B, 51]
-    td_target = td_target.squeeze(-1)
-    pred_sa = pred_sa.squeeze(-1)  # Do this to pred_sa too just to be perfectly safe!
+    # Align shapes for loss: [B] or [B, Atoms]
+    # If standard DQN, pred_sa is [B], td_target is [B, 1] -> squeeze td_target
+    if td_target.dim() == 2 and td_target.shape[1] == 1:
+        td_target = td_target.squeeze(-1)
 
     loss, info = loss_fn(pred_sa, td_target)
 
@@ -103,14 +118,14 @@ def with_per_weights(base_loss_fn: Callable, is_weights: torch.Tensor) -> Callab
         is_weights (torch.Tensor): Importance sampling weights.
 
     Returns:
-        Callable: The loss function with PER weights.
+        Callable: The loss function with PER weights applied.
     """
 
     def per_loss_fn(
         predictions: torch.Tensor, targets: torch.Tensor
     ) -> Tuple[torch.Tensor, dict]:
         """
-        Calculate the loss for a batch of transitions.
+        Calculate the weighted loss for a batch of transitions.
 
         Args:
             predictions (torch.Tensor): Predicted Q-values.
@@ -146,9 +161,14 @@ def mse_loss(
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A tuple containing the raw losses and the info dictionary.
+
+    Expects flat tensors [B].
     """
-    targets = rearrange(targets, "b -> b")
+    assert (
+        predictions.shape == targets.shape
+    ), f"Shape mismatch: {predictions.shape} vs {targets.shape}"
     raw_losses = F.mse_loss(predictions, targets, reduction="none")
+    # Priorities are usually the absolute TD error
     priorities = torch.abs(predictions - targets).detach()
 
     info = {
@@ -170,8 +190,12 @@ def cross_entropy_loss(
 
     Returns:
         Tuple[torch.Tensor, torch.Tensor]: A tuple containing the raw losses and the info dictionary.
+
+    Expects [B, Atoms] or [B, Actions].
     """
-    targets = rearrange(targets, "b a -> b a")
+    assert (
+        predictions.shape == targets.shape
+    ), f"Shape mismatch: {predictions.shape} vs {targets.shape}"
     log_probs = F.log_softmax(predictions, dim=-1)
     # Cross-entropy: - sum(p_target * log(p_online))
     raw_losses = -(targets * log_probs).sum(dim=-1)
@@ -179,7 +203,7 @@ def cross_entropy_loss(
     info = {
         "priorities": raw_losses.detach(),
         "loss/cross_entropy": raw_losses.mean().detach(),
-        # Functional tensor for plotting
+        # Functional tensor for plotting distributions
         "predictions": predictions.detach(),
     }
     return raw_losses, info
@@ -190,16 +214,19 @@ def huber_loss(
 ) -> Tuple[torch.Tensor, dict]:
     """
     Huber Loss (Smooth L1 Loss). Also returns priorities for PER.
-
-    Args:
+        Args:
         predictions (torch.Tensor): Predicted Q-values.
         targets (torch.Tensor): Target Q-values.
         delta (float, optional): The threshold at which to change between L1 and L2 loss. Defaults to 1.0.
 
     Returns:
         Tuple[torch.Tensor, dict]: A tuple containing the raw losses and the info dictionary.
+
+    Expects flat tensors [B].
     """
-    targets = rearrange(targets, "b -> b")
+    assert (
+        predictions.shape == targets.shape
+    ), f"Shape mismatch: {predictions.shape} vs {targets.shape}"
     raw_losses = F.huber_loss(predictions, targets, reduction="none", delta=delta)
     priorities = torch.abs(predictions - targets).detach()
 
@@ -217,20 +244,20 @@ def policy_gradient_loss(
     """
     Calculate the policy gradient loss for a batch of transitions.
 
+
     Args:
         advantages (torch.Tensor): Tensor of advantages.
         log_probs (torch.Tensor): Tensor of log probabilities of actions.
 
     Returns:
-        torch.Tensor: The loss for the batch.
+        Tuple[torch.Tensor, dict]: A tuple containing the raw losses and the info dictionary.
 
-    Note: log_probs must be shape [T, ] (advantages must match it)
+    Expects flat tensors [B * T] or [B].
     """
-    # NOTE: doesnt follow the exact policy gradient of returns - baseline but we calculate the baseline outside. Optionally could move into here and do: -log_probs * (returns - baseline) instead
-    # Ensure advantages matches the shape of log_probs for element-wise multiplication
-    advantages = rearrange(advantages, "t -> t")
-    log_probs = rearrange(log_probs, "t -> t")
-
+    assert (
+        advantages.shape == log_probs.shape
+    ), f"Shape mismatch: {advantages.shape} vs {log_probs.shape}"
+    # PG Loss: -log_prob * advantage (Advantage is treated as constant)
     loss = -log_probs * advantages.detach()
     # NOTE: no priorities, PG is on-policy and so PER doesn't really apply.abs
     # TODO: what about A-PPO or A3C?
@@ -240,43 +267,32 @@ def policy_gradient_loss(
 
 
 def entropy_loss(
-    logits: torch.Tensor,
+    dist: D.Distribution,
 ) -> Tuple[torch.Tensor, dict]:
     """
-    Calculate the entropy loss for a batch of transitions.
+    Calculate the entropy loss for ANY action distribution (Discrete or Continuous).
 
     Args:
-        logits (torch.Tensor): Tensor of logits.
+        dist (torch.distributions.Distribution): The PyTorch distribution object.
 
     Returns:
-        torch.Tensor: The loss for the batch.
-
-    Note: logits should be of shape [Batch, num_actions].
+        Tuple[torch.Tensor, dict]: The mean entropy loss and logging info.
     """
-    logits = rearrange(logits, "b a -> b a")
+    # 1. dist.entropy() automatically handles the underlying math,
+    # whether it's Shannon Entropy (Categorical) or Differential Entropy (Normal)
+    entropy = dist.entropy()
 
-    # Option 1
-    # dist = torch.distributions.Categorical(logits=logits)
-    # entropy = dist.entropy()
+    # 2. Take the mean across the batch
+    # NOTE: for multivariate distributions, entropy might be [B, A] or [B].
+    # Normal returns [B, A], so we sum across actions first if needed,
+    # but dist.entropy() for Normal usually returns [B, A].
+    # Wait, torch.distributions.Normal(mu, std).entropy() returns [B, A].
+    # We usually want the total entropy of the joint distribution, which is the sum.
+    if entropy.dim() > 1:
+        entropy = entropy.sum(dim=-1)
 
-    # Option 2
-    # # 1. Get probabilities and log probabilities
-    # probs = F.softmax(logits, dim=-1)
-    # log_probs = F.log_softmax(logits, dim=-1)
+    loss = entropy.mean()
 
-    # # 2. Compute Shannon entropy: -sum(p * log(p))
-    # entropy = -(probs * log_probs).sum(dim=-1)
-
-    # # 3. Take the mean across the batch
-    # loss = entropy.mean()
-
-    # Option 3 (Fastest?)
-    # Compute probabilities once
-    probs = F.softmax(logits, dim=-1)
-
-    # Cross-entropy of probabilities with their own logits = Entropy
-    # PyTorch's backend handles the log-sum-exp fusion automatically here
-    loss = F.cross_entropy(logits, probs)
     info = {"loss/entropy": loss.detach()}
 
     return loss, info

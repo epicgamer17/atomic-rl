@@ -1,46 +1,31 @@
 import pytest
 import torch
 from functional.targets import (
-    standard_td_target,
-    n_step_td_target,
+    scalar_td_target,
     categorical_td_target,
 )
 
 pytestmark = pytest.mark.unit
 
 
-def test_standard_td_target():
+def test_scalar_td_target():
     # Batch size 2, Actions 3
     next_q = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     next_actions = torch.tensor([[2], [0]])  # Q-values: 3.0, 4.0
     rewards = torch.tensor([[0.5], [1.0]])
-    terminated = torch.tensor([[False], [True]])
-    truncated = torch.tensor([[True], [False]]) # Truncated at target 0
-    gamma = torch.tensor([0.9, 0.9])
+    terminated = torch.tensor([[0.0], [1.0]])
+    truncated = torch.tensor([[1.0], [1.0]])
+    gamma = torch.tensor([[0.9], [0.9]])
 
-    # Target 0: Truncated=True, Terminated=False -> Should bootstrap
+    # Target 0: Terminated=0 -> Should bootstrap
     # 0.5 + 0.9 * 3.0 = 0.5 + 2.7 = 3.2
-    # Target 1: Terminated=True -> Should NOT bootstrap
+    # Target 1: Terminated=1 -> Should NOT bootstrap
     # 1.0 + 0.9 * 4.0 * (1 - 1) = 1.0
     expected = torch.tensor([[3.2], [1.0]])
 
-    target = standard_td_target(next_q, next_actions, rewards, terminated, truncated, gamma)
-    torch.testing.assert_close(target, expected)
-
-
-def test_n_step_td_target():
-    # Effectively same as standard but with n-step rewards/gamma passed in
-    next_q = torch.tensor([[10.0]])
-    next_actions = torch.tensor([[0]])
-    rewards = torch.tensor([[1.0]])
-    terminated = torch.tensor([[False]])
-    truncated = torch.tensor([[True]])
-    gamma = torch.tensor([[0.9**3]])  # N=3 steps
-
-    # 1.0 + 0.729 * 10.0 = 8.29
-    expected = torch.tensor([[8.29]])
-
-    target = n_step_td_target(next_q, next_actions, rewards, terminated, truncated, gamma)
+    target = scalar_td_target(
+        next_q, next_actions, rewards, terminated, truncated, gamma
+    )
     torch.testing.assert_close(target, expected)
 
 
@@ -56,8 +41,8 @@ def test_categorical_td_target():
     )  # Next action 1 is certain at atom 1 (val 1.0)
     next_actions = torch.tensor([[1]])
     rewards = torch.tensor([[0.5]])
-    terminated = torch.tensor([[False]])
-    truncated = torch.tensor([[True]])
+    terminated = torch.tensor([[0.0]])
+    truncated = torch.tensor([[1.0]])
     gamma = torch.tensor([[1.0]])  # For simplicity
 
     # Tz = 0.5 + 1.0 * [0, 1, 2] = [0.5, 1.5, 2.5]
@@ -93,11 +78,11 @@ def test_categorical_td_target_terminal():
     next_logits = torch.randn(1, 1, atom_size)  # doesn't matter
     next_actions = torch.tensor([[0]])
     rewards = torch.tensor([[1.2]])
-    terminated = torch.tensor([[True]])
-    truncated = torch.tensor([[False]])
+    terminated = torch.tensor([[1.0]])
+    truncated = torch.tensor([[0.0]])
     gamma = torch.tensor([[0.9]])
 
-    # Terminal means Tz = rewards = 1.2 (for all atoms)
+    # Terminal means Tz = rewards = 1.2
     # 1.2 is between bin 1 (1.0) and bin 2 (2.0)
     # distance from bin 1 = 0.2. distance to bin 2 = 0.8.
     # prob to bin 1 = 1 - 0.2/1.0 = 0.8

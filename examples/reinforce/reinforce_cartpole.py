@@ -24,8 +24,7 @@ from functional.action_selection import categorical_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
-from functional.utils import exponential_moving_average
-from functional.advantages import compute_mean_advantages, compute_ema_advantages
+from functional.utils import exponential_moving_average, standardize_tensor, scale_tensor_by_std
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -108,23 +107,31 @@ for episode in range(MAX_EPISODES):
     # --- 3. The Update Loop ---
     # NOTE: Again unlike PPO, we don't sample as a learning step always occurs at the end of an episode.
 
-    # Calculate Loss & Gradients
-    # TODO: properly handle truncation and pass that to compute_mc_returns
+    # 1. Compute Returns (Algorithm Agnostic)
     returns = compute_mc_returns(
         rewards=torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        terminated=torch.tensor(terminated, dtype=torch.float32, device=device).unsqueeze(
+        terminated=torch.tensor(
+            terminated, dtype=torch.float32, device=device
+        ).unsqueeze(0),
+        truncated=torch.tensor(truncated, dtype=torch.float32, device=device).unsqueeze(
             0
         ),
         gamma=GAMMA,
     ).squeeze(0)
 
+    # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
     # METHOD A: Mean baseline
-    # advantages = compute_mean_advantages(returns).detach()
-    # METHOD B: EMA baseline
+    # raw_advantages = returns - returns.mean()
+    # advantages = standardize_tensor(raw_advantages)
+
+    # METHOD B: EMA baseline (Standard for REINFORCE)
     global_ema_baseline = exponential_moving_average(
         torch.tensor(global_ema_baseline, device=device), returns.mean(), alpha=0.01
     ).item()
-    advantages = compute_ema_advantages(returns, global_ema_baseline).detach()
+    raw_advantages = returns - global_ema_baseline
+
+    # 3. Optional Scaling
+    advantages = scale_tensor_by_std(raw_advantages)
 
     # Others: learn a baseline with a neural network (advantage) (not done here)
     loss, info_dict = policy_gradient_loss(

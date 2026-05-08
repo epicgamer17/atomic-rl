@@ -3,131 +3,116 @@ import torch.nn.functional as F
 from einops import rearrange
 
 
-def standard_td_target(
-    next_q_values: torch.Tensor,
-    next_actions: torch.Tensor,
-    rewards: torch.Tensor,
-    terminated: torch.Tensor,
-    truncated: torch.Tensor,
-    gamma: torch.Tensor,
-):
+def scalar_td_target(
+    next_q_values: torch.Tensor,  # [batch, num_actions]
+    next_actions: torch.Tensor,  # [batch, 1]
+    rewards: torch.Tensor,  # [batch, 1]
+    terminated: torch.Tensor,  # [batch, 1]
+    truncated: torch.Tensor,  # [batch, 1]
+    gamma: torch.Tensor,  # [batch, 1]
+) -> torch.Tensor:
     """
-    Calculates the standard 1-step TD target.
-    Handles truncated states by bootstrapping from the next state's Q-value.
+    Calculates the TD target for scalar Q-values.
+
+    This function handles both 1-step and N-step TD targets. For N-step,
+    the `rewards` should be the pre-computed discounted sum of rewards,
+    and `gamma` should be the pre-computed effective discount factor (gamma^n).
+
+    Formula: y = R_{t:t+n} + gamma^n * (1 - terminated) * max_a Q(s_{t+n}, a)
+    Note: Truncated states still bootstrap as they are not true environment terminations.
 
     Args:
-        next_q_values (torch.Tensor): Tensor of shape (batch_size, num_actions) containing the Q-values of the next states.
-        next_actions (torch.Tensor): Tensor of shape (batch_size, 1) containing the indices of the actions taken in the next states.
-        rewards (torch.Tensor): Tensor of shape (batch_size, 1) containing the rewards.
-        terminated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes terminated (MDP end).
-        truncated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes were truncated (e.g. time limit).
-        gamma (torch.Tensor): Discount factor.
+        next_q_values: Q-values of the next states.
+        next_actions: Indices of the actions taken in the next states.
+        rewards: Rewards for the transitions (or n-step discounted sum).
+        terminated: Booleans indicating whether the episodes terminated.
+        truncated: Booleans indicating whether the episodes were truncated.
+        gamma: Discount factors (or effective gamma^n).
+
     Returns:
-        torch.Tensor: The standard 1-step TD target.
+        The TD target of shape [batch, 1].
     """
-    # 1. THE BOUNCER: Safely handle [B] OR [B, 1], and format exactly to [B, 1]
-    rewards = rearrange(rewards.squeeze(-1), "b -> b 1")
-    gamma = rearrange(gamma.squeeze(-1), "b -> b 1")
-    terminated = rearrange(terminated.squeeze(-1), "b -> b 1").float()
-    truncated = rearrange(truncated.squeeze(-1), "b -> b 1").float()
-    next_actions = rearrange(next_actions.squeeze(-1), "b -> b 1")
+    assert (
+        next_q_values.ndim == 2
+    ), f"Expected 2D next_q_values [B, A], got {next_q_values.shape}"
+    assert (
+        next_actions.shape
+        == rewards.shape
+        == terminated.shape
+        == truncated.shape
+        == gamma.shape
+    ), "Shape mismatch in TD target inputs"
+    assert (
+        next_actions.ndim == 2 and next_actions.shape[1] == 1
+    ), f"Expected [B, 1] next_actions, got {next_actions.shape}"
 
-    # 2. PURE MATH: Now guaranteed to broadcast perfectly
+    # Pure Math: Guaranteed to broadcast perfectly if shapes are correct
     max_q_next = torch.gather(next_q_values, 1, next_actions)
-    
-    # Bootstrap if not terminated. Truncated states bootstrap from max_q_next.
-    return rewards + gamma * max_q_next * (1 - terminated)
 
-
-def n_step_td_target(
-    next_q_values: torch.Tensor,
-    next_actions: torch.Tensor,
-    rewards: torch.Tensor,
-    terminated: torch.Tensor,
-    truncated: torch.Tensor,
-    gamma: torch.Tensor,
-):
-    """
-    Calculates the N-step TD target using an effective gamma.
-    Assumes rewards is already the n-step discounted sum and gamma is gamma^n.
-    Handles truncated states by bootstrapping from the next state's Q-value.
-
-    Args:
-        next_q_values (torch.Tensor): Tensor of shape (batch_size, num_actions) containing the Q-values of the next states.
-        next_actions (torch.Tensor): Tensor of shape (batch_size, 1) containing the indices of the actions taken in the next states.
-        rewards (torch.Tensor): Tensor of shape (batch_size, 1) containing the rewards.
-        terminated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes terminated.
-        truncated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes were truncated.
-        gamma (torch.Tensor): Effective discount factor (gamma^n).
-    Returns:
-        torch.Tensor: The N-step TD target.
-    """
-    # 1. THE BOUNCER: Safely handle [B] OR [B, 1], and format exactly to [B, 1]
-    rewards = rearrange(rewards.squeeze(-1), "b -> b 1")
-    gamma = rearrange(gamma.squeeze(-1), "b -> b 1")
-    terminated = rearrange(terminated.squeeze(-1), "b -> b 1").float()
-    truncated = rearrange(truncated.squeeze(-1), "b -> b 1").float()
-    next_actions = rearrange(next_actions.squeeze(-1), "b -> b 1")
-
-    # 2. PURE MATH: Now guaranteed to broadcast perfectly
-    max_q_next = torch.gather(next_q_values, 1, next_actions)
-    
     # Bootstrap if not terminated.
-    return rewards + gamma * max_q_next * (1 - terminated)
+    return rewards + gamma * max_q_next * (1 - terminated.float())
 
 
 def categorical_td_target(
-    next_logits: torch.Tensor,
-    next_actions: torch.Tensor,
-    rewards: torch.Tensor,
-    terminated: torch.Tensor,
-    truncated: torch.Tensor,
-    gamma: torch.Tensor,
-    support: torch.Tensor,
+    next_logits: torch.Tensor,  # [batch, num_actions, atom_size]
+    next_actions: torch.Tensor,  # [batch, 1]
+    rewards: torch.Tensor,  # [batch, 1]
+    terminated: torch.Tensor,  # [batch, 1]
+    truncated: torch.Tensor,  # [batch, 1]
+    gamma: torch.Tensor,  # [batch, 1]
+    support: torch.Tensor,  # [atom_size]
     v_min: float,
     v_max: float,
     atom_size: int,
-):
+) -> torch.Tensor:
     """
-    Calculates the projected Categorical TD target distribution.
-    Handles truncated states by bootstrapping from the support values.
+    Calculates the projected Categorical TD target distribution (C51 style).
+
+    This function handles both 1-step and N-step TD targets. For N-step,
+    the `rewards` should be the pre-computed discounted sum of rewards,
+    and `gamma` should be the pre-computed effective discount factor (gamma^n).
 
     Args:
-        next_logits (torch.Tensor): Tensor of shape (batch_size, num_actions, atom_size) containing the logits of the next states.
-        next_actions (torch.Tensor): Tensor of shape (batch_size, 1) containing the indices of the actions taken in the next states.
-        rewards (torch.Tensor): Tensor of shape (batch_size, 1) containing the rewards.
-        terminated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes terminated.
-        truncated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes were truncated.
-        gamma (torch.Tensor): Tensor of shape (batch_size, 1) containing the discount factors.
-        support (torch.Tensor): Tensor of shape (atom_size,) containing the support values.
-        v_min (float): The minimum value of the support.
-        v_max (float): The maximum value of the support.
-        atom_size (int): The number of atoms in the support.
+        next_logits: Logits of the next states.
+        next_actions: Indices of the actions taken in the next states.
+        rewards: Rewards for the transitions (or n-step discounted sum).
+        terminated: Booleans indicating whether the episodes terminated.
+        truncated: Booleans indicating whether the episodes were truncated.
+        gamma: Discount factors (or effective gamma^n).
+        support: Support values for the distribution.
+        v_min: The minimum value of the support.
+        v_max: The maximum value of the support.
+        atom_size: The number of atoms in the support.
+
     Returns:
-        torch.Tensor: The projected Categorical TD target distribution.
+        The projected Categorical TD target distribution [B, Atoms].
     """
-    # 1. THE BOUNCER: Safely handle [B] OR [B, 1], and format exactly to [B, 1]
-    rewards_b = rearrange(rewards.squeeze(-1), "b -> b 1")
-    gamma_b = rearrange(gamma.squeeze(-1), "b -> b 1")
-    terminated_b = rearrange(terminated.squeeze(-1), "b -> b 1").float()
-    truncated_b = rearrange(truncated.squeeze(-1), "b -> b 1").float()
-    next_actions_b = rearrange(next_actions.squeeze(-1), "b -> b 1")
-    support_b = rearrange(support, "a -> 1 a")
+    assert (
+        next_logits.ndim == 3
+    ), f"Expected 3D next_logits [B, A, Atoms], got {next_logits.shape}"
+    assert (
+        next_actions.shape
+        == rewards.shape
+        == terminated.shape
+        == truncated.shape
+        == gamma.shape
+    ), "Shape mismatch in Categorical target inputs"
+    assert (
+        next_actions.ndim == 2 and next_actions.shape[1] == 1
+    ), f"Expected [B, 1] next_actions, got {next_actions.shape}"
 
-    batch_size = rewards_b.size(0)
-
-    # 2. Get probabilities of the next states
+    # 1. Get probabilities of the next states
     next_probs = F.softmax(next_logits, dim=-1)
 
-    # 3. Gather the probabilities for the chosen next actions
-    # next_actions_b is [B, 1], expand to [B, 1, Atoms] to match next_probs
-    next_actions_expanded = next_actions_b.unsqueeze(-1).expand(-1, -1, atom_size)
+    # 2. Gather the probabilities for the chosen next actions
+    # next_actions is [B, 1], expand to [B, 1, Atoms] to match next_probs
+    next_actions_expanded = next_actions.unsqueeze(-1).expand(-1, -1, atom_size)
     next_probs_a = next_probs.gather(1, next_actions_expanded).squeeze(1)  # [B, Atoms]
 
-    # 4. Compute the target support (Tz) [B, Atoms]
-    # Pure Math (Readable)
-    # Bootstrap if not terminated. Truncated states bootstrap from support_b.
-    Tz = rewards_b + gamma_b * support_b * (1 - terminated_b)
+    # 3. Compute the target support (Tz) [B, Atoms]
+    # Formula: Tz = R + gamma * support * (1 - terminated)
+    support_b = rearrange(support, "a -> 1 a")
+    Tz = rewards + gamma * support_b * (1 - terminated.float())
     Tz = Tz.clamp(min=v_min, max=v_max)
 
     # 4. Compute projection bins
@@ -140,7 +125,8 @@ def categorical_td_target(
     l[(u > 0) & (l == u)] -= 1
     u[(l < (atom_size - 1)) & (l == u)] += 1
 
-    # 5. Distribute probabilities onto the fixed support
+    # 5. Distribute probabilities onto the fixed support (Projection)
+    batch_size = rewards.size(0)
     m = torch.zeros(batch_size, atom_size, device=rewards.device)
     offset = (
         torch.linspace(
@@ -154,7 +140,7 @@ def categorical_td_target(
         .expand(batch_size, atom_size)
     )
 
-    # Flatten views for categorical projection (Flatten Once)
+    # Flatten views for categorical projection (Projection Efficiency)
     m_flat = rearrange(m, "b a -> (b a)")
     offset_l = rearrange(l + offset, "b a -> (b a)")
     offset_u = rearrange(u + offset, "b a -> (b a)")
@@ -162,8 +148,8 @@ def categorical_td_target(
     prob_lower = rearrange(next_probs_a * (u.float() - b), "b a -> (b a)")
     prob_upper = rearrange(next_probs_a * (b - l.float()), "b a -> (b a)")
 
-    # Index Add becomes clean:
+    # Index Add becomes clean and fast:
     m_flat.index_add_(0, offset_l, prob_lower)
     m_flat.index_add_(0, offset_u, prob_upper)
 
-    return m  # This is the target probability distribution
+    return m

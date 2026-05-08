@@ -33,22 +33,28 @@ def test_expected_value():
     assert values.shape == (1, 2), f"Expected shape (1, 2), got {values.shape}"
     torch.testing.assert_close(values, torch.tensor([[1.0, -1.0]]))
 
+    # Test with 1D support
+    support_1d = torch.tensor([-1.0, 1.0])
+    values_1d = expected_value(predictions, support_1d)
+    torch.testing.assert_close(values_1d, torch.tensor([[1.0, -1.0]]))
+
 
 def test_argmax_selector():
     """Test argmax action selection."""
     predictions = torch.tensor([[0.1, 0.9, 0.2], [0.8, 0.1, 0.1]])  # [2, 3]
 
     # Test without extractor_fn
-    actions = argmax_selector(predictions)
+    actions, info = argmax_selector(predictions)
     assert actions.shape == (2, 1)
     assert actions[0, 0] == 1
     assert actions[1, 0] == 0
+    assert isinstance(info, dict)
 
     # Test with extractor_fn
     def dummy_extractor(x):
         return x * -1  # flip signs
 
-    actions_flipped = argmax_selector(predictions, extractor_fn=dummy_extractor)
+    actions_flipped, _ = argmax_selector(predictions, extractor_fn=dummy_extractor)
     assert actions_flipped[0, 0] == 0
     assert actions_flipped[1, 0] == 1
 
@@ -61,12 +67,20 @@ def test_categorical_sampling_selector():
     predictions = torch.tensor([[0.0, 10.0, 0.0]])
 
     # Temperature 0 should be argmax and return 0 log_prob
-    action, log_prob = categorical_sampling_selector(predictions, temperature=0.0)
+    action, info = categorical_sampling_selector(predictions, temperature=0.0)
     assert action.item() == 1
-    assert log_prob.item() == 0.0
+    assert info["log_prob"].item() == 0.0
+
+    # Temperature 0 with extractor_fn
+    action_0_ext, _ = categorical_sampling_selector(
+        predictions, extractor_fn=lambda x: x * -1.0, temperature=0.0
+    )
+    # flipped signs: [0, -10, 0] -> argmax is 0 or 2. argmax(0) = 0
+    assert action_0_ext.item() == 0
 
     # Temperature 1.0
-    action, log_prob = categorical_sampling_selector(predictions, temperature=1.0)
+    action, info = categorical_sampling_selector(predictions, temperature=1.0)
+    log_prob = info["log_prob"]
     assert action.shape == (1, 1)
     assert log_prob.shape == (1, 1)
     # With logits [0, 10, 0], action 1 is extremely likely
@@ -90,7 +104,8 @@ def test_categorical_sampling_selector():
     # Test multi-discrete (e.g. 2 categorical variables)
     # Shape [Batch, Num_Vars, Num_Actions] -> [1, 2, 3]
     multi_predictions = torch.tensor([[[10.0, 0.0, 0.0], [0.0, 10.0, 0.0]]])
-    action_multi, log_prob_multi = categorical_sampling_selector(multi_predictions)
+    action_multi, info_multi = categorical_sampling_selector(multi_predictions)
+    log_prob_multi = info_multi["log_prob"]
     # The correct implementation preserves batch dimension: [Batch, Num_Vars]
     assert action_multi.shape == (1, 2)
     assert log_prob_multi.shape == (1, 1)
@@ -106,12 +121,14 @@ def test_gaussian_sampling_selector():
     std = torch.tensor([[0.1, 0.1]])
 
     # Test explore=False
-    action, log_prob = gaussian_sampling_selector(mean, std, explore=False)
+    action, info = gaussian_sampling_selector(mean, std, explore=False)
+    log_prob = info["log_prob"]
     torch.testing.assert_close(action, mean)
     torch.testing.assert_close(log_prob, torch.zeros_like(log_prob))
 
     # Test explore=True
-    action, log_prob = gaussian_sampling_selector(mean, std, explore=True)
+    action, info = gaussian_sampling_selector(mean, std, explore=True)
+    log_prob = info["log_prob"]
     assert action.shape == (1, 2)
     assert log_prob.shape == (1, 1)  # Summed over action dimension
 
@@ -124,21 +141,39 @@ def test_gaussian_sampling_selector():
     # Test multi-dimensional continuous action space
     mean_multi = torch.randn(2, 3)  # [Batch 2, Actions 3]
     std_multi = torch.ones(2, 3) * 0.1
-    action_multi, log_prob_multi = gaussian_sampling_selector(mean_multi, std_multi)
+    action_multi, info_multi = gaussian_sampling_selector(mean_multi, std_multi)
+    log_prob_multi = info_multi["log_prob"]
     assert action_multi.shape == (2, 3)
     assert log_prob_multi.shape == (2, 1)
 
 
+def test_gaussian_sampling_selector_1d():
+    mean = torch.tensor([10.0, -10.0])  # 1D
+    std = torch.tensor([0.1, 0.1])
+
+    # Covers line 157 (explore=False)
+    _, info_det = gaussian_sampling_selector(mean, std, explore=False)
+    assert info_det["log_prob"].shape == (2, 1)
+
+    # Covers lines 170-171 (explore=True)
+    _, info_sample = gaussian_sampling_selector(mean, std, explore=True)
+    assert info_sample["log_prob"].shape == (2, 1)
+
+
 def test_with_epsilon_greedy():
     """Test epsilon greedy higher-order function."""
-    greedy_selector = lambda x: torch.argmax(x, dim=1, keepdim=True)
+    greedy_selector = lambda x: (
+        torch.argmax(x, dim=1, keepdim=True),
+        {"test_info": True},
+    )
     epsilon_selector = with_epsilon_greedy(greedy_selector)
 
     predictions = torch.tensor([[1.0, 0.0], [1.0, 0.0]])  # Greedy action is 0
 
     # Epsilon 0.0 -> always greedy
-    actions, _ = epsilon_selector(predictions, epsilon=0.0, num_actions=2)
+    actions, info = epsilon_selector(predictions, epsilon=0.0, num_actions=2)
     assert torch.all(actions == 0)
+    assert info["test_info"] is True
 
     # Epsilon 1.0 -> always random
     # Use a fixed generator for reproducibility
@@ -155,7 +190,9 @@ def test_linear_schedule():
     """Test linear schedule decay."""
     # start 1.0, end 0.1, decay_steps 10
     assert math.isclose(get_linear_schedule(0, 1.0, 0.1, 10), 1.0)
-    assert math.isclose(get_linear_schedule(5, 1.0, 0.1, 10), 0.55)  # 1.0 + 0.5 * (-0.9)
+    assert math.isclose(
+        get_linear_schedule(5, 1.0, 0.1, 10), 0.55
+    )  # 1.0 + 0.5 * (-0.9)
     assert math.isclose(get_linear_schedule(10, 1.0, 0.1, 10), 0.1)
     assert math.isclose(
         get_linear_schedule(20, 1.0, 0.1, 10), 0.1
@@ -182,3 +219,26 @@ def test_ape_x_epsilon():
     # actor last should have base_eps ^ (1 + alpha)
     expected_last = 0.4 ** (1 + 7.0)
     assert math.isclose(get_ape_x_epsilon(4, 5, base_eps=0.4, alpha=7.0), expected_last)
+
+
+def test_action_selection_assertions():
+    """Test that action selection functions raise assertions on invalid input shapes."""
+    # expected_value
+    with pytest.raises(AssertionError, match="Expected 3D predictions"):
+        expected_value(torch.randn(2, 2), torch.randn(2))
+    with pytest.raises(
+        AssertionError, match="Expected 1D \[N\] or 3D \[B, A, N\] support"
+    ):
+        expected_value(torch.randn(1, 2, 3), torch.randn(2, 3))
+
+    # categorical_sampling_selector
+    with pytest.raises(
+        AssertionError, match="Expected predictions with at least batch and action dims"
+    ):
+        categorical_sampling_selector(torch.randn(3))
+
+    # gaussian_sampling_selector
+    with pytest.raises(AssertionError, match="Mean .* and Std .* must match"):
+        gaussian_sampling_selector(torch.randn(2, 2), torch.randn(2, 3))
+    with pytest.raises(AssertionError, match="Expected at least 1D tensors"):
+        gaussian_sampling_selector(torch.tensor(0.0), torch.tensor(1.0))

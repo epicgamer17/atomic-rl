@@ -20,6 +20,9 @@ def exponential_moving_average(
     Returns:
         torch.Tensor: The updated EMA value.
     """
+    assert (
+        old_ema.shape == new_value.shape
+    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
     return (1 - alpha) * old_ema + alpha * new_value
 
 
@@ -51,8 +54,32 @@ def extract_vector_env_final_obs(info: dict) -> Tuple[np.ndarray, np.ndarray]:
     if len(env_indices) == 0:
         return np.array([]), np.array([])
 
-    # Extract only the valid observations (the rest are usually None)
-    true_final_obs = np.stack(info["final_observation"][env_indices])
+    # Use explicit list comprehension to extract items using the NumPy array indices.
+    # This avoids the TypeError from "fancy indexing" a Python list and avoids
+    # allocating a slow intermediate np.array(..., dtype=object).
+    valid_observations = [info["final_observation"][i] for i in env_indices]
+    true_final_obs = np.stack(valid_observations)
 
     return env_indices, true_final_obs
 
+
+def standardize_tensor(tensor: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    Mean-centers and scales a tensor by its standard deviation.
+    Used when the baseline does not perfectly center the current batch (e.g., PPO Critic).
+    """
+    if tensor.numel() <= 1:
+        return torch.zeros_like(tensor)
+
+    return (tensor - tensor.mean()) / (tensor.std() + eps)
+
+
+def scale_tensor_by_std(tensor: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    Scales a tensor by its standard deviation WITHOUT mean-centering.
+    Used when the data is already centered (e.g., EMA Advantages).
+    """
+    if tensor.numel() <= 1:
+        return torch.zeros_like(tensor)
+
+    return tensor / (tensor.std() + eps)

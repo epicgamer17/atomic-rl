@@ -32,7 +32,7 @@ from tensordict import TensorDict
 from functools import partial
 from einops import rearrange
 
-from functional.buffer import init_buffer, circular_write_strategy, uniform_sample
+from functional.replay_buffer import init_buffer, circular_write_strategy, uniform_sample
 from functional.losses import bellman_error, cross_entropy_loss
 from functional.action_selection import (
     argmax_selector,
@@ -120,7 +120,7 @@ rng_key.manual_seed(SEED)
 
 # 1. Initialize the Distributional DQN rollout selector
 action_selector = with_epsilon_greedy(
-    partial(argmax_selector, extractor_fn=partial(expected_value, support=SUPPORT))
+    partial(argmax_selector, extractor_fn=partial(expected_value, support=SUPPORT.to(device)))
 )
 
 # Initialize W&B
@@ -146,12 +146,13 @@ for step in range(MAX_STEPS):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
 
         predictions = model(obs_tensor)
-        action, rng_key = action_selector(
+        action, info = action_selector(
             predictions=predictions,
             epsilon=current_epsilon,
             num_actions=num_actions,
             generator=rng_key,
         )
+        rng_key = info["generator"]
         action = action.item()
 
     # 2. Step Env
@@ -190,14 +191,14 @@ for step in range(MAX_STEPS):
             target_model,
             partial(
                 categorical_td_target,
-                gamma=batch["gamma"],
-                support=SUPPORT,
+                gamma=rearrange(batch["gamma"], "b -> b 1"),
+                support=SUPPORT.to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,
             ),
             loss_fn=cross_entropy_loss,
-            extractor_fn=partial(expected_value, support=SUPPORT),
+            extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
         )
         loss = loss.mean()
 

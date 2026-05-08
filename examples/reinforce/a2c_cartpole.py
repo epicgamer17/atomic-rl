@@ -2,6 +2,8 @@
 Notes on A2C:
 
 Essentially REINFORCE + a value function for the baseline to compute advantages. Or another way of putting it is REINFORCE with learned state dependant baseline.
+
+# TODO: more notes and A2C and A3C, why A2C is chosen over A3C and decisions ive made that differ from the paper.
 """
 
 import torch
@@ -19,16 +21,17 @@ from functools import partial
 from functional.action_selection import categorical_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_n_step_returns
-from functional.losses import policy_gradient_loss, mse_loss, entropy_loss
+from functional.losses import policy_gradient_loss, huber_loss, mse_loss, entropy_loss
+from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
-from functional.advantages import compute_critic_advantages
-from functional.buffer import (
+from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step,
     flatten_rollout_buffer,
     record_truncations,
     get_rollout_next_values,
 )
+from functional.utils import standardize_tensor
 from tensordict import TensorDict
 import pufferlib
 import pufferlib.vector
@@ -36,13 +39,14 @@ import pufferlib.emulation
 
 # Constants
 LEARNING_RATE = 1e-3
-MAX_ITERATIONS = 1_000
+MAX_ITERATIONS = 10_000
 GAMMA = 0.99
-N_STEP = 3
-ENTROPY_COEFF = 0.01
+ENTROPY_COEFF = 0.001
 CRITIC_COEFF = 0.5
-STEPS_PER_ENV = 512
-NUM_ENVS = 4
+MAX_GRAD_NORM = 0.5
+N_STEP = 5
+STEPS_PER_ENV = N_STEP  # Steps for rollout collection is the same as n_step for the bootstrapping in the A3C paper, though they could be different in practice.
+NUM_ENVS = 16
 SEED = 42
 
 # Seeding for reproducibility
@@ -50,9 +54,8 @@ random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 
-# NOTE: these can have a fused backbone and separate heads, for now we keep separate for simplicity
 
-
+# NOTE: we use a fused backbone and separate heads in accordance with the A3C paper
 class ActorCritic(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
@@ -91,6 +94,11 @@ model = ActorCritic(obs_shape, num_actions).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
+# Linearly decay LR from 1.0 * LEARNING_RATE to 0.0 * LEARNING_RATE over MAX_ITERATIONS
+scheduler = LinearLR(
+    optimizer, start_factor=1.0, end_factor=0.0, total_iters=MAX_ITERATIONS
+)
+
 obs, info = envs.reset(seed=SEED)
 
 # Pre-allocate rollout buffers using the new functional system
@@ -119,67 +127,73 @@ rng_key.manual_seed(SEED)
 
 # Initialize W&B
 wandb.init(project="a2c-cartpole", config={"lr": LEARNING_RATE, "gamma": GAMMA})
+wandb.define_metric("*", step_metric="global_step")
+global_step = 0
 
 # Using full episodes
 for iteration in range(MAX_ITERATIONS):
-    # Clear the data
-    # TODO: make this part of "online sampling" and put it in a function?, along with clearing the truncation records maybe?
-    buffer.data.detach_()
-    for step in range(STEPS_PER_ENV):
-        obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
-        logits, value = model(obs_tensor)
-        action, log_prob = categorical_sampling_selector(logits, temperature=1.0)
-        action = (
-            action.cpu().numpy().flatten().astype(np.int32)
-        )  # NOTE: .item() is for python scalars (NOT for batches!)
+    # NOTE: here we use torch.inference_mode() and do a re-eval pass to compute necessary data, but the re-eval could be integrated into the data collection loop and use python lists similar to VPG. We chose the re-eval pass instead in order to demonstrate the buffer system, and have a parallel to PPO's re-eval pass.
+    with torch.inference_mode():
+        for step in range(STEPS_PER_ENV):
+            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+            logits, value = model(obs_tensor)
+            action, info_dict = categorical_sampling_selector(logits, temperature=1.0)
+            action = (
+                action.cpu().numpy().flatten().astype(np.int32)
+            )  # NOTE: .item() is for python scalars (NOT for batches!)
 
-        # 2. Step Env
-        next_obs, reward, terminated, truncated, info = envs.step(action)
+            # 2. Step Env
+            next_obs, reward, terminated, truncated, info = envs.step(action)
+            global_step += NUM_ENVS
 
-        # 3. Add to "online" buffers
-        transition = TensorDict(
-            {
-                "observations": obs_tensor,
-                "actions": torch.as_tensor(action, device=device),
-                "logprobs": log_prob.squeeze(-1),
-                "rewards": torch.as_tensor(reward, dtype=torch.float32, device=device),
-                "terminated": torch.as_tensor(
-                    terminated, dtype=torch.float32, device=device
-                ),
-                "truncated": torch.as_tensor(
-                    truncated, dtype=torch.float32, device=device
-                ),
-                "values": value.squeeze(-1),
-                "logits": logits,
-            },
-            batch_size=[NUM_ENVS],
+            # 3. Add to "online" buffers
+            transition = TensorDict(
+                {
+                    "observations": obs_tensor,
+                    "actions": torch.as_tensor(action, device=device),
+                    "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
+                    "rewards": torch.as_tensor(
+                        reward, dtype=torch.float32, device=device
+                    ),
+                    "terminated": torch.as_tensor(
+                        terminated, dtype=torch.float32, device=device
+                    ),
+                    "truncated": torch.as_tensor(
+                        truncated, dtype=torch.float32, device=device
+                    ),
+                    "values": value.squeeze(-1).detach(),
+                    "logits": logits.detach(),
+                },
+                batch_size=[NUM_ENVS],
+            )
+            store_rollout_step(buffer=buffer, step=step, transition=transition)
+            record_truncations(buffer, step, info, truncated)
+            # Update state for next tick
+
+            stat_episode_returns += reward
+            for i, (t, tr) in enumerate(zip(terminated, truncated)):
+                if t or tr:
+                    wandb.log(
+                        {
+                            "episode_return": stat_episode_returns[i],
+                            "global_step": global_step,
+                        }
+                    )
+                    stat_episode_returns[i] = 0.0
+
+            # NOTE: vectorized envs like pufferlib auto reset so obs = next_obs is moved to here.
+            obs = next_obs
+
+        # Compute last values for the re-evaluation pass
+        last_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+        _, last_values = model(last_obs_tensor)
+
+        # Calculate Loss & Gradients
+        next_values = get_rollout_next_values(
+            buffer, last_values, get_value_fn=lambda obs: model(obs)[1], device=device
         )
-        store_rollout_step(buffer=buffer, step=step, transition=transition)
-        record_truncations(buffer, step, info, truncated)
-        # Update state for next tick
-
-        stat_episode_returns += reward
-        for i, (t, tr) in enumerate(zip(terminated, truncated)):
-            if t or tr:
-                wandb.log({"episode_return": stat_episode_returns[i]}, step=iteration)
-                stat_episode_returns[i] = 0.0
-
-        # TODO: vectorized envs like pufferlib auto reset so obs = next_obs is moved to here.
-        obs = next_obs
 
     # --- 3. The Update Loop ---
-    # TODO: handle einops reshaping
-
-    last_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
-    _, last_values = model(last_obs_tensor)
-
-    # Calculate Loss & Gradients
-    next_values = get_rollout_next_values(
-        buffer, last_values, get_value_fn=lambda obs: model(obs)[1], device=device
-    )
-
-    # TODO: properly handle truncation and pass that to compute_n_step_returns
-
     returns = compute_n_step_returns(
         rewards=buffer.data["rewards"],
         terminated=buffer.data["terminated"],
@@ -190,39 +204,56 @@ for iteration in range(MAX_ITERATIONS):
         n=N_STEP,
     )
 
-    advantages = compute_critic_advantages(
-        returns=returns,
-        values=buffer.data["values"],
-    )
+    # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
+    baseline = buffer.data["values"].detach()
+    advantages = returns - baseline
+
+    # 3. Optional Scaling
+    advantages = standardize_tensor(advantages)
 
     # Flatten buffer for loss calculations
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "t b -> (t b)")
-    flat_returns = rearrange(returns, "t b -> (t b)")
+    flat_advantages = rearrange(advantages, "b t -> (b t)")
+    flat_returns = rearrange(returns, "b t -> (b t)")
+
+    # --- Re-evaluation Pass (The CleanRL / SB3 Way) ---
+    # This pass is vectorized and allows for gradient calculation
+    new_logits, new_values = model(flat_data["observations"])
+    new_values = new_values.squeeze(-1)
+
+    # Re-calculate log probabilities for the actions taken
+    # Using Categorical distribution for CartPole (discrete)
+    dist = torch.distributions.Categorical(logits=new_logits)
+    new_log_probs = dist.log_prob(flat_data["actions"].squeeze(-1))
 
     pg_loss, info_dict = policy_gradient_loss(
-        advantages=flat_advantages.detach(),
-        log_probs=flat_data["logprobs"],
+        advantages=flat_advantages,
+        log_probs=new_log_probs,
     )
 
-    ent_loss, _ = entropy_loss(logits=flat_data["logits"])
+    ent_loss, _ = entropy_loss(dist)
     ent_loss = ent_loss.mean()
 
     pg_loss = pg_loss.mean()
 
     # NOTE: i use my mse_loss from losses.py, but we don't need priorities here since it's not off policy.
-    critic_loss, _ = mse_loss(
-        predictions=flat_data["values"], targets=flat_returns.detach()
-    )
+    critic_loss, _ = mse_loss(predictions=new_values, targets=flat_returns.detach())
     critic_loss = critic_loss.mean()
 
     loss = pg_loss + CRITIC_COEFF * critic_loss - ENTROPY_COEFF * ent_loss
 
     # Apply Updates
-    optimizer = apply_gradients(optimizer, loss)
+    optimizer = apply_gradients(
+        optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
+    )
+
+    # Step the learning rate down
+    scheduler.step()
 
     # Clear truncation records for the next iteration
+    # TODO: do this here or start of collection phase?
     buffer.truncation_records.clear()
+    # buffer.data.detach_()
 
     if iteration % 100 == 0:
         # Calculate explained variance
@@ -234,13 +265,15 @@ for iteration in range(MAX_ITERATIONS):
         log_dict = info_dict.copy()
         log_dict.update(
             {
+                "learning_rate": scheduler.get_last_lr()[0],  # Log the decaying LR
                 "loss/total": loss.item(),
-                "loss/critic": critic_loss.mean().item(),
+                "loss/critic": critic_loss.item(),
                 "value/mean": buffer.data["values"].mean().item(),
                 "value/return_mean": returns.mean().item(),
                 "value/explained_variance": explained_var,
                 "advantages/mean": advantages.mean().item(),
                 "advantages/std": advantages.std().item(),
+                "global_step": global_step,
             }
         )
-        wandb.log(log_dict, step=iteration)
+        wandb.log(log_dict)

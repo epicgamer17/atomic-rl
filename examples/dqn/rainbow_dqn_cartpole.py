@@ -20,7 +20,7 @@ import random
 import wandb
 from functools import partial
 
-from functional.buffer import (
+from functional.replay_buffer import (
     init_per_buffer,
     sample_per,
     update_priorities,
@@ -199,8 +199,8 @@ for step in range(MAX_STEPS):
         model.reset_noise()
 
         predictions = model(obs_tensor)
-        action = argmax_selector(
-            predictions, extractor_fn=partial(expected_value, support=SUPPORT)
+        action, _ = argmax_selector(
+            predictions, extractor_fn=partial(expected_value, support=SUPPORT.to(device))
         )
         action = action.item()
 
@@ -211,7 +211,12 @@ for step in range(MAX_STEPS):
     # 3. N-Step Accumulation and Buffer Addition
     # The accumulator now returns a list of 0, 1, or N transitions.
     n_step_transitions = accumulate_n_step(
-        obs, action, reward, next_obs, terminated, truncated
+        torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0),
+        torch.tensor([action]),
+        torch.tensor([reward], dtype=torch.float32),
+        torch.as_tensor(next_obs, dtype=torch.float32).unsqueeze(0),
+        torch.tensor([terminated], dtype=torch.float32),
+        torch.tensor([truncated], dtype=torch.float32),
     )
 
     # Iterate through whatever the accumulator yielded and write to the buffer
@@ -251,15 +256,15 @@ for step in range(MAX_STEPS):
             model,
             partial(
                 categorical_td_target,
-                gamma=batch["gamma"],
-                support=SUPPORT.to(device),
+                gamma=rearrange(batch["gamma"], "b -> b 1"),
+                support=SUPPORT.to(device).to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,
             ),
             eval_model=target_model,
             loss_fn=per_loss_fn,
-            extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
+            extractor_fn=partial(expected_value, support=SUPPORT.to(device).to(device)),
         )
 
         # Apply Gradients

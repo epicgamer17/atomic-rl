@@ -3,7 +3,7 @@ import torch
 import random
 import math
 from tensordict import TensorDict
-from functional.buffer import (
+from functional.replay_buffer import (
     init_buffer,
     init_per_buffer,
     circular_write_strategy,
@@ -13,9 +13,7 @@ from functional.buffer import (
     update_priorities,
     with_per_tracking,
     make_n_step_accumulator,
-    init_rollout_buffer,
-    store_rollout_step,
-    flatten_rollout_buffer,
+    BufferState,
 )
 
 pytestmark = pytest.mark.unit
@@ -29,6 +27,7 @@ def test_init_buffer():
     assert state.capacity == capacity
     assert state.size == 0
     assert state.pointer == 0
+    assert state.steps_seen == 0
     assert "obs" in state.data.keys()
     assert state.data["obs"].shape == (capacity, 4)
     assert state.data["action"].shape == (capacity, 1)
@@ -58,6 +57,7 @@ def test_circular_write_strategy():
 
     assert state.size == 3
     assert state.pointer == 3
+    assert state.steps_seen == 3
     torch.testing.assert_close(indices, torch.tensor([0, 1, 2]))
     torch.testing.assert_close(state.data["data"][:3], batch["data"])
 
@@ -67,6 +67,7 @@ def test_circular_write_strategy():
 
     assert state.size == 5  # capped at capacity
     assert state.pointer == 2  # (3 + 4) % 5 = 2
+    assert state.steps_seen == 7
     torch.testing.assert_close(indices2, torch.tensor([3, 4, 0, 1]))
     # Verify values at indices
     assert state.data["data"][3] == 4.0
@@ -79,23 +80,14 @@ def test_reservoir_write_strategy():
     random.seed(42)
     capacity = 5
     shapes = {"data": (1,)}
-    from functional.buffer import ReservoirBufferState
 
-    state = ReservoirBufferState(
-        data=TensorDict(
-            {"data": torch.zeros((capacity, 1))}, batch_size=[capacity], device="cpu"
-        ),
-        pointer=0,
-        size=0,
-        capacity=capacity,
-        total_steps_seen=0,
-    )
+    state = init_buffer(capacity, shapes)
 
     # Write 10 items
     batch = TensorDict({"data": torch.arange(10, dtype=torch.float32).reshape(-1, 1)}, batch_size=[10])
     state, indices = reservoir_write_strategy(state, batch)
 
-    assert state.total_steps_seen == 10
+    assert state.steps_seen == 10
     assert state.size == 5
     # Since it's random, we just check that indices are valid
     assert indices.numel() <= 10
@@ -205,12 +197,12 @@ def test_n_step_accumulator():
     truncated = torch.tensor(0.0, dtype=torch.float32)
 
     # 1. Step once
-    trans = process(obs, action, reward, next_obs, terminated, truncated)
+    trans = process(obs[None], action[None], reward[None], next_obs[None], terminated[None], truncated[None])
     assert len(trans) == 0
 
     # 2. Step until window full
-    process(obs, action, reward, next_obs, terminated, truncated)
-    trans = process(obs, action, reward, next_obs, terminated, truncated)
+    process(obs[None], action[None], reward[None], next_obs[None], terminated[None], truncated[None])
+    trans = process(obs[None], action[None], reward[None], next_obs[None], terminated[None], truncated[None])
     assert len(trans) == 1
     # reward = 1 + 0.9*1 + 0.9^2 * 1 = 1 + 0.9 + 0.81 = 2.71
     torch.testing.assert_close(trans[0]["reward"], torch.tensor(2.71))
@@ -218,7 +210,7 @@ def test_n_step_accumulator():
 
     # 3. Terminate
     terminated_true = torch.tensor(1.0, dtype=torch.float32)
-    trans_term = process(obs, action, reward, next_obs, terminated_true, truncated)
+    trans_term = process(obs[None], action[None], reward[None], next_obs[None], terminated_true[None], truncated[None])
     # history had 2 items left before termination, plus the terminal one = 3
     # it should flush all 3
     assert len(trans_term) == 3
@@ -228,63 +220,7 @@ def test_n_step_accumulator():
     torch.testing.assert_close(trans_term[-1]["gamma"], torch.tensor(gamma**1))
 
     # 4. Reset
-    process(obs, action, reward, next_obs, terminated, truncated)
+    process(obs[None], action[None], reward[None], next_obs[None], terminated[None], truncated[None])
     reset()
-    trans_after_reset = process(obs, action, reward, next_obs, terminated, truncated)
+    trans_after_reset = process(obs[None], action[None], reward[None], next_obs[None], terminated[None], truncated[None])
     assert len(trans_after_reset) == 0  # history was cleared
-
-
-def test_init_rollout_buffer():
-    steps = 10
-    num_envs = 4
-    shapes = {"obs": (8,), "action": ()}
-    device = "cpu"
-
-    buffer = init_rollout_buffer(steps, num_envs, shapes, device=device)
-
-    assert buffer.data["obs"].shape == (steps, num_envs, 8)
-    assert buffer.data["action"].shape == (steps, num_envs)
-    assert buffer.data["action"].dtype == torch.long
-
-
-def test_store_rollout_step():
-    steps = 5
-    num_envs = 2
-    shapes = {"obs": (4,), "action": ()}
-    buffer = init_rollout_buffer(steps, num_envs, shapes)
-
-    step = 0
-    transition = TensorDict(
-        {"obs": torch.randn(num_envs, 4), "action": torch.randint(0, 5, (num_envs,))},
-        batch_size=[num_envs],
-    )
-
-    store_rollout_step(buffer, step, transition)
-
-    torch.testing.assert_close(buffer.data[step], transition)
-
-
-def test_flatten_rollout_buffer():
-    steps = 3
-    num_envs = 2
-    shapes = {"obs": (4,), "action": ()}
-    buffer = init_rollout_buffer(steps, num_envs, shapes)
-
-    # Fill buffer
-    for i in range(steps):
-        transition = TensorDict(
-            {
-                "obs": torch.ones(num_envs, 4) * i,
-                "action": torch.ones(num_envs, dtype=torch.long) * i,
-            },
-            batch_size=[num_envs],
-        )
-        store_rollout_step(buffer, i, transition)
-
-    flat_data = flatten_rollout_buffer(buffer)
-
-    assert flat_data.batch_size == torch.Size([steps * num_envs])
-    assert flat_data["obs"].shape == (steps * num_envs, 4)
-    assert torch.all(flat_data["obs"][0:2] == 0)
-    assert torch.all(flat_data["obs"][2:4] == 1)
-    assert torch.all(flat_data["obs"][4:6] == 2)

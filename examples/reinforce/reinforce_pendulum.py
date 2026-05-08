@@ -20,8 +20,7 @@ from functional.action_selection import gaussian_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
-from functional.utils import exponential_moving_average
-from functional.advantages import compute_mean_advantages, compute_ema_advantages
+from functional.utils import exponential_moving_average, standardize_tensor, scale_tensor_by_std
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -29,7 +28,7 @@ MAX_EPISODES = 2_000
 GAMMA = 0.99
 SEED = 42
 MAX_ACTION = 2.0
-HIDDEN_SIZE = 64
+HIDDEN_SIZE = 256
 INITIAL_LOG_STD = -0.5
 
 # Seeding for reproducibility
@@ -58,8 +57,8 @@ class Actor(nn.Module):
             Tuple[torch.Tensor, torch.Tensor]: The mean (mu) and standard deviation (std)
                 of the Gaussian action distribution. # [B, num_actions], [B, num_actions]
         """
-        x = F.relu(self.l1(x))  # [B, HIDDEN_SIZE]
-        x = F.relu(self.l2(x))  # [B, HIDDEN_SIZE]
+        x = torch.tanh(self.l1(x))  # [B, HIDDEN_SIZE]
+        x = torch.tanh(self.l2(x))  # [B, HIDDEN_SIZE]
         mu = torch.tanh(self.mu_head(x)) * MAX_ACTION  # [B, num_actions]
 
         # Expand log_std to match batch size
@@ -87,14 +86,15 @@ wandb.init(project="reinforce-pendulum", config={"lr": LEARNING_RATE, "gamma": G
 for episode in range(MAX_EPISODES):
     rewards = []
     log_probs = []
-    terminated = []
+    terminateds = []
+    truncateds = []
 
     while not (terminated or truncated):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
         mu, std = actor(obs_tensor)
 
         # Sample action using Gaussian selector
-        action_tensor, log_prob = gaussian_sampling_selector(mu, std, explore=True)
+        action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
 
         # Pendulum expects a numpy array for actions
         action = action_tensor.detach().cpu().numpy().flatten()
@@ -107,8 +107,9 @@ for episode in range(MAX_EPISODES):
 
         # 3. Add to buffers
         rewards.append(reward)
-        log_probs.append(log_prob)
-        terminated.append(terminated)
+        log_probs.append(info_dict["log_prob"])
+        terminateds.append(terminated)
+        truncateds.append(truncated)
 
         # Update state
         obs = next_obs
@@ -120,17 +121,23 @@ for episode in range(MAX_EPISODES):
         stat_episode_return = 0.0
 
     # --- 3. The Update Loop ---
+    # 1. Compute Returns (Algorithm Agnostic)
     returns = compute_mc_returns(
         torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(terminated, dtype=torch.float32, device=device).unsqueeze(0),
+        torch.tensor(terminateds, dtype=torch.float32, device=device).unsqueeze(0),
+        torch.tensor(truncateds, dtype=torch.float32, device=device).unsqueeze(0),
         GAMMA,
     ).squeeze(0) # TODO: replace with rearrange
 
+    # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
     # Use EMA baseline for variance reduction
     global_ema_baseline = exponential_moving_average(
         torch.tensor(global_ema_baseline, device=device), returns.mean(), alpha=0.01
     ).item()
-    advantages = compute_ema_advantages(returns, global_ema_baseline).detach()
+    raw_advantages = returns - global_ema_baseline
+
+    # 3. Optional Scaling
+    advantages = scale_tensor_by_std(raw_advantages)
 
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,

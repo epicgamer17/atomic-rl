@@ -17,7 +17,7 @@ from tensordict import TensorDict
 from functools import partial
 from typing import Tuple, Dict, Any, Callable, List
 
-from functional.buffer import (
+from functional.replay_buffer import (
     init_per_buffer,
     sample_per,
     update_priorities,
@@ -27,7 +27,7 @@ from functional.buffer import (
     PERBufferState,
 )
 from functional.losses import bellman_error, huber_loss
-from functional.targets import standard_td_target
+from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
     get_ape_x_epsilon,
@@ -196,7 +196,7 @@ def actor_worker(
         with torch.inference_mode():
             obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32)
             predictions = local_model(obs_tensor)
-            greedy_actions = argmax_selector(predictions)
+            greedy_actions, _ = argmax_selector(predictions)
             # TODO: Remove this and use epsilon-greedy selector function.
             if random.random() < epsilon:
                 action = random.randint(0, num_actions - 1)
@@ -304,7 +304,7 @@ def learner_worker(
             local_model,
             batch,
             local_model,
-            partial(target_fn, gamma=batch["gamma"]),
+            partial(target_fn, gamma=rearrange(batch["gamma"], "b -> b 1")),
             eval_model=target_model,
             loss_fn=loss_fn,
         )
@@ -359,7 +359,7 @@ def main():
         model_creator_fn, obs_shape=obs_shape, num_actions=num_actions
     )
     my_selector_fn = argmax_selector
-    my_target_fn = standard_td_target
+    my_target_fn = scalar_td_target
     my_loss_fn = huber_loss
 
     # Shared model for weight syncing

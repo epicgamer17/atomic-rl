@@ -1,3 +1,10 @@
+"""
+Notes on A2C for Pendulum (Continuous Action Space):
+
+STRUCTURALLY SIMILAR TO a2c_cartpole.py but adapted for continuous actions.
+Uses pufferlib for vectorization and the functional rollout buffer system.
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,22 +15,42 @@ import numpy as np
 import random
 import wandb
 from einops import rearrange
+from functools import partial
 
 from functional.action_selection import gaussian_sampling_selector
 from functional.optimizer import apply_gradients
-from functional.returns import compute_mc_returns
-from functional.losses import policy_gradient_loss, mse_loss
+from functional.returns import compute_n_step_returns
+from functional.losses import policy_gradient_loss, mse_loss, entropy_loss
+from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
-from functional.advantages import compute_critic_advantages
+from functional.rollout_buffer import (
+    init_rollout_buffer,
+    store_rollout_step,
+    flatten_rollout_buffer,
+    record_truncations,
+    get_rollout_next_values,
+)
+from functional.utils import standardize_tensor
+from tensordict import TensorDict
+import pufferlib
+import pufferlib.vector
+import pufferlib.emulation
+
+# TODO: find a good set of hyperparameters for this (maybe based on PPO?)
 
 # Constants
-LEARNING_RATE = 1e-3
-MAX_EPISODES = 2_000
-GAMMA = 0.99
-SEED = 42
+LEARNING_RATE = 1e-4
+MAX_ITERATIONS = 100_000
+GAMMA = 0.9
 CRITIC_COEFF = 0.5
+ENTROPY_COEFF = 0.001
+MAX_GRAD_NORM = 0.5
+N_STEP = 5
+STEPS_PER_ENV = N_STEP
+NUM_ENVS = 32
+SEED = 42
 MAX_ACTION = 2.0
-HIDDEN_SIZE = 64
+HIDDEN_SIZE = 256
 INITIAL_LOG_STD = -0.5
 
 # Seeding for reproducibility
@@ -32,147 +59,250 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 
-class Actor(nn.Module):
+# Decoupled networks for Actor-Critic
+class ActorCritic(nn.Module):
+    """
+    Actor-Critic network for continuous action spaces with decoupled networks.
+    This architecture uses separate parameters for the actor and critic to
+    handle different gradient magnitudes, which is often necessary for
+    stability in continuous domains like Pendulum.
+    """
+
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], HIDDEN_SIZE)
-        self.l2 = nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
-        self.mu_head = nn.Linear(HIDDEN_SIZE, num_actions)
-        self.log_std = nn.Parameter(torch.full((1, num_actions), INITIAL_LOG_STD))
+        # NOTE: Details from the A3C paper for continuous control:
+        # 1. State-dependent variance: Both mu and log_std are network heads. This is recommended but we do not implement it here as we find it leads to instability.
+        # 2. Separate Networks: The actor and critic networks are completely
+        #    separate (not sharing layers) to prevent interference between updates.
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Actor Network: Predicts distribution parameters (mu and log_std)
+        self.actor_backbone = nn.Sequential(
+            nn.Linear(input_shape[0], HIDDEN_SIZE),
+            nn.Tanh(),
+            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            nn.Tanh(),
+        )
+        self.actor_mu = nn.Linear(HIDDEN_SIZE, num_actions)
+        self.log_std = nn.Parameter(torch.ones(1, num_actions) * INITIAL_LOG_STD)
+
+        # Critic Network: Predicts the state value estimate (completely separate)
+        self.critic = nn.Sequential(
+            nn.Linear(input_shape[0], HIDDEN_SIZE),
+            nn.Tanh(),
+            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            nn.Tanh(),
+            nn.Linear(HIDDEN_SIZE, 1),
+        )
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Forward pass for the Actor network.
+        Forward pass for the Actor-Critic network.
 
         Args:
-            x (torch.Tensor): The input observation tensor. # [B, obs_dim]
+            x: Input observation tensor.
 
         Returns:
-            Tuple[torch.Tensor, torch.Tensor]: The mean (mu) and standard deviation (std)
-                of the Gaussian action distribution. # [B, num_actions], [B, num_actions]
+            mu: Mean of the Gaussian distribution.
+            std: Standard deviation of the Gaussian distribution.
+            value: State value estimate.
         """
-        x = F.relu(self.l1(x))  # [B, HIDDEN_SIZE]
-        x = F.relu(self.l2(x))  # [B, HIDDEN_SIZE]
-        mu = torch.tanh(self.mu_head(x)) * MAX_ACTION  # [B, num_actions]
-        std = torch.exp(self.log_std).expand_as(mu)  # [B, num_actions]
-        return mu, std
+        latent = self.actor_backbone(x)
+        mu = torch.tanh(self.actor_mu(latent)) * MAX_ACTION
+        std = torch.exp(self.log_std).expand_as(mu)
+        value = self.critic(x)
+        return mu, std, value
 
 
-class Critic(nn.Module):
-    def __init__(self, input_shape: Tuple):
-        super().__init__()
-        self.l1 = nn.Linear(input_shape[0], HIDDEN_SIZE)
-        self.l2 = nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
-        self.l3 = nn.Linear(HIDDEN_SIZE, 1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass for the Critic network.
-
-        Args:
-            x (torch.Tensor): The input observation tensor. # [B, obs_dim]
-
-        Returns:
-            torch.Tensor: The predicted state value. # [B, 1]
-        """
-        x = F.relu(self.l1(x))  # [B, HIDDEN_SIZE]
-        x = F.relu(self.l2(x))  # [B, HIDDEN_SIZE]
-        x = self.l3(x)  # [B, 1]
-        return x
+# --- 1. Initialization (Defining the State) ---
+def env_creator(**kwargs):
+    # Create the standard Gym environment
+    env = gym.make("Pendulum-v1")
+    return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
 
 
-# --- 1. Initialization ---
-env = gym.make("Pendulum-v1")
-obs_shape = env.observation_space.shape
-num_actions = env.action_space.shape[0]
+envs = pufferlib.vector.make(
+    env_creator, num_envs=NUM_ENVS, backend=pufferlib.vector.Serial
+)
+obs_shape = envs.single_observation_space.shape
+num_actions = envs.single_action_space.shape[0]
 device = torch.device("cpu")
 
-actor = Actor(obs_shape, num_actions).to(device)
-critic = Critic(obs_shape).to(device)
+model = ActorCritic(obs_shape, num_actions).to(device)
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-optimizer = optim.Adam(
-    list(actor.parameters()) + list(critic.parameters()), lr=LEARNING_RATE
+# Linearly decay LR from 1.0 * LEARNING_RATE to 0.0 * LEARNING_RATE over MAX_ITERATIONS
+scheduler = LinearLR(
+    optimizer, start_factor=1.0, end_factor=0.1, total_iters=MAX_ITERATIONS
 )
 
-obs, info = env.reset(seed=SEED)
-terminated, truncated = False, False
-stat_episode_return = 0.0
+obs, info = envs.reset(seed=SEED)
+
+# Pre-allocate rollout buffers
+shapes = {
+    "observations": obs_shape,
+    "actions": (num_actions,),
+    "logprobs": (),
+    "rewards": (),
+    "terminated": (),
+    "truncated": (),
+    "values": (),
+    "mu": (num_actions,),
+    "std": (num_actions,),
+}
+buffer = init_rollout_buffer(
+    steps_per_env=STEPS_PER_ENV,
+    num_envs=NUM_ENVS,
+    shapes=shapes,
+    device=device,
+)
+
+# Track episodic returns
+stat_episode_returns = np.zeros(NUM_ENVS)
 
 # Initialize W&B
-wandb.init(project="vpg-pendulum", config={"lr": LEARNING_RATE, "gamma": GAMMA})
+wandb.init(project="a2c-pendulum", config={"lr": LEARNING_RATE, "gamma": GAMMA})
+wandb.define_metric("*", step_metric="global_step")
+global_step = 0
 
-for episode in range(MAX_EPISODES):
-    rewards = []
-    log_probs = []
-    values = []
-    terminated = []
+for iteration in range(MAX_ITERATIONS):
+    # NOTE: vectorized collection with inference_mode
+    with torch.inference_mode():
+        for step in range(STEPS_PER_ENV):
+            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+            mu, std, value = model(obs_tensor)
 
-    while not (terminated or truncated):
-        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
-        mu, std = actor(obs_tensor)
-        value = critic(obs_tensor)
+            action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
+            action = action_tensor.cpu().numpy()
+            # Pendulum actions are already scaled by mu head, but we can clip to be safe
+            action = np.clip(action, -MAX_ACTION, MAX_ACTION)
 
-        action_tensor, log_prob = gaussian_sampling_selector(mu, std, explore=True)
-        action = action_tensor.detach().cpu().numpy().flatten()
-        # Clip action to env bounds just in case, though mu is already scaled
-        action = np.clip(action, -MAX_ACTION, MAX_ACTION)
+            # 2. Step Env
+            next_obs, reward, terminated, truncated, info = envs.step(action)
+            global_step += NUM_ENVS
 
-        # 2. Step Env
-        next_obs, reward, terminated, truncated, info = env.step(action)
-        stat_episode_return += reward
+            # 3. Add to buffers
+            transition = TensorDict(
+                {
+                    "observations": obs_tensor,
+                    "actions": action_tensor,
+                    "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
+                    "rewards": torch.as_tensor(
+                        reward, dtype=torch.float32, device=device
+                    ),
+                    "terminated": torch.as_tensor(
+                        terminated, dtype=torch.float32, device=device
+                    ),
+                    "truncated": torch.as_tensor(
+                        truncated, dtype=torch.float32, device=device
+                    ),
+                    "values": value.squeeze(-1).detach(),
+                    "mu": mu.detach(),
+                    "std": std.detach(),
+                },
+                batch_size=[NUM_ENVS],
+            )
+            store_rollout_step(buffer=buffer, step=step, transition=transition)
+            record_truncations(buffer, step, info, truncated)
 
-        # 3. Add to buffers
-        rewards.append(reward)
-        log_probs.append(log_prob)
-        values.append(value)
-        terminated.append(terminated)
+            stat_episode_returns += reward
+            for i, (t, tr) in enumerate(zip(terminated, truncated)):
+                if t or tr:
+                    wandb.log(
+                        {
+                            "episode_return": stat_episode_returns[i],
+                            "global_step": global_step,
+                        }
+                    )
+                    stat_episode_returns[i] = 0.0
 
-        # Update state
-        obs = next_obs
+            obs = next_obs
 
-    if terminated or truncated:
-        wandb.log({"episode_return": stat_episode_return}, step=episode)
-        obs, info = env.reset()
-        terminated, truncated = False, False
-        stat_episode_return = 0.0
+        last_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+        _, _, last_values = model(last_obs_tensor)
+
+        # Calculate Loss & Gradients
+        next_values = get_rollout_next_values(
+            buffer,
+            last_values,
+            get_value_fn=lambda obs: model(obs)[2],
+            device=device,
+        )
 
     # --- 3. The Update Loop ---
-    returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(terminated, dtype=torch.float32, device=device).unsqueeze(0),
-        GAMMA,
-    ).squeeze(
-        0
-    )  # TODO: replace with rearrange
 
-    values_tensor = rearrange(torch.stack(values), "t 1 1 -> t")
-    advantages = compute_critic_advantages(returns, values_tensor)
+    returns = compute_n_step_returns(
+        rewards=buffer.data["rewards"],
+        terminated=buffer.data["terminated"],
+        truncated=buffer.data["truncated"],
+        values=buffer.data["values"],
+        next_values=next_values,
+        gamma=GAMMA,
+        n=N_STEP,
+    )
+
+    # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
+    baseline = buffer.data["values"].detach()
+    advantages = returns - baseline
+
+    # 3. Optional Scaling
+    advantages = standardize_tensor(advantages)
+
+    # Flatten buffer for loss calculations
+    flat_data = flatten_rollout_buffer(buffer)
+    flat_advantages = rearrange(advantages, "b t -> (b t)")
+    flat_returns = rearrange(returns, "b t -> (b t)")
+
+    # --- Re-evaluation Pass ---
+    new_mu, new_std, new_values = model(flat_data["observations"])
+    new_values = new_values.squeeze(-1)
+
+    # Re-calculate log probabilities for the actions taken
+    dist = torch.distributions.Normal(new_mu, new_std)
+    new_log_probs = dist.log_prob(flat_data["actions"]).sum(dim=-1)
 
     pg_loss, info_dict = policy_gradient_loss(
-        advantages=advantages,
-        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
+        advantages=flat_advantages,
+        log_probs=new_log_probs,
     )
     pg_loss = pg_loss.mean()
 
-    critic_loss, _ = mse_loss(values_tensor, returns)
+    ent_loss, _ = entropy_loss(dist)
+
+    critic_loss, _ = mse_loss(predictions=new_values, targets=flat_returns.detach())
     critic_loss = critic_loss.mean()
 
-    loss = pg_loss + CRITIC_COEFF * critic_loss
+    loss = pg_loss + CRITIC_COEFF * critic_loss - ENTROPY_COEFF * ent_loss
 
     # Apply Updates
-    optimizer = apply_gradients(optimizer, loss)
+    optimizer = apply_gradients(
+        optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
+    )
 
-    if episode % 100 == 0:
+    # Step the learning rate down
+    scheduler.step()
+
+    # Clear truncation records for the next iteration
+    buffer.truncation_records.clear()
+
+    if iteration % 100 == 0:
         explained_var = compute_explained_variance(
-            returns.detach().cpu().numpy(), values_tensor.detach().cpu().numpy()
+            returns.detach().cpu().numpy(), buffer.data["values"].detach().cpu().numpy()
         )
+
         log_dict = info_dict.copy()
         log_dict.update(
             {
+                "learning_rate": scheduler.get_last_lr()[0],  # Log the decaying LR
                 "loss/total": loss.item(),
                 "loss/critic": critic_loss.item(),
+                "value/mean": buffer.data["values"].mean().item(),
+                "value/return_mean": returns.mean().item(),
                 "value/explained_variance": explained_var,
-                "std": torch.exp(actor.log_std).item(),
+                "advantages/mean": advantages.mean().item(),
+                "std/mean": buffer.data["std"].mean().item(),
+                "global_step": global_step,
             }
         )
-        wandb.log(log_dict, step=episode)
+        wandb.log(log_dict)

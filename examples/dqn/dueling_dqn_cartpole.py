@@ -23,9 +23,9 @@ import wandb
 from tensordict import TensorDict
 from functools import partial
 
-from functional.buffer import init_buffer, circular_write_strategy, uniform_sample
+from functional.replay_buffer import init_buffer, circular_write_strategy, uniform_sample
 from functional.losses import bellman_error, mse_loss
-from functional.targets import standard_td_target
+from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
     with_epsilon_greedy,
@@ -136,12 +136,13 @@ for step in range(MAX_STEPS):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
 
         predictions = model(obs_tensor)
-        action, rng_key = action_selector(
+        action, info = action_selector(
             predictions=predictions,
             epsilon=current_epsilon,
             num_actions=num_actions,
             generator=rng_key,
         )
+        rng_key = info["generator"]
         action = action.item()
 
     # 2. Step Env
@@ -180,7 +181,7 @@ for step in range(MAX_STEPS):
             model,
             batch,
             target_model,
-            partial(standard_td_target, gamma=batch["gamma"]),
+            partial(scalar_td_target, gamma=rearrange(batch["gamma"], "b -> b 1")),
             loss_fn=mse_loss,
         )
         loss = loss.mean()

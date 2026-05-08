@@ -17,7 +17,7 @@ import wandb
 from functools import partial
 from typing import Tuple, Dict, Any, Callable
 
-from functional.buffer import (
+from functional.replay_buffer import (
     init_per_buffer,
     sample_per,
     update_priorities,

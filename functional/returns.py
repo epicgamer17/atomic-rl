@@ -3,7 +3,6 @@ import warnings
 from einops import rearrange
 
 
-# TODO: should also reset on truncated not just terminated
 def compute_mc_returns(
     rewards: torch.Tensor,
     terminated: torch.Tensor,
@@ -11,53 +10,53 @@ def compute_mc_returns(
     gamma: float,
 ) -> torch.Tensor:
     """
-    Computes batched Monte Carlo discounted returns.
+    Computes batched Monte Carlo discounted returns. The same as a compute discounted rewards function, with the soft expectation that all trajectories have been terminated at some point.
+
+    Formula: G_t = r_t + gamma * r_{t+1} + gamma^2 * r_{t+2} + ...
+
+    MC returns are computed by backward-iterating through the rewards, stopping at
+    either termination or truncation.
 
     Args:
-        rewards (torch.Tensor): The reward tensor of shape [batch, time].
-        terminated (torch.Tensor): Boolean/float mask indicating episode termination (MDP end).
-            If 1.0/True, the return is not propagated from the next step.
-            Shape [batch, time].
-        truncated (torch.Tensor): Boolean/float mask indicating episode truncation (e.g. time limit).
-            If 1.0/True, the return is not propagated from the next step.
-            Shape [batch, time].
-        gamma (float): The discount factor.
+        rewards: Reward tensor [B, T].
+        terminated: Termination mask [B, T].
+        truncated: Truncation mask [B, T].
+        gamma: Discount factor.
 
     Returns:
-        torch.Tensor: The discounted returns of shape [batch, time].
+        Discounted returns [B, T].
     """
-    # The Bouncer: Ensure [B, T] shapes
-    rewards = rearrange(rewards, "b t -> b t")
-    terminated = rearrange(terminated, "b t -> b t")
-    truncated = rearrange(truncated, "b t -> b t")
+    assert rewards.ndim == 2, f"Expected 2D rewards [B, T], got {rewards.shape}"
+    assert (
+        rewards.shape == terminated.shape == truncated.shape
+    ), "Shape mismatch in returns inputs"
 
     # Combine masks: MC returns stop at either terminated or truncated
+    # Both mean the trajectory ended for the purpose of the current return calculation.
     done = (terminated.bool() | truncated.bool()).float()
 
-    # Validation: Warn if any trajectory in the batch is never done
+    # Validation: Warn if any trajectory in the batch is never done.
+    # Infinite-horizon MC returns are biased if not properly handled.
     is_never_terminal = ~(terminated.bool().any(dim=1))
     if is_never_terminal.any():
         warnings.warn(
             "Found trajectory in batch where terminated is always False (never terminal). "
-            "MC returns for these trajectories may be biased if they were intended to be full episodes."
+            "MC returns for these trajectories may be biased."
         )
 
     returns = torch.zeros_like(rewards)
     R = torch.zeros_like(rewards[:, 0])  # [B]
 
-    # Iterate backwards through time T
+    # Backward iteration for efficient O(T) calculation
     for t in reversed(range(rewards.size(1))):
-        # If done is True (1.0), the next R gets multiplied by 0
+        # If done is True (1.0), the next R gets multiplied by 0 (bootstrapping stops)
         mask = 1.0 - done[:, t]
-
         R = rewards[:, t] + gamma * R * mask
         returns[:, t] = R
 
     return returns
 
 
-# NOTE: Could change the approach so user must properly slice (remove V_0) and append the final values to `next_values` to ensure the returns are computed correctly.
-# TODO: should also reset on truncated not just terminated
 def compute_n_step_returns(
     rewards: torch.Tensor,
     terminated: torch.Tensor,
@@ -69,65 +68,124 @@ def compute_n_step_returns(
 ) -> torch.Tensor:
     """
     Computes batched n-step bootstrapped discounted returns.
-    Correctly handles truncated states by bootstrapping from the value function,
-    while terminated states do not bootstrap.
+
+    Formula: G_t^{(n)} = r_t + gamma r_{t+1} + ... + gamma^{n-1} r_{t+n-1} + gamma^n V(s_{t+n})
+
+    Correctly handles both terminated (no bootstrap) and truncated (bootstrap) states.
 
     Args:
-        rewards (torch.Tensor): The reward tensor of shape [batch, time].
-        terminated (torch.Tensor): Boolean/float mask indicating episode termination.
-            If 1.0/True, the return is not propagated from the next step and NO bootstrap occurs.
-            Shape [batch, time].
-        truncated (torch.Tensor): Boolean/float mask indicating episode truncation.
-            If 1.0/True, the return is not propagated from the next step but bootstrapping DOES occur.
-            Shape [batch, time].
-        values (torch.Tensor): The values tensor of shape [batch, time].
-            Note: This should be V(s_0), ..., V(s_{T-1}).
-        next_values (torch.Tensor): The values for the next state in the batch.
-            Note: This should be V(s_1), ..., V(s_T). Shape [batch, time].
-        gamma (float): The discount factor.
-        n (int): The number of steps to lookahead.
+        rewards: Reward tensor [B, T].
+        terminated: Termination mask [B, T].
+        truncated: Truncation mask [B, T].
+        values: State values V(s_t) [B, T].
+        next_values: Next state values V(s_{t+1}) [B, T].
+        gamma: Discount factor.
+        n: Number of steps to look ahead.
 
     Returns:
-        torch.Tensor: The discounted returns of shape [batch, time].
+        N-step returns [B, T].
     """
-    rewards = rearrange(rewards.squeeze(-1), "b t -> b t")
-    b, t = rewards.shape
-
-    terminated = rearrange(terminated.squeeze(-1), "b t -> b t", b=b, t=t)
-    truncated = rearrange(truncated.squeeze(-1), "b t -> b t", b=b, t=t)
-    values = rearrange(values.squeeze(-1), "b t -> b t", b=b, t=t)
-    next_values = rearrange(next_values.squeeze(-1), "b t -> b t", b=b, t=t).detach()
-
+    assert rewards.ndim == 2, f"Expected 2D rewards [B, T], got {rewards.shape}"
+    assert (
+        rewards.shape
+        == terminated.shape
+        == truncated.shape
+        == values.shape
+        == next_values.shape
+    ), "Shape mismatch in n-step returns inputs"
     assert n >= 1, f"n-step must be at least 1, got {n}"
 
     done = (terminated.bool() | truncated.bool()).float()
 
     # Base case: 1-step returns (Pure Bellman math)
-    returns = rewards + gamma * (1.0 - terminated.float()) * next_values
+    # G_t^{(1)} = r_t + gamma * (1 - term) * V(s_{t+1})
+    returns = rewards + gamma * (1.0 - terminated.float()) * next_values.detach()
 
-    # Iteratively compute n-step returns
+    # Iteratively compute n-step returns by shifting and discounting
     for i in range(1, n):
         # Shift left: G_{t+1}^{(i)}
         next_returns = torch.zeros_like(returns)
         next_returns[:, :-1] = returns[:, 1:]
 
-        # Valid update mask: steps that have a future step available within the batch
+        # Valid update mask (we can't update the last i steps fully)
         valid_mask = torch.zeros_like(returns)
         valid_mask[:, :-i] = 1.0
 
-        # Compute (i+1)-step return: G_t^{(i+1)} = R_t + gamma * G_{t+1}^{(i)}
-        # We only use G_{t+1} if the trajectory hasn't ended (not done)
-        # If it has ended, we keep the previous k-step return (which eventually is the 1-step return)
         updated_returns = rewards + gamma * next_returns
 
-        # Update logic:
-        # 1. Must be a valid step in the batch (valid_mask)
-        # 2. Must not be the end of a trajectory (not done)
+        # Only update if the transition was not 'done' at time t
+        # and if we have enough future steps to perform the i-th update.
         should_update = valid_mask.bool() & ~done.bool()
         returns = torch.where(should_update, updated_returns, returns)
 
     return returns
 
 
-def compute_td_lambda_returns():
-    raise NotImplementedError("TD Lambda returns not yet implemented")
+def compute_gae(
+    rewards: torch.Tensor,
+    terminated: torch.Tensor,
+    truncated: torch.Tensor,
+    values: torch.Tensor,
+    next_values: torch.Tensor,
+    gamma: float,
+    gae_lambda: float,
+) -> torch.Tensor:
+    """
+    Computes the Generalized Advantage Estimate (GAE) for a batch of trajectories.
+    (Moved from advantages.py to consolidate temporal credit assignment math).
+
+    Args:
+        rewards (torch.Tensor): The reward tensor of shape [batch, time].
+        terminated (torch.Tensor): Boolean/float mask indicating episode termination.
+        truncated (torch.Tensor): Boolean/float mask indicating episode truncation.
+        values (torch.Tensor): The values tensor of shape [batch, time].
+        next_values (torch.Tensor): The values for the next state in the batch.
+        gamma (float): The discount factor.
+        gae_lambda (float): The GAE lambda parameter (typically 0.95 or 0.99).
+    Expects exact [B, T] shapes.
+    """
+    assert rewards.ndim == 2, f"Expected 2D rewards [B, T], got {rewards.shape}"
+    assert (
+        rewards.shape
+        == terminated.shape
+        == truncated.shape
+        == values.shape
+        == next_values.shape
+    ), "Shape mismatch in GAE inputs"
+
+    # Combined done mask
+    done = (terminated.bool() | truncated.bool()).float()
+
+    # Pure Bellman Math
+    deltas = rewards + gamma * (1.0 - terminated.float()) * next_values - values
+
+    gae = torch.zeros_like(rewards)
+    last_gae = torch.zeros_like(rewards[:, 0])  # [B]
+
+    for t in reversed(range(rewards.shape[1])):
+        mask = 1.0 - done[:, t].float()
+        last_gae = deltas[:, t] + gamma * gae_lambda * mask * last_gae
+        gae[:, t] = last_gae
+
+    return gae
+
+
+def compute_td_lambda_returns(
+    rewards: torch.Tensor,
+    terminated: torch.Tensor,
+    truncated: torch.Tensor,
+    values: torch.Tensor,
+    next_values: torch.Tensor,
+    gamma: float,
+    lam: float,
+) -> torch.Tensor:
+    """
+    Computes TD(lambda) returns.
+    Mathematically, TD(λ) returns are equivalent to GAE + State Values.
+    We preserve compute_gae as a separate function for semantic readability,
+    but compose it here to unify the returns API.
+    """
+    advantages = compute_gae(
+        rewards, terminated, truncated, values, next_values, gamma, lam
+    )
+    return advantages + values.detach()

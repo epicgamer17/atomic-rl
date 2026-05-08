@@ -21,8 +21,8 @@ from functional.action_selection import gaussian_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss, mse_loss
+from functional.utils import exponential_moving_average, scale_tensor_by_std
 from functional.visualization import compute_explained_variance
-from functional.advantages import compute_critic_advantages
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -30,8 +30,9 @@ MAX_EPISODES = 2_000
 GAMMA = 0.99
 SEED = 42
 CRITIC_COEFF = 0.5
+EMA_ALPHA = 0.01  # Smoothing factor for EMA baseline
 MAX_ACTION = 2.0
-HIDDEN_SIZE = 64
+HIDDEN_SIZE = 256
 INITIAL_LOG_STD = -0.5
 
 # Seeding for reproducibility
@@ -59,8 +60,8 @@ class Actor(nn.Module):
             Tuple[torch.Tensor, torch.Tensor]: The mean (mu) and standard deviation (std)
                 of the Gaussian action distribution. # [B, num_actions], [B, num_actions]
         """
-        x = F.relu(self.l1(x))  # [B, HIDDEN_SIZE]
-        x = F.relu(self.l2(x))  # [B, HIDDEN_SIZE]
+        x = torch.tanh(self.l1(x))  # [B, HIDDEN_SIZE]
+        x = torch.tanh(self.l2(x))  # [B, HIDDEN_SIZE]
         mu = torch.tanh(self.mu_head(x)) * MAX_ACTION  # [B, num_actions]
         std = torch.exp(self.log_std).expand_as(mu)  # [B, num_actions]
         return mu, std
@@ -83,8 +84,8 @@ class Critic(nn.Module):
         Returns:
             torch.Tensor: The predicted state value. # [B, 1]
         """
-        x = F.relu(self.l1(x))  # [B, HIDDEN_SIZE]
-        x = F.relu(self.l2(x))  # [B, HIDDEN_SIZE]
+        x = torch.tanh(self.l1(x))  # [B, HIDDEN_SIZE]
+        x = torch.tanh(self.l2(x))  # [B, HIDDEN_SIZE]
         x = self.l3(x)  # [B, 1]
         return x
 
@@ -106,6 +107,9 @@ obs, info = env.reset(seed=SEED)
 terminated, truncated = False, False
 stat_episode_return = 0.0
 
+# Initialize EMA baseline
+ema_baseline = torch.zeros(1, device=device)
+
 # Initialize W&B
 wandb.init(project="vpg-pendulum", config={"lr": LEARNING_RATE, "gamma": GAMMA})
 
@@ -121,7 +125,7 @@ for episode in range(MAX_EPISODES):
         mu, std = actor(obs_tensor)
         value = critic(obs_tensor)
 
-        action_tensor, log_prob = gaussian_sampling_selector(mu, std, explore=True)
+        action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
         action = action_tensor.detach().cpu().numpy().flatten()
         # Clip action to env bounds just in case, though mu is already scaled
         action = np.clip(action, -MAX_ACTION, MAX_ACTION)
@@ -132,7 +136,7 @@ for episode in range(MAX_EPISODES):
 
         # 3. Add to buffers
         rewards.append(reward)
-        log_probs.append(log_prob)
+        log_probs.append(info_dict["log_prob"])
         values.append(value)
         terminateds.append(terminated)
         truncateds.append(truncated)
@@ -148,6 +152,7 @@ for episode in range(MAX_EPISODES):
 
     # --- 3. The Update Loop ---
     # TODO: replace with rearrange and einops
+    # 1. Compute Returns (Algorithm Agnostic)
     returns = compute_mc_returns(
         torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
         torch.tensor(terminateds, dtype=torch.float32, device=device).unsqueeze(0),
@@ -155,8 +160,21 @@ for episode in range(MAX_EPISODES):
         GAMMA,
     ).squeeze(0)
 
+    # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
+    # Using EMA baseline instead of critic for raw advantages as requested
+    raw_advantages = returns - ema_baseline.detach()
+
+    # 3. Optional Scaling (Standard practice for EMA advantages)
+    advantages = scale_tensor_by_std(raw_advantages)
+
+    # Update EMA baseline with the mean return of this episode
+    ema_baseline = exponential_moving_average(
+        old_ema=ema_baseline,
+        new_value=returns.mean(dim=0, keepdim=True),
+        alpha=EMA_ALPHA,
+    )
+
     values_tensor = rearrange(torch.stack(values), "t 1 1 -> t")
-    advantages = compute_critic_advantages(returns, values_tensor)
 
     pg_loss, info_dict = policy_gradient_loss(
         advantages=advantages,
