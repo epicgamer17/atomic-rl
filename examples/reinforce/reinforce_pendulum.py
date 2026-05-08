@@ -87,7 +87,7 @@ wandb.init(project="reinforce-pendulum", config={"lr": LEARNING_RATE, "gamma": G
 for episode in range(MAX_EPISODES):
     rewards = []
     log_probs = []
-    terminals = []
+    terminated = []
 
     while not (terminated or truncated):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
@@ -108,7 +108,7 @@ for episode in range(MAX_EPISODES):
         # 3. Add to buffers
         rewards.append(reward)
         log_probs.append(log_prob)
-        terminals.append(terminated)
+        terminated.append(terminated)
 
         # Update state
         obs = next_obs
@@ -122,7 +122,7 @@ for episode in range(MAX_EPISODES):
     # --- 3. The Update Loop ---
     returns = compute_mc_returns(
         torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(terminals, dtype=torch.float32, device=device).unsqueeze(0),
+        torch.tensor(terminated, dtype=torch.float32, device=device).unsqueeze(0),
         GAMMA,
     ).squeeze(0) # TODO: replace with rearrange
 

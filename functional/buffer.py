@@ -1,11 +1,14 @@
 import torch
-from dataclasses import dataclass
+import torch.nn as nn
+
+from dataclasses import dataclass, field
 from tensordict import TensorDict
 import random
 import numpy as np
 from einops import rearrange
 from typing import Tuple, Callable, List, Dict, Any, Optional, Union
 
+from collections import deque
 
 
 @dataclass(kw_only=True)
@@ -29,6 +32,26 @@ class ReservoirBufferState(BufferState):
     total_steps_seen: int
 
 
+@dataclass
+class RolloutBufferState:
+    data: TensorDict
+    truncation_records: List[Tuple[int, int, torch.Tensor]] = field(
+        default_factory=list
+    )
+
+
+def _allocate_tensordict(
+    shapes: dict, batch_size: List[int], device: str = "cpu"
+) -> TensorDict:
+    """Allocates a zeroed TensorDict of any arbitrary geometry."""
+    data = TensorDict({}, batch_size=batch_size, device=device)
+    for key, shape in shapes.items():
+        # Use long for actions, float32 for everything else by default
+        dtype = torch.long if "action" in key else torch.float32
+        data.set(key, torch.zeros((*batch_size, *shape), dtype=dtype))
+    return data
+
+
 def init_buffer(capacity: int, shapes: dict, device: str = "cpu") -> BufferState:
     """
     Initializes a buffer for storing transitions.
@@ -41,10 +64,134 @@ def init_buffer(capacity: int, shapes: dict, device: str = "cpu") -> BufferState
     Returns:
         BufferState: An instance of BufferState containing the initialized buffer.
     """
-    empty_data = TensorDict({}, batch_size=[capacity], device=device)
-    for key, shape in shapes.items():
-        empty_data.set(key, torch.zeros((capacity, *shape), dtype=torch.float32))
-    return BufferState(data=empty_data, pointer=0, size=0, capacity=capacity)
+    # Geometry: [Capacity]
+    data = _allocate_tensordict(shapes, [capacity], device)
+    return BufferState(data=data, pointer=0, size=0, capacity=capacity)
+
+
+# TODO: should i merge this with init_buffer somehow?
+def init_rollout_buffer(
+    steps_per_env: int, num_envs: int, shapes: dict, device: str = "cpu"
+) -> RolloutBufferState:
+    """
+    Initializes a buffer for storing on-policy rollouts.
+    Uses [Time, Batch, ...] dimensionality.
+
+    Args:
+        steps_per_env (int): Number of steps to store per environment.
+        num_envs (int): Number of parallel environments.
+        shapes (dict): Dictionary of names and shapes for each component.
+        device (str): Device to store the buffer on.
+
+    Returns:
+        RolloutBufferState: State containing the pre-allocated TensorDict.
+    """
+    # Geometry: [Time, Batch]
+    data = _allocate_tensordict(shapes, [steps_per_env, num_envs], device)
+    return RolloutBufferState(data=data, truncation_records=[])
+
+
+def store_rollout_step(
+    buffer: RolloutBufferState, step: int, transition: TensorDict
+) -> None:
+    """
+    Stores a transition batch into the rollout buffer at the given time step.
+
+    Args:
+        buffer (RolloutBufferState): The rollout buffer state.
+        step (int): The time step index to store at.
+        transition (TensorDict): A TensorDict containing the transition data for this step.
+            Must have batch_size [num_envs].
+    """
+    buffer.data[step] = transition
+
+
+def record_truncations(
+    buffer: RolloutBufferState,
+    step: int,
+    info: dict,
+    truncated: Union[np.ndarray, torch.Tensor],
+) -> None:
+    """
+    Checks the info dict for final observations (from Gymnasium auto-resets)
+    and records them in the buffer's truncation_records list ONLY if they were truncated.
+
+    Args:
+        buffer (RolloutBufferState): The buffer to record into.
+        step (int): The current step index in the rollout.
+        info (dict): The info dictionary from env.step().
+        truncated (Union[np.ndarray, torch.Tensor]): The truncated boolean mask from env.step().
+    """
+    from .utils import extract_vector_env_final_obs
+
+    env_indices, final_obs = extract_vector_env_final_obs(info)
+
+    for i, env_idx in enumerate(env_indices):
+        # Only record it if the environment actually truncated!
+        if truncated[env_idx]:
+            # We store the observation as a tensor to avoid repeated conversions later
+            obs_tensor = torch.as_tensor(final_obs[i], dtype=torch.float32)
+            buffer.truncation_records.append((step, int(env_idx), obs_tensor))
+
+
+def get_rollout_next_values(
+    buffer: RolloutBufferState,
+    last_values: torch.Tensor,
+    get_value_fn: Callable[[torch.Tensor], torch.Tensor],
+    device: torch.device,
+) -> torch.Tensor:
+    """
+    Assembles the next_values tensor [T, B] and patches any truncated states
+    using the recorded truncation_records.
+
+    Args:
+        buffer (RolloutBufferState): The rollout buffer.
+        last_values (torch.Tensor): The value of the final states in the rollout [B, 1] or [B].
+        get_value_fn (Callable[[torch.Tensor], torch.Tensor]): A function that takes an observation
+            tensor and returns the corresponding state value tensor.
+        device (torch.device): Device for computation.
+
+    Returns:
+        torch.Tensor: The patched next_values tensor of shape [T, B].
+    """
+    T, B = buffer.data.batch_size
+    values = buffer.data["values"]  # [T, B]
+
+    # 1. Standard assembly
+    if last_values.ndim == 1:
+        last_values = last_values.unsqueeze(1)  # [B, 1]
+
+    # values is [T, B], so values[1:] is [T-1, B].
+    # last_values is [B, 1]. We need it to be [1, B].
+    last_v_reshaped = rearrange(last_values, "b 1 -> 1 b")
+
+    next_values = torch.cat([values[1:], last_v_reshaped], dim=0)  # [T, B]
+
+    # 2. Patch truncations
+    if buffer.truncation_records:
+        obs_batch = torch.stack([r[2] for r in buffer.truncation_records]).to(device)
+        with torch.inference_mode():
+            v_patch = get_value_fn(obs_batch)
+            v_patch = v_patch.squeeze(-1)  # [N]
+
+        for i, (step, env_idx, _) in enumerate(buffer.truncation_records):
+            next_values[step, env_idx] = v_patch[i]
+
+    return next_values
+
+
+def flatten_rollout_buffer(buffer: RolloutBufferState) -> TensorDict:
+    """
+    Flattens the [Time, Batch] dimensions into a single [Time * Batch] dimension.
+
+    Args:
+        buffer (RolloutBufferState): The rollout buffer state.
+
+    Returns:
+        TensorDict: The flattened data.
+    """
+    # TODO: should we/can we use einops here (on a tensordict)?
+    return buffer.data.flatten(0, 1)
 
 
 def init_per_buffer(capacity: int, shapes: dict, device="cpu") -> PERBufferState:
@@ -341,9 +488,7 @@ def with_per_tracking(write_strategy_fn: Callable) -> Callable:
         per_add: The PER tracking function.
     """
 
-    def per_add(
-        buffer_state: PERBufferState, batch: TensorDict
-    ) -> PERBufferState:
+    def per_add(buffer_state: PERBufferState, batch: TensorDict) -> PERBufferState:
         # 1. Execute the base writing strategy
         new_state, written_indices = write_strategy_fn(buffer_state, batch)
 
@@ -380,28 +525,17 @@ def with_per_tracking(write_strategy_fn: Callable) -> Callable:
     return per_add
 
 
-from collections import deque
-
-
-
-
-def make_n_step_accumulator(n_steps: int, gamma: float) -> Callable:
+def make_n_step_accumulator(n_steps: int, gamma: float, num_envs: int = 1) -> Callable:
     """
-    Creates a stateful function that accumulates transitions.
-    Returns a list of N-step transitions ready to be written to the buffer.
+    Creates a stateful function that accumulates transitions for both single
+    and vectorized environments. Maintains a separate history for each environment.
 
     Args:
-        n_steps (int): The number of steps to accumulate.
+        n_steps (int): The number of steps to lookahead.
         gamma (float): The discount factor.
-
-    Returns:
-        process_transition: The function that processes transitions.
-
-    Note: Computes N-step TD targets at write time. This allows you to use 1-step transitions for N-step target. Because of this it does not work for sequence based algorithms.
-    This is also a stateful function. You need to call reset() when you reset the environment.
-    It is also possible to use a sequence based approach to get the N-step TD target. As done in R2D2 and MuZero.
+        num_envs (int): The number of parallel environments (default: 1).
     """
-    history = deque(maxlen=n_steps)
+    histories = [deque(maxlen=n_steps) for _ in range(num_envs)]
 
     def process_transition(
         obs: torch.Tensor,
@@ -410,72 +544,94 @@ def make_n_step_accumulator(n_steps: int, gamma: float) -> Callable:
         next_obs: torch.Tensor,
         terminated: torch.Tensor,
         truncated: torch.Tensor,
-    ) -> List[TensorDict]:
-        history.append((obs, action, reward, next_obs, terminated, truncated))
-        transitions_to_yield = []
+    ) -> TensorDict:
 
-        # Case 1: Normal stepping. The window is full, slide it forward by 1.
-        if len(history) == n_steps and not (terminated or truncated):
-            n_step_reward = sum(t[2] * (gamma**i) for i, t in enumerate(history))
+        # 1. THE BOUNCER: Safely format unbatched inputs to [1, ...]
+        # If the reward is a 0D tensor (scalar), we know it lacks a batch dimension.
+        # TODO: should bouncer handle these or should user pass in batched inputs always? maybe user always batching is cleaner?
+        if getattr(reward, "ndim", 0) == 0:
+            obs = obs.unsqueeze(0)
+            action = action.unsqueeze(0)
+            reward = reward.view(1)
+            next_obs = next_obs.unsqueeze(0)
+            terminated = terminated.view(1)
+            truncated = truncated.view(1)
 
-            first_obs, first_action, _, _, _, _ = history[0]
-            _, _, _, final_next_obs, final_terminated, final_truncated = history[-1]
+        ready_transitions = []
 
-            transitions_to_yield.append(
-                TensorDict(
-                    {
-                        "obs": torch.as_tensor(first_obs, dtype=torch.float32),
-                        "action": torch.tensor(first_action, dtype=torch.long),
-                        "reward": torch.tensor(n_step_reward, dtype=torch.float32),
-                        "terminated": torch.tensor(final_terminated, dtype=torch.float32),
-                        "truncated": torch.tensor(final_truncated, dtype=torch.float32),
-                        "next_obs": torch.as_tensor(final_next_obs, dtype=torch.float32),
-                        "gamma": torch.tensor(gamma**n_steps, dtype=torch.float32),
-                    },
-                    batch_size=[],
-                ).unsqueeze(0)
-            )
-            history.popleft()
+        # 2. Process each environment's timeline individually
+        for i in range(num_envs):
+            t_obs = obs[i]
+            t_action = action[i]
+            t_reward = reward[i].item()
+            t_next_obs = next_obs[i]
+            t_term = terminated[i].item()
+            t_trunc = truncated[i].item()
 
-        # Case 2: Episode ended. Flush the remaining tail!
-        elif terminated or truncated:
-            while len(history) > 0:
-                # Calculate the return for the remaining items in the shrinking window
-                n_step_reward = sum(t[2] * (gamma**i) for i, t in enumerate(history))
+            history = histories[i]
+            history.append((t_obs, t_action, t_reward, t_next_obs, t_term, t_trunc))
+
+            is_done = t_term or t_trunc
+
+            # Case 1: Window is full, env is still running. Slide forward by 1.
+            if len(history) == n_steps and not is_done:
+                n_step_reward = sum(t[2] * (gamma**j) for j, t in enumerate(history))
 
                 first_obs, first_action, _, _, _, _ = history[0]
-                _, _, _, final_next_obs, final_terminated, final_truncated = history[-1]
+                _, _, _, final_next_obs, final_term, final_trunc = history[-1]
 
-                transitions_to_yield.append(
-                    TensorDict(
+                ready_transitions.append(
+                    {
+                        "obs": first_obs,
+                        "action": first_action,
+                        "reward": torch.tensor(n_step_reward, dtype=torch.float32),
+                        "next_obs": final_next_obs,
+                        "terminated": torch.tensor(final_term, dtype=torch.float32),
+                        "truncated": torch.tensor(final_trunc, dtype=torch.float32),
+                        "gamma": torch.tensor(gamma**n_steps, dtype=torch.float32),
+                    }
+                )
+                history.popleft()
+
+            # Case 2: Episode ended. Flush the remaining tail for this specific env!
+            elif is_done:
+                while len(history) > 0:
+                    n_step_reward = sum(
+                        t[2] * (gamma**j) for j, t in enumerate(history)
+                    )
+
+                    first_obs, first_action, _, _, _, _ = history[0]
+                    _, _, _, final_next_obs, final_term, final_trunc = history[-1]
+
+                    ready_transitions.append(
                         {
-                            "obs": torch.as_tensor(first_obs, dtype=torch.float32),
-                            "action": torch.tensor(first_action, dtype=torch.long),
+                            "obs": first_obs,
+                            "action": first_action,
                             "reward": torch.tensor(n_step_reward, dtype=torch.float32),
-                            "terminated": torch.tensor(
-                                final_terminated, dtype=torch.float32
-                            ),
-                            "truncated": torch.tensor(
-                                final_truncated, dtype=torch.float32
-                            ),
-                            "next_obs": torch.as_tensor(final_next_obs, dtype=torch.float32),
+                            "next_obs": final_next_obs,
+                            "terminated": torch.tensor(final_term, dtype=torch.float32),
+                            "truncated": torch.tensor(final_trunc, dtype=torch.float32),
                             "gamma": torch.tensor(
                                 gamma ** len(history), dtype=torch.float32
                             ),
-                        },
-                        batch_size=[],
-                    ).unsqueeze(0)
-                )
-                history.popleft()  # Shrink the window until empty
+                        }
+                    )
+                    history.popleft()
 
-        return transitions_to_yield
+        # 3. Batch the results for unified buffer writing
+        if ready_transitions:
+            stacked_dict = {
+                key: torch.stack([t[key] for t in ready_transitions])
+                for key in ready_transitions[0].keys()
+            }
+            # Returns a TensorDict of shape [N] where N is ready transitions
+            return TensorDict(stacked_dict, batch_size=[len(ready_transitions)])
+        else:
+            # Returns an empty TensorDict if nothing is ready yet
+            return TensorDict({}, batch_size=[0])
 
     def reset():
-        """
-        Clears the history.
-        Note: Because the termination case flushes the queue, this is mostly
-        a safety net for hard resets (e.g., if you manually interrupt an episode).
-        """
-        history.clear()
+        for h in histories:
+            h.clear()
 
     return process_transition, reset

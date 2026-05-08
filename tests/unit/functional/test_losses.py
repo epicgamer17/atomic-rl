@@ -7,6 +7,7 @@ from functional.losses import (
     cross_entropy_loss,
     with_per_weights,
     policy_gradient_loss,
+    entropy_loss,
     bellman_error,
 )
 import math  # Add math for isclose
@@ -86,6 +87,29 @@ def test_policy_gradient_loss():
     assert info["loss/policy_gradient"] == (0.5 - 2.0) / 2.0
 
 
+def test_entropy_loss():
+    # 1. Uniform distribution: logits = [0, 0] -> probs = [0.5, 0.5]
+    # entropy = - (0.5 * log(0.5) + 0.5 * log(0.5)) = -log(0.5) = log(2)
+    logits = torch.tensor([[0.0, 0.0]])
+    loss, info = entropy_loss(logits)
+    expected_entropy = math.log(2.0)
+    assert math.isclose(loss.item(), expected_entropy, rel_tol=1e-5)
+    assert math.isclose(info["loss/entropy"].item(), expected_entropy, rel_tol=1e-5)
+
+    # 2. Certain distribution: one logit very high
+    logits = torch.tensor([[100.0, 0.0]])
+    loss, info = entropy_loss(logits)
+    # entropy should be near 0
+    assert loss.item() < 1e-5
+
+    # 3. Batched input
+    logits = torch.tensor([[0.0, 0.0], [100.0, 0.0]])
+    loss, info = entropy_loss(logits)
+    # mean of log(2) and 0
+    expected_mean = math.log(2.0) / 2.0
+    assert math.isclose(loss.item(), expected_mean, rel_tol=1e-5)
+
+
 def test_bellman_error():
     # Setup mocks
     class MockModel(nn.Module):
@@ -100,9 +124,10 @@ def test_bellman_error():
         "next_obs": torch.zeros(1, 4),
         "reward": torch.tensor([[0.5]]),
         "terminated": torch.tensor([[False]]),
+        "truncated": torch.tensor([[False]]),
     }
 
-    def target_calculator(next_preds, next_actions, reward, terminated):
+    def target_calculator(next_preds, next_actions, reward, terminated, truncated):
         # target = reward + gamma * next_q
         # next_q is from next_preds[next_actions]
         # next_actions will be 1 (argmax of [1, 2])
@@ -141,9 +166,10 @@ def test_bellman_error_with_eval_model():
         "next_obs": torch.zeros(1, 4),
         "reward": torch.tensor([[0.5]]),
         "terminated": torch.tensor([[False]]),
+        "truncated": torch.tensor([[False]]),
     }
 
-    def target_calculator(next_preds, next_actions, reward, terminated):
+    def target_calculator(next_preds, next_actions, reward, terminated, truncated):
         # next_preds will be from eval_model (2.0)
         return reward + 0.9 * next_preds[0, next_actions]
 

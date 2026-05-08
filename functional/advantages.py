@@ -89,54 +89,57 @@ def compute_critic_advantages(
 
 def compute_gae(
     rewards: torch.Tensor,
-    terminals: torch.Tensor,
+    terminated: torch.Tensor,
+    truncated: torch.Tensor,
     values: torch.Tensor,
-    last_values: torch.Tensor,
+    next_values: torch.Tensor,
     gamma: float,
     gae_lambda: float,
-):
+) -> torch.Tensor:
     """
     Computes the Generalized Advantage Estimate (GAE) for a batch of trajectories.
+    Correctly handles truncated states by bootstrapping from the value function,
+    while terminated states do not bootstrap.
 
     Args:
         rewards (torch.Tensor): The reward tensor of shape [batch, time].
-        terminals (torch.Tensor): Boolean/float mask indicating episode termination.
-            If 1.0/True, the return is not propagated from the next step.
+        terminated (torch.Tensor): Boolean/float mask indicating episode termination.
+            If 1.0/True, the return is not propagated from the next step and NO bootstrap occurs.
+            Shape [batch, time].
+        truncated (torch.Tensor): Boolean/float mask indicating episode truncation.
+            If 1.0/True, the return is not propagated from the next step but bootstrapping DOES occur.
             Shape [batch, time].
         values (torch.Tensor): The values tensor of shape [batch, time].
             Note: This should be V(s_0), ..., V(s_{T-1}).
-        last_values (torch.Tensor): The value for the final state in the batch.
-            Note: This should be V(s_T). Shape [batch] or [batch, 1].
+        next_values (torch.Tensor): The values for the next state in the batch.
+            Note: This should be V(s_1), ..., V(s_T). Shape [batch, time].
         gamma (float): The discount factor.
         gae_lambda (float): The GAE lambda parameter (typically 0.95 or 0.99).
 
     Returns:
         torch.Tensor: The GAE values of shape [batch, time].
     """
-    # The Bouncer: Ensure [B, T] shapes
-    # 1. Safely strip trailing 1s, assert it's 2D, and lock in the exact (B, T) sizes
+    # 1. Safely strip trailing 1s, assert it's 2D, lock in (B, T) sizes
     rewards = rearrange(rewards.squeeze(-1), "b t -> b t")
-    b, t = rewards.shape  # Capture the exact batch and time dimensions
+    b, t = rewards.shape
 
-    # 2. Force terminals and values to match 'b' and 't' exactly, or crash!
-    terminals = rearrange(terminals.squeeze(-1), "b t -> b t", b=b, t=t)
+    terminated = rearrange(terminated.squeeze(-1), "b t -> b t", b=b, t=t)
+    truncated = rearrange(truncated.squeeze(-1), "b t -> b t", b=b, t=t)
     values = rearrange(values.squeeze(-1), "b t -> b t", b=b, t=t)
-    # 3. Last Value Bouncer: Safely handle [B] or [B, 1] without destroying batch size 1
-    # NOTE: not sure how much i love this block
-    if last_values.ndim == 1:
-        last_values = rearrange(last_values, "b -> b 1", b=b)
-    else:
-        last_values = rearrange(last_values, "b 1 -> b 1", b=b)
+    next_values = rearrange(next_values.squeeze(-1), "b t -> b t", b=b, t=t)
 
-    next_values = torch.cat([values[:, 1:], last_values], dim=1)
+    # Combined done mask to prevent bleedthrough between trajectories
+    done = (terminated.bool() | truncated.bool()).float()
 
-    deltas = rewards + gamma * (1.0 - terminals.float()) * next_values - values
+    # Pure Bellman Math (No more torch.cat assembly here!)
+    deltas = rewards + gamma * (1.0 - terminated.float()) * next_values - values
+
     gae = torch.zeros_like(rewards)
     last_gae = torch.zeros_like(rewards[:, 0])  # [B]
-    for t in reversed(range(rewards.shape[1])):
-        mask = 1.0 - terminals[:, t].float()
 
-        # A_t = delta_t + gamma * lambda * mask * A_{t+1}
+    for t in reversed(range(rewards.shape[1])):
+        mask = 1.0 - done[:, t].float()
         last_gae = deltas[:, t] + gamma * gae_lambda * mask * last_gae
         gae[:, t] = last_gae
+
     return gae

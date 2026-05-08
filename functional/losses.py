@@ -59,7 +59,11 @@ def bellman_error(
 
         # 3. Target Calculation
         td_target = target_calculator_fn(
-            next_preds, next_actions, batch["reward"], batch["terminated"]
+            next_preds,
+            next_actions,
+            batch["reward"],
+            batch["terminated"],
+            batch["truncated"],
         )
 
     # 4. Compute Loss (Force shape alignment to prevent broadcasting)
@@ -220,7 +224,7 @@ def policy_gradient_loss(
     Returns:
         torch.Tensor: The loss for the batch.
 
-    Note: log_probs must be shape [T, ] (advantages will to match it)
+    Note: log_probs must be shape [T, ] (advantages must match it)
     """
     # NOTE: doesnt follow the exact policy gradient of returns - baseline but we calculate the baseline outside. Optionally could move into here and do: -log_probs * (returns - baseline) instead
     # Ensure advantages matches the shape of log_probs for element-wise multiplication
@@ -231,5 +235,48 @@ def policy_gradient_loss(
     # NOTE: no priorities, PG is on-policy and so PER doesn't really apply.abs
     # TODO: what about A-PPO or A3C?
     info = {"loss/policy_gradient": loss.mean().detach()}
+
+    return loss, info
+
+
+def entropy_loss(
+    logits: torch.Tensor,
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Calculate the entropy loss for a batch of transitions.
+
+    Args:
+        logits (torch.Tensor): Tensor of logits.
+
+    Returns:
+        torch.Tensor: The loss for the batch.
+
+    Note: logits should be of shape [Batch, num_actions].
+    """
+    logits = rearrange(logits, "b a -> b a")
+
+    # Option 1
+    # dist = torch.distributions.Categorical(logits=logits)
+    # entropy = dist.entropy()
+
+    # Option 2
+    # # 1. Get probabilities and log probabilities
+    # probs = F.softmax(logits, dim=-1)
+    # log_probs = F.log_softmax(logits, dim=-1)
+
+    # # 2. Compute Shannon entropy: -sum(p * log(p))
+    # entropy = -(probs * log_probs).sum(dim=-1)
+
+    # # 3. Take the mean across the batch
+    # loss = entropy.mean()
+
+    # Option 3 (Fastest?)
+    # Compute probabilities once
+    probs = F.softmax(logits, dim=-1)
+
+    # Cross-entropy of probabilities with their own logits = Entropy
+    # PyTorch's backend handles the log-sum-exp fusion automatically here
+    loss = F.cross_entropy(logits, probs)
+    info = {"loss/entropy": loss.detach()}
 
     return loss, info

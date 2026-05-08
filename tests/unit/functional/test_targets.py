@@ -15,13 +15,16 @@ def test_standard_td_target():
     next_actions = torch.tensor([[2], [0]])  # Q-values: 3.0, 4.0
     rewards = torch.tensor([[0.5], [1.0]])
     terminated = torch.tensor([[False], [True]])
+    truncated = torch.tensor([[True], [False]]) # Truncated at target 0
     gamma = torch.tensor([0.9, 0.9])
 
-    # Target 0: 0.5 + 0.9 * 3.0 = 0.5 + 2.7 = 3.2
-    # Target 1: 1.0 + 0.9 * 4.0 * (1 - 1) = 1.0
+    # Target 0: Truncated=True, Terminated=False -> Should bootstrap
+    # 0.5 + 0.9 * 3.0 = 0.5 + 2.7 = 3.2
+    # Target 1: Terminated=True -> Should NOT bootstrap
+    # 1.0 + 0.9 * 4.0 * (1 - 1) = 1.0
     expected = torch.tensor([[3.2], [1.0]])
 
-    target = standard_td_target(next_q, next_actions, rewards, terminated, gamma)
+    target = standard_td_target(next_q, next_actions, rewards, terminated, truncated, gamma)
     torch.testing.assert_close(target, expected)
 
 
@@ -31,12 +34,13 @@ def test_n_step_td_target():
     next_actions = torch.tensor([[0]])
     rewards = torch.tensor([[1.0]])
     terminated = torch.tensor([[False]])
+    truncated = torch.tensor([[True]])
     gamma = torch.tensor([[0.9**3]])  # N=3 steps
 
     # 1.0 + 0.729 * 10.0 = 8.29
     expected = torch.tensor([[8.29]])
 
-    target = n_step_td_target(next_q, next_actions, rewards, terminated, gamma)
+    target = n_step_td_target(next_q, next_actions, rewards, terminated, truncated, gamma)
     torch.testing.assert_close(target, expected)
 
 
@@ -53,6 +57,7 @@ def test_categorical_td_target():
     next_actions = torch.tensor([[1]])
     rewards = torch.tensor([[0.5]])
     terminated = torch.tensor([[False]])
+    truncated = torch.tensor([[True]])
     gamma = torch.tensor([[1.0]])  # For simplicity
 
     # Tz = 0.5 + 1.0 * [0, 1, 2] = [0.5, 1.5, 2.5]
@@ -68,6 +73,7 @@ def test_categorical_td_target():
         next_actions,
         rewards,
         terminated,
+        truncated,
         gamma,
         support,
         v_min,
@@ -88,6 +94,7 @@ def test_categorical_td_target_terminal():
     next_actions = torch.tensor([[0]])
     rewards = torch.tensor([[1.2]])
     terminated = torch.tensor([[True]])
+    truncated = torch.tensor([[False]])
     gamma = torch.tensor([[0.9]])
 
     # Terminal means Tz = rewards = 1.2 (for all atoms)
@@ -101,6 +108,7 @@ def test_categorical_td_target_terminal():
         next_actions,
         rewards,
         terminated,
+        truncated,
         gamma,
         support,
         v_min,

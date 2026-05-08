@@ -13,6 +13,9 @@ from functional.buffer import (
     update_priorities,
     with_per_tracking,
     make_n_step_accumulator,
+    init_rollout_buffer,
+    store_rollout_step,
+    flatten_rollout_buffer,
 )
 
 pytestmark = pytest.mark.unit
@@ -195,33 +198,93 @@ def test_n_step_accumulator():
     process, reset = make_n_step_accumulator(n_steps, gamma)
 
     obs = torch.zeros(4)
-    action = 1
+    action = torch.tensor(1, dtype=torch.long)
+    reward = torch.tensor(1.0, dtype=torch.float32)
     next_obs = torch.ones(4)
+    terminated = torch.tensor(0.0, dtype=torch.float32)
+    truncated = torch.tensor(0.0, dtype=torch.float32)
 
     # 1. Step once
-    trans = process(obs, action, 1.0, next_obs, False, False)
+    trans = process(obs, action, reward, next_obs, terminated, truncated)
     assert len(trans) == 0
 
     # 2. Step until window full
-    process(obs, action, 1.0, next_obs, False, False)
-    trans = process(obs, action, 1.0, next_obs, False, False)
+    process(obs, action, reward, next_obs, terminated, truncated)
+    trans = process(obs, action, reward, next_obs, terminated, truncated)
     assert len(trans) == 1
     # reward = 1 + 0.9*1 + 0.9^2 * 1 = 1 + 0.9 + 0.81 = 2.71
-    torch.testing.assert_close(trans[0]["reward"], torch.tensor([2.71]))
-    torch.testing.assert_close(trans[0]["gamma"], torch.tensor([gamma**3]))
+    torch.testing.assert_close(trans[0]["reward"], torch.tensor(2.71))
+    torch.testing.assert_close(trans[0]["gamma"], torch.tensor(gamma**3))
 
     # 3. Terminate
-    trans_term = process(obs, action, 1.0, next_obs, True, False)
+    terminated_true = torch.tensor(1.0, dtype=torch.float32)
+    trans_term = process(obs, action, reward, next_obs, terminated_true, truncated)
     # history had 2 items left before termination, plus the terminal one = 3
     # it should flush all 3
     assert len(trans_term) == 3
     # last one should have terminated=1.0
     assert trans_term[-1]["terminated"] == 1.0
     # last one's reward should be just the last step's reward
-    torch.testing.assert_close(trans_term[-1]["gamma"], torch.tensor([gamma**1]))
+    torch.testing.assert_close(trans_term[-1]["gamma"], torch.tensor(gamma**1))
 
     # 4. Reset
-    process(obs, action, 1.0, next_obs, False, False)
+    process(obs, action, reward, next_obs, terminated, truncated)
     reset()
-    trans_after_reset = process(obs, action, 1.0, next_obs, False, False)
+    trans_after_reset = process(obs, action, reward, next_obs, terminated, truncated)
     assert len(trans_after_reset) == 0  # history was cleared
+
+
+def test_init_rollout_buffer():
+    steps = 10
+    num_envs = 4
+    shapes = {"obs": (8,), "action": ()}
+    device = "cpu"
+
+    buffer = init_rollout_buffer(steps, num_envs, shapes, device=device)
+
+    assert buffer.data["obs"].shape == (steps, num_envs, 8)
+    assert buffer.data["action"].shape == (steps, num_envs)
+    assert buffer.data["action"].dtype == torch.long
+
+
+def test_store_rollout_step():
+    steps = 5
+    num_envs = 2
+    shapes = {"obs": (4,), "action": ()}
+    buffer = init_rollout_buffer(steps, num_envs, shapes)
+
+    step = 0
+    transition = TensorDict(
+        {"obs": torch.randn(num_envs, 4), "action": torch.randint(0, 5, (num_envs,))},
+        batch_size=[num_envs],
+    )
+
+    store_rollout_step(buffer, step, transition)
+
+    torch.testing.assert_close(buffer.data[step], transition)
+
+
+def test_flatten_rollout_buffer():
+    steps = 3
+    num_envs = 2
+    shapes = {"obs": (4,), "action": ()}
+    buffer = init_rollout_buffer(steps, num_envs, shapes)
+
+    # Fill buffer
+    for i in range(steps):
+        transition = TensorDict(
+            {
+                "obs": torch.ones(num_envs, 4) * i,
+                "action": torch.ones(num_envs, dtype=torch.long) * i,
+            },
+            batch_size=[num_envs],
+        )
+        store_rollout_step(buffer, i, transition)
+
+    flat_data = flatten_rollout_buffer(buffer)
+
+    assert flat_data.batch_size == torch.Size([steps * num_envs])
+    assert flat_data["obs"].shape == (steps * num_envs, 4)
+    assert torch.all(flat_data["obs"][0:2] == 0)
+    assert torch.all(flat_data["obs"][2:4] == 1)
+    assert torch.all(flat_data["obs"][4:6] == 2)

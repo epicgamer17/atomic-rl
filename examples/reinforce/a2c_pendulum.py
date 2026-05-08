@@ -1,11 +1,3 @@
-"""
-Notes on Vanilla Policy Gradient for Pendulum (Continuous Action Space):
-
-VPG (REINFORCE + Critic baseline) adapted for continuous action spaces.
-The Actor outputs mean (mu) and has a learnable log standard deviation (log_std).
-The Critic predicts state values to compute advantages.
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -113,8 +105,7 @@ for episode in range(MAX_EPISODES):
     rewards = []
     log_probs = []
     values = []
-    terminateds = []
-    truncateds = []
+    terminated = []
 
     while not (terminated or truncated):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
@@ -134,8 +125,7 @@ for episode in range(MAX_EPISODES):
         rewards.append(reward)
         log_probs.append(log_prob)
         values.append(value)
-        terminateds.append(terminated)
-        truncateds.append(truncated)
+        terminated.append(terminated)
 
         # Update state
         obs = next_obs
@@ -147,13 +137,13 @@ for episode in range(MAX_EPISODES):
         stat_episode_return = 0.0
 
     # --- 3. The Update Loop ---
-    # TODO: replace with rearrange and einops
     returns = compute_mc_returns(
         torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(terminateds, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(truncateds, dtype=torch.float32, device=device).unsqueeze(0),
+        torch.tensor(terminated, dtype=torch.float32, device=device).unsqueeze(0),
         GAMMA,
-    ).squeeze(0)
+    ).squeeze(
+        0
+    )  # TODO: replace with rearrange
 
     values_tensor = rearrange(torch.stack(values), "t 1 1 -> t")
     advantages = compute_critic_advantages(returns, values_tensor)

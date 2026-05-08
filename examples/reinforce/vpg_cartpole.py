@@ -97,7 +97,7 @@ for episode in range(MAX_EPISODES):
     rewards = []
     log_probs = []
     values = []
-    terminals = []
+    terminated = []
     while not (terminated or truncated):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
         logits = actor(obs_tensor)
@@ -113,7 +113,7 @@ for episode in range(MAX_EPISODES):
         rewards.append(reward)
         log_probs.append(log_prob)
         values.append(value)
-        terminals.append(terminated)
+        terminated.append(terminated)
 
         # Update state for next tick
         obs = next_obs
@@ -128,10 +128,13 @@ for episode in range(MAX_EPISODES):
     # NOTE: Again unlike PPO, we don't sample as a learning step always occurs at the end of an episode.
 
     # Calculate Loss & Gradients
+    # TODO: properly handle truncation and pass that to compute_mc_returns
     returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(terminals, dtype=torch.float32, device=device).unsqueeze(0),
-        GAMMA,
+        rewards=torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
+        terminated=torch.tensor(terminated, dtype=torch.float32, device=device).unsqueeze(
+            0
+        ),
+        gamma=GAMMA,
     ).squeeze(0)
     # returns is [T]
 

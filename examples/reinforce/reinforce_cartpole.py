@@ -80,7 +80,7 @@ for episode in range(MAX_EPISODES):
     # NOTE: Since pure REINFORCE relys on MC returns, there is not a clean way to preallocate a buffer or use a circular buffer like we can do for PPO so we just use lists
     rewards = []
     log_probs = []
-    terminals = []
+    terminated = []
     while not (terminated or truncated):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
         logits = actor(obs_tensor)
@@ -94,7 +94,7 @@ for episode in range(MAX_EPISODES):
         # 3. Add to "online" buffers
         rewards.append(reward)
         log_probs.append(log_prob)
-        terminals.append(terminated)
+        terminated.append(terminated)
 
         # Update state for next tick
         obs = next_obs
@@ -109,10 +109,13 @@ for episode in range(MAX_EPISODES):
     # NOTE: Again unlike PPO, we don't sample as a learning step always occurs at the end of an episode.
 
     # Calculate Loss & Gradients
+    # TODO: properly handle truncation and pass that to compute_mc_returns
     returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(terminals, dtype=torch.float32, device=device).unsqueeze(0),
-        GAMMA,
+        rewards=torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
+        terminated=torch.tensor(terminated, dtype=torch.float32, device=device).unsqueeze(
+            0
+        ),
+        gamma=GAMMA,
     ).squeeze(0)
 
     # METHOD A: Mean baseline
@@ -126,7 +129,7 @@ for episode in range(MAX_EPISODES):
     # Others: learn a baseline with a neural network (advantage) (not done here)
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,  # NOTE: calculate this outside
-        log_probs=rearrange(torch.stack(log_probs), 't 1 1 -> t'),
+        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
     )
 
     loss = loss.mean()

@@ -8,15 +8,19 @@ def standard_td_target(
     next_actions: torch.Tensor,
     rewards: torch.Tensor,
     terminated: torch.Tensor,
+    truncated: torch.Tensor,
     gamma: torch.Tensor,
 ):
     """
     Calculates the standard 1-step TD target.
+    Handles truncated states by bootstrapping from the next state's Q-value.
+
     Args:
         next_q_values (torch.Tensor): Tensor of shape (batch_size, num_actions) containing the Q-values of the next states.
         next_actions (torch.Tensor): Tensor of shape (batch_size, 1) containing the indices of the actions taken in the next states.
         rewards (torch.Tensor): Tensor of shape (batch_size, 1) containing the rewards.
-        terminated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes terminated.
+        terminated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes terminated (MDP end).
+        truncated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes were truncated (e.g. time limit).
         gamma (torch.Tensor): Discount factor.
     Returns:
         torch.Tensor: The standard 1-step TD target.
@@ -25,10 +29,13 @@ def standard_td_target(
     rewards = rearrange(rewards.squeeze(-1), "b -> b 1")
     gamma = rearrange(gamma.squeeze(-1), "b -> b 1")
     terminated = rearrange(terminated.squeeze(-1), "b -> b 1").float()
+    truncated = rearrange(truncated.squeeze(-1), "b -> b 1").float()
     next_actions = rearrange(next_actions.squeeze(-1), "b -> b 1")
 
     # 2. PURE MATH: Now guaranteed to broadcast perfectly
     max_q_next = torch.gather(next_q_values, 1, next_actions)
+    
+    # Bootstrap if not terminated. Truncated states bootstrap from max_q_next.
     return rewards + gamma * max_q_next * (1 - terminated)
 
 
@@ -37,17 +44,21 @@ def n_step_td_target(
     next_actions: torch.Tensor,
     rewards: torch.Tensor,
     terminated: torch.Tensor,
+    truncated: torch.Tensor,
     gamma: torch.Tensor,
 ):
     """
     Calculates the N-step TD target using an effective gamma.
+    Assumes rewards is already the n-step discounted sum and gamma is gamma^n.
+    Handles truncated states by bootstrapping from the next state's Q-value.
+
     Args:
         next_q_values (torch.Tensor): Tensor of shape (batch_size, num_actions) containing the Q-values of the next states.
         next_actions (torch.Tensor): Tensor of shape (batch_size, 1) containing the indices of the actions taken in the next states.
         rewards (torch.Tensor): Tensor of shape (batch_size, 1) containing the rewards.
         terminated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes terminated.
-        gamma (torch.Tensor): Discount factor.
-        n_steps (int): The number of steps to use for the TD target.
+        truncated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes were truncated.
+        gamma (torch.Tensor): Effective discount factor (gamma^n).
     Returns:
         torch.Tensor: The N-step TD target.
     """
@@ -55,10 +66,13 @@ def n_step_td_target(
     rewards = rearrange(rewards.squeeze(-1), "b -> b 1")
     gamma = rearrange(gamma.squeeze(-1), "b -> b 1")
     terminated = rearrange(terminated.squeeze(-1), "b -> b 1").float()
+    truncated = rearrange(truncated.squeeze(-1), "b -> b 1").float()
     next_actions = rearrange(next_actions.squeeze(-1), "b -> b 1")
 
     # 2. PURE MATH: Now guaranteed to broadcast perfectly
     max_q_next = torch.gather(next_q_values, 1, next_actions)
+    
+    # Bootstrap if not terminated.
     return rewards + gamma * max_q_next * (1 - terminated)
 
 
@@ -67,6 +81,7 @@ def categorical_td_target(
     next_actions: torch.Tensor,
     rewards: torch.Tensor,
     terminated: torch.Tensor,
+    truncated: torch.Tensor,
     gamma: torch.Tensor,
     support: torch.Tensor,
     v_min: float,
@@ -75,11 +90,14 @@ def categorical_td_target(
 ):
     """
     Calculates the projected Categorical TD target distribution.
+    Handles truncated states by bootstrapping from the support values.
+
     Args:
         next_logits (torch.Tensor): Tensor of shape (batch_size, num_actions, atom_size) containing the logits of the next states.
         next_actions (torch.Tensor): Tensor of shape (batch_size, 1) containing the indices of the actions taken in the next states.
         rewards (torch.Tensor): Tensor of shape (batch_size, 1) containing the rewards.
         terminated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes terminated.
+        truncated (torch.Tensor): Tensor of shape (batch_size, 1) containing booleans indicating whether the episodes were truncated.
         gamma (torch.Tensor): Tensor of shape (batch_size, 1) containing the discount factors.
         support (torch.Tensor): Tensor of shape (atom_size,) containing the support values.
         v_min (float): The minimum value of the support.
@@ -92,6 +110,7 @@ def categorical_td_target(
     rewards_b = rearrange(rewards.squeeze(-1), "b -> b 1")
     gamma_b = rearrange(gamma.squeeze(-1), "b -> b 1")
     terminated_b = rearrange(terminated.squeeze(-1), "b -> b 1").float()
+    truncated_b = rearrange(truncated.squeeze(-1), "b -> b 1").float()
     next_actions_b = rearrange(next_actions.squeeze(-1), "b -> b 1")
     support_b = rearrange(support, "a -> 1 a")
 
@@ -107,6 +126,7 @@ def categorical_td_target(
 
     # 4. Compute the target support (Tz) [B, Atoms]
     # Pure Math (Readable)
+    # Bootstrap if not terminated. Truncated states bootstrap from support_b.
     Tz = rewards_b + gamma_b * support_b * (1 - terminated_b)
     Tz = Tz.clamp(min=v_min, max=v_max)
 
