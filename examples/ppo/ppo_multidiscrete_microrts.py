@@ -1,5 +1,7 @@
 # Fully Generated
 # TODO: compare with 37 implementation details of PPO results
+# TODO: attempt a cleanup if possible
+# TODO: notes on multi discrete
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -246,8 +248,12 @@ for iteration in range(MAX_ITERATIONS):
                     record_truncations(
                         buffer,
                         step,
-                        torch.as_tensor(env_indices[trunc_mask], dtype=torch.long, device=device),
-                        torch.as_tensor(final_obs[trunc_mask], dtype=torch.float32, device=device),
+                        torch.as_tensor(
+                            env_indices[trunc_mask], dtype=torch.long, device=device
+                        ),
+                        torch.as_tensor(
+                            final_obs[trunc_mask], dtype=torch.float32, device=device
+                        ),
                     )
 
             if "final_info" in info:

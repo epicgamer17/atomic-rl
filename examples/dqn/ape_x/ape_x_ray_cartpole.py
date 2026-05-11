@@ -31,6 +31,8 @@ NOTE: Our implementation uses ray which was not available at the time of the pap
 
 """
 
+# TODO: attempt a cleanup if possible
+
 import os
 import time
 import ray

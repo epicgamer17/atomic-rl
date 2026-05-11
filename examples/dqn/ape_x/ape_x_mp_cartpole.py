@@ -2,6 +2,8 @@
 APE-X DQN implemented with torch.multiprocessing.
 """
 
+# TODO: attempt a cleanup if possible
+
 import os
 import time
 import torch

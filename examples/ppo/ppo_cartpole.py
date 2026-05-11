@@ -24,6 +24,7 @@ TODO: what is better sample complexity
 TODO: More on pessemistic lower bound, what it means, why its useful, etc
 """
 
+# TODO: attempt a cleanup if possible
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -115,7 +116,9 @@ def make_env(env_id, seed, idx):
         # Apply standard wrappers if needed here
         # Standard continuous control wrappers
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10).astype(np.float32))
+        env = gym.wrappers.TransformObservation(
+            env, lambda obs: np.clip(obs, -10, 10).astype(np.float32)
+        )
         env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.action_space.seed(seed)
@@ -237,8 +240,12 @@ for iteration in range(MAX_ITERATIONS):
                     record_truncations(
                         buffer,
                         step,
-                        torch.as_tensor(env_indices[trunc_mask], dtype=torch.long, device=device),
-                        torch.as_tensor(final_obs[trunc_mask], dtype=torch.float32, device=device),
+                        torch.as_tensor(
+                            env_indices[trunc_mask], dtype=torch.long, device=device
+                        ),
+                        torch.as_tensor(
+                            final_obs[trunc_mask], dtype=torch.float32, device=device
+                        ),
                     )
 
             if "final_info" in info:

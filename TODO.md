@@ -10,19 +10,15 @@ figure out my naming convention for functions. sometimes i say compute_xyz and o
 
 potentially consider making functions for getting log probs for distributions (trouble is when doing multi discrete or multi continuous envs which require summing log probs), is this needed though? I handle this in the action selectors but do not handle it in the re-eval step cleanly at the moment. the user is expected to handle it instead.
 
-Add examples on MuJoCo
-Add examples on Atari
+Add examples on Atari for DQN and A2C
 Add examples on Labyrinth (A3C Paper)
+More testing/verification of implementations and examples (compared to 37 implementation details of PPO for example or APE-X)
 
 Future models/examples: 
 A2C + Trust Regions? (from PPO paper, what is this)
 VPG (Adaptive)? (from PPO paper, what is this)
 TRPO (from PPO paper, what is this)
-PPO
-PPO LSTM 
-PPO ATARI
-PPO MULTI DISCRETE 
-PPO CONTINUOUS 
+MAPPO
 ...
 R2D2
 NGU

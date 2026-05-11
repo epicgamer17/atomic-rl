@@ -112,3 +112,38 @@ def scale_tensor_by_std(tensor: torch.Tensor, eps: float = 1e-8) -> torch.Tensor
         return torch.zeros_like(tensor)
 
     return tensor / (tensor.std() + eps)
+
+
+def add_dirichlet_noise(
+    probs: torch.Tensor,
+    epsilon: float,
+    alpha: float,
+) -> torch.Tensor:
+    """
+    Adds Dirichlet noise to the given probabilities for exploration.
+    Formula: P(s, a) = (1 - epsilon) * P(s, a) + epsilon * noise
+    where noise ~ Dirichlet(alpha).
+
+    Args:
+        probs: The probabilities to add noise to [..., Num_Actions].
+        epsilon: The weight of the noise.
+        alpha: The concentration parameter of the Dirichlet distribution.
+
+    Returns:
+        The probabilities with added noise.
+    """
+    # 1. Sample noise from Dirichlet distribution
+    num_actions = probs.shape[-1]
+    alphas = torch.full((num_actions,), alpha, device=probs.device, dtype=probs.dtype)
+
+    # torch.distributions.Dirichlet handles batch shapes correctly via .sample()
+    dist = torch.distributions.Dirichlet(alphas)
+    noise = dist.sample(probs.shape[:-1])  # [..., Num_Actions]
+
+    # 2. Combine with original probabilities
+    return (1.0 - epsilon) * probs + epsilon * noise
+
+
+def add_gumbel_noise():
+    # TODO: implement this
+    pass

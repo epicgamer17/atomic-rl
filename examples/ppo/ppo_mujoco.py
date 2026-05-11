@@ -1,5 +1,7 @@
 # Fully Generated
 # TODO: compare with 37 implementation details of PPO results
+# TODO: attempt a cleanup if possible
+# TODO: notes on multi continuous
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -103,7 +105,9 @@ def make_env(env_id, seed, idx):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10).astype(np.float32))
+        env = gym.wrappers.TransformObservation(
+            env, lambda obs: np.clip(obs, -10, 10).astype(np.float32)
+        )
         env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
         env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.action_space.seed(seed)
@@ -230,8 +234,12 @@ for iteration in range(MAX_ITERATIONS):
                     record_truncations(
                         buffer,
                         step,
-                        torch.as_tensor(env_indices[trunc_mask], dtype=torch.long, device=device),
-                        torch.as_tensor(final_obs[trunc_mask], dtype=torch.float32, device=device),
+                        torch.as_tensor(
+                            env_indices[trunc_mask], dtype=torch.long, device=device
+                        ),
+                        torch.as_tensor(
+                            final_obs[trunc_mask], dtype=torch.float32, device=device
+                        ),
                     )
 
             if "final_info" in info:
