@@ -26,20 +26,37 @@ def exponential_moving_average(
     return (1 - alpha) * old_ema + alpha * new_value
 
 
-def extract_vector_env_final_obs(info: dict) -> Tuple[np.ndarray, np.ndarray]:
+# TODO: messy, hard to read, and doesnt work reliably or at least not tested reliably on both gym vector envs and pufferlib's vector envs.
+def extract_vector_env_final_obs(info) -> Tuple[np.ndarray, np.ndarray]:
     """
     Extracts the true final observations from a Gymnasium Vector Environment's info dict.
     Safely handles the auto-reset hidden states.
 
+    Some vector-env wrappers (notably PufferLib's `pufferlib.vector`) deliver
+    `info` as a list rather than a Gymnasium-style dict, and do not preserve
+    the truncation-state observation at all. In those cases this returns
+    empty arrays — the caller should not bootstrap through the truncated
+    next-state since `V(s_truncated)` is not recoverable.
+
     Args:
-        info (dict): The info dictionary returned by `envs.step()`.
+        info: The info object returned by `envs.step()`. Expected to be a dict
+            with `final_observation` / `_final_observation` keys (Gymnasium
+            vector envs). Any other type (list, None, etc.) is treated as
+            "no final observations available" and yields empty arrays.
 
     Returns:
         Tuple[np.ndarray, np.ndarray]:
             - env_indices: 1D array of environment indices that terminated or truncated.
             - final_obs: Stacked array of the true final observations for those environments.
-              Returns (empty_array, empty_array) if no environments ended.
+              Returns (empty_array, empty_array) if no environments ended or if the
+              info format does not expose final observations.
     """
+    # Non-dict info formats (e.g. PufferLib emits a list) cannot expose
+    # final observations; bail out cleanly.
+    # TODO: implement correct behaviour for pufferlib
+    if not isinstance(info, dict):
+        return np.array([]), np.array([])
+
     # Vector envs only add this key if at least one environment ended
     if "final_observation" not in info:
         return np.array([]), np.array([])

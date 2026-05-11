@@ -23,6 +23,7 @@ from functional.returns import compute_n_step_returns
 from functional.losses import policy_gradient_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
+from functional.network import layer_init
 from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step,
@@ -77,21 +78,21 @@ class ActorCritic(nn.Module):
 
         # Actor Network: Predicts distribution parameters (mu and log_std)
         self.actor_backbone = nn.Sequential(
-            nn.Linear(input_shape[0], HIDDEN_SIZE),
+            layer_init(nn.Linear(input_shape[0], HIDDEN_SIZE)),
             nn.Tanh(),
-            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            layer_init(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
             nn.Tanh(),
         )
-        self.actor_mu = nn.Linear(HIDDEN_SIZE, num_actions)
+        self.actor_mu = layer_init(nn.Linear(HIDDEN_SIZE, num_actions), std=0.01)
         self.log_std = nn.Parameter(torch.ones(1, num_actions) * INITIAL_LOG_STD)
 
         # Critic Network: Predicts the state value estimate (completely separate)
         self.critic = nn.Sequential(
-            nn.Linear(input_shape[0], HIDDEN_SIZE),
+            layer_init(nn.Linear(input_shape[0], HIDDEN_SIZE)),
             nn.Tanh(),
-            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            layer_init(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
             nn.Tanh(),
-            nn.Linear(HIDDEN_SIZE, 1),
+            layer_init(nn.Linear(HIDDEN_SIZE, 1), std=1.0),
         )
 
     def forward(
@@ -269,6 +270,7 @@ for iteration in range(MAX_ITERATIONS):
     pg_loss = pg_loss.mean()
 
     ent_loss, _ = entropy_loss(dist)
+    ent_loss = ent_loss.mean()
 
     critic_loss, _ = mse_loss(predictions=new_values, targets=flat_returns.detach())
     critic_loss = critic_loss.mean()

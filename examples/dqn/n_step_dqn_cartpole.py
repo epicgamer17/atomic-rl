@@ -1,6 +1,6 @@
 """
 Notes on Multi-step (N-step) DQN:
-The idea is to use n-step returns to speed up learning. Instead of using the 1-step return $R_{t+1} + \gamma \max_{a} Q(s_{t+1}, a)$, we use the n-step return $\sum_{k=0}^{n-1} \gamma^k R_{t+k+1} + \gamma^n \max_{a} Q(s_{t+n}, a)$. This allows for faster propagation of rewards to earlier time steps.
+The idea is to use n-step returns to speed up learning. Instead of using the 1-step return $R_{t+1} + \gamma \max_{a} Q(s_{t+1}, a)$, we use the n-step return $\sum_{k=0}^{n-1} \gamma^k R_{t+k+1} + \gamma^n \max_{a} Q(s_{t+n}, a)$. This allows for faster propagation of rewards to earlier time steps. The argument for is that a single step (reward) affecting the n previous values instead of just the immediate previous one.
 
 This method increases the variance of updates but reduces the bias. In a sense, it is a compromise between 1-step TD and Monte Carlo returns (which use the full episode return). By increasing n, we can trade decreased bias for increased variance (and vice versa). By using the n step return we rely less on our flawed guesses (reducing bias) but more on environmental randomness (increasing variance).
 
@@ -24,7 +24,7 @@ from functional.replay_buffer import (
     uniform_sample,
     make_n_step_accumulator,
 )
-from functional.losses import bellman_error, mse_loss
+from functional.losses import compute_q_td_loss, mse_loss
 from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
@@ -32,7 +32,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network, layer_init
 
 # Constants
 BATCH_SIZE = 128
@@ -58,9 +58,9 @@ torch.manual_seed(SEED)
 class DQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 512)
-        self.l2 = nn.Linear(512, 512)
-        self.l3 = nn.Linear(512, num_actions)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init(nn.Linear(512, 512))
+        self.l3 = layer_init(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -170,7 +170,7 @@ for step in range(MAX_STEPS):
         batch = uniform_sample(buffer_state, rng_key, BATCH_SIZE)
 
         # Calculate Loss & Gradients
-        loss, info_dict = bellman_error(
+        loss, info_dict = compute_q_td_loss(
             model,
             batch,
             model,

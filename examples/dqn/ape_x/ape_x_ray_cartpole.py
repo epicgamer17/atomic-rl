@@ -25,9 +25,9 @@ Something to note is that Ape-X strictly requires off-policy algorithms. Because
 
 One thing to note there are some different ways of implementing distributed RL systems. This is one possible implementation. Some implementations also use a seperate process/node for the replay buffer, and seperate process/node for the shared parameter storage. This is especially true when using something like Ray for distributed computing.
 
-Note: The original paper did not use a circular buffer for the replay buffer. It used a buffer with a "target" capacity, and allowed for overflow, every 100 steps it would flush the overflow from the buffer in a FIFO manner. This is in contrast to the implementation here which uses a circular buffer and doesn't allow for overflow. The paper used a key value buffer and so removed all old transitions at once and allowed for overflow of the buffer. We are using a circular buffer for simplicity, with our current pytorch based buffers, this would be inefficient.
+NOTE: The original paper did not use a circular buffer for the replay buffer. It used a buffer with a "target" capacity, and allowed for overflow, every 100 steps it would flush the overflow from the buffer in a FIFO manner. This is in contrast to the implementation here which uses a circular buffer and doesn't allow for overflow. The paper used a key value buffer and so removed all old transitions at once and allowed for overflow of the buffer. We are using a circular buffer for simplicity, with our current pytorch based buffers, this would be inefficient.
 
-Note: Our implementation uses ray which was not available at the time of the paper but is now widely used and makes the implementation much cleaner.
+NOTE: Our implementation uses ray which was not available at the time of the paper but is now widely used and makes the implementation much cleaner.
 
 """
 
@@ -54,14 +54,14 @@ from functional.replay_buffer import (
     circular_write_strategy,
     make_n_step_accumulator,
 )
-from functional.losses import bellman_error, mse_loss, huber_loss
+from functional.losses import compute_q_td_loss, mse_loss, huber_loss
 from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
     get_ape_x_epsilon,
 )
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network, layer_init
 
 # --- Constants ---
 ENV_NAME = "CartPole-v1"
@@ -98,9 +98,9 @@ torch.manual_seed(SEED)
 class DuelingDQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 512)
-        self.value_head = nn.Linear(512, 1)
-        self.advantage_head = nn.Linear(512, num_actions)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
+        self.value_head = layer_init(nn.Linear(512, 1), std=1.0)
+        self.advantage_head = layer_init(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -262,10 +262,10 @@ class ActorActor:
                     },
                     batch_size=[len(self.local_batch)],
                 )
-                # TODO: calling bellman_error leads to an extra forward pass to calculate priorities.
+                # TODO: calling compute_q_td_loss leads to an extra forward pass to calculate priorities.
                 # Compute Initial Priorities in one batched forward pass
                 with torch.no_grad():
-                    _, info_dict = bellman_error(
+                    _, info_dict = compute_q_td_loss(
                         self.model,
                         collated,
                         self.model,
@@ -348,7 +348,7 @@ class LearnerActor:
         is_weights = is_weights.to(self.device)
 
         # Calculate Loss using injected functions
-        loss, info = bellman_error(
+        loss, info = compute_q_td_loss(
             self.model,
             batch,
             self.model,

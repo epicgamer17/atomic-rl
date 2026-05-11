@@ -1,4 +1,4 @@
-Explicit over Implicit (with Orchestration): It is better to avoid "magic" objects that hide hidden state mutations. However, using stateless, high-level orchestration functions (like bellman_error) to group operations and keep the main algorithmic loop clean and readable is highly encouraged.
+Explicit over Implicit (with Orchestration): It is better to avoid "magic" objects that hide hidden state mutations. However, using stateless, high-level orchestration functions (like compute_q_td_loss) to group operations and keep the main algorithmic loop clean and readable is highly encouraged.
 
 Fail Fast: Use assertions and type hints in the functional layer to ensure that shape mismatches or device errors are caught at the point of origin rather than deep in a gradient calculation.
 
@@ -20,7 +20,7 @@ Functions should try to handle edge cases, and they should be tested.
 Functions should be efficient and performant.
 Functions should be reusable across algorithms and papers. For example, gaussian action selection should be usable in ppo, a2c, td3, sac, etc. It shouldn't be hardcoded for a particular algorithm.
 Functions should attempt to have consistent signatures/interfaces so that "similar"/related functions can be swapped in and out easily. For example, mc returns should be easily swappable with n step returns for VPG. Ie they should return the same output format and stuff, and they should take the same inputs (as much as possible).
-Avoid combinatorial explosion of options. If multiple options/architectures exist for a function try to solve via composability (as done for example in bellman_error())
+Avoid combinatorial explosion of options. If multiple options/architectures exist for a function try to solve via composability (as done for example in compute_q_td_loss())
 Solutions/decisions should be expandable. When designing a function don't design it only for the algorithm it is currently being created for. Instead, design it such that it could be easily extended/adapted to other algorithms.
 Functions have semantic meaning, although GAE can represent MC returns and N step returns, we have seperate functions for those to improve readability. Try to keep functions to a single responsibility, which improves readability and reusability.
 Minimize code that does multiple things. If a function is doing more than one thing, try to split it into multiple functions.

@@ -2,6 +2,7 @@
 Notes on Vanilla Policy Gradient:
 
 Essentially REINFORCE + a value function for the baseline to compute advantages. Or another way of putting it is REINFORCE with learned state dependant baseline.
+NOTE: very similar to A2C/A3C
 """
 
 import torch
@@ -22,6 +23,7 @@ from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss, mse_loss
 from functional.utils import exponential_moving_average, scale_tensor_by_std
 from functional.visualization import compute_explained_variance
+from functional.network import layer_init
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -42,9 +44,9 @@ torch.manual_seed(SEED)
 class Actor(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 64)
-        self.l2 = nn.Linear(64, 64)
-        self.l3 = nn.Linear(64, num_actions)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 64))
+        self.l2 = layer_init(nn.Linear(64, 64))
+        self.l3 = layer_init(nn.Linear(64, num_actions), std=0.01)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -56,9 +58,9 @@ class Actor(nn.Module):
 class Critic(nn.Module):
     def __init__(self, input_shape: Tuple):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 64)
-        self.l2 = nn.Linear(64, 64)
-        self.l3 = nn.Linear(64, 1)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 64))
+        self.l2 = layer_init(nn.Linear(64, 64))
+        self.l3 = layer_init(nn.Linear(64, 1), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))

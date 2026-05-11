@@ -16,7 +16,7 @@ In short:
 
 This paradigm/approach of treating q value estimation, value estimation, or reward estimation as classification problems has been applied to other algorithms as well like MuZero and Dreamer, though with different supports and support transformations or targets (e.g., two-hot with a projection or exponentially spaced bins). This is a powerful idea that has led to significant improvements in performance.
 
-Note: the below DQN implementation is not the same as used in the paper (it does not use dueling DQN, double DQN, etc).
+NOTE: the below DQN implementation is not the same as used in the paper (it does not use dueling DQN, double DQN, etc).
 """
 
 import torch
@@ -32,8 +32,12 @@ from tensordict import TensorDict
 from functools import partial
 from einops import rearrange
 
-from functional.replay_buffer import init_buffer, circular_write_strategy, uniform_sample
-from functional.losses import bellman_error, cross_entropy_loss
+from functional.replay_buffer import (
+    init_buffer,
+    circular_write_strategy,
+    uniform_sample,
+)
+from functional.losses import compute_q_td_loss, cross_entropy_loss
 from functional.action_selection import (
     argmax_selector,
     expected_value,
@@ -41,7 +45,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network, layer_init
 from functional.visualization import log_distributional_metrics
 
 from functional.targets import categorical_td_target
@@ -74,9 +78,9 @@ torch.manual_seed(SEED)
 class CategoricalDQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int, atom_size: int = 51):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 512)
-        self.l2 = nn.Linear(512, 512)
-        self.l3 = nn.Linear(512, num_actions * atom_size)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init(nn.Linear(512, 512))
+        self.l3 = layer_init(nn.Linear(512, num_actions * atom_size), std=1.0)
         self.num_actions = num_actions
         self.atom_size = atom_size
 
@@ -84,7 +88,7 @@ class CategoricalDQN(nn.Module):
         x = F.relu(self.l1(x))
         x = F.relu(self.l2(x))
         x = self.l3(x)
-        return rearrange(x, 'b (a s) -> b a s', a=self.num_actions, s=self.atom_size)
+        return rearrange(x, "b (a s) -> b a s", a=self.num_actions, s=self.atom_size)
 
 
 # --- 1. Initialization (Defining the State) ---
@@ -120,7 +124,10 @@ rng_key.manual_seed(SEED)
 
 # 1. Initialize the Distributional DQN rollout selector
 action_selector = with_epsilon_greedy(
-    partial(argmax_selector, extractor_fn=partial(expected_value, support=SUPPORT.to(device)))
+    partial(
+        argmax_selector,
+        extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
+    )
 )
 
 # Initialize W&B
@@ -169,7 +176,9 @@ for step in range(MAX_STEPS):
         "next_obs": torch.as_tensor(next_obs, dtype=torch.float32),
         "gamma": torch.tensor(GAMMA, dtype=torch.float32),
     }
-    buffer_state, _ = circular_write_strategy(buffer_state, TensorDict(transition, batch_size=[]).unsqueeze(0))
+    buffer_state, _ = circular_write_strategy(
+        buffer_state, TensorDict(transition, batch_size=[]).unsqueeze(0)
+    )
 
     # Update state for next tick
     obs = next_obs
@@ -185,7 +194,7 @@ for step in range(MAX_STEPS):
         batch = uniform_sample(buffer_state, rng_key, BATCH_SIZE)
 
         # Calculate Loss & Gradients
-        loss, info_dict = bellman_error(
+        loss, info_dict = compute_q_td_loss(
             model,
             batch,
             target_model,

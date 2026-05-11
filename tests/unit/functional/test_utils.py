@@ -1,6 +1,10 @@
 import pytest
 import torch
-from functional.utils import exponential_moving_average, standardize_tensor, scale_tensor_by_std
+from functional.utils import (
+    exponential_moving_average,
+    standardize_tensor,
+    scale_tensor_by_std,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -9,11 +13,11 @@ def test_exponential_moving_average():
     old = torch.tensor([1.0, 2.0])
     new = torch.tensor([3.0, 4.0])
     alpha = 0.1
-    
+
     # (1-0.1)*1.0 + 0.1*3.0 = 0.9 + 0.3 = 1.2
     # (1-0.1)*2.0 + 0.1*4.0 = 1.8 + 0.4 = 2.2
     expected = torch.tensor([1.2, 2.2])
-    
+
     res = exponential_moving_average(old, new, alpha)
     torch.testing.assert_close(res, expected)
 
@@ -109,5 +113,29 @@ def test_extract_vector_env_final_obs():
         "_final_observation": np.array([False, False]),
     }
     indices, obs = extract_vector_env_final_obs(info_all_false)
+    assert indices.size == 0
+    assert obs.size == 0
+
+
+# TODO: change this into a test for pufferlib to verify it properly extracts on pufferlib (need to add that functionality though)
+def test_extract_vector_env_final_obs_edge_cases():
+    """Test edge cases for extract_vector_env_final_obs."""
+    import numpy as np
+    from functional.utils import extract_vector_env_final_obs
+
+    # 1. Info is not a dict (e.g., PufferLib list)
+    info_list = ["some", "data"]
+    indices, obs = extract_vector_env_final_obs(info_list)
+    assert indices.size == 0
+    assert obs.size == 0
+
+    # 2. Info is None
+    indices, obs = extract_vector_env_final_obs(None)
+    assert indices.size == 0
+    assert obs.size == 0
+
+    # 3. Missing _final_observation key but has final_observation
+    info_missing_mask = {"final_observation": [np.zeros(4)]}
+    indices, obs = extract_vector_env_final_obs(info_missing_mask)
     assert indices.size == 0
     assert obs.size == 0

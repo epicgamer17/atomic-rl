@@ -26,14 +26,14 @@ from functional.replay_buffer import (
     make_n_step_accumulator,
     PERBufferState,
 )
-from functional.losses import bellman_error, huber_loss
+from functional.losses import compute_q_td_loss, huber_loss
 from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
     get_ape_x_epsilon,
 )
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network, layer_init
 
 # --- Constants ---
 ENV_NAME = "CartPole-v1"
@@ -68,9 +68,9 @@ torch.manual_seed(SEED)
 class DuelingDQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 512)
-        self.value_head = nn.Linear(512, 1)
-        self.advantage_head = nn.Linear(512, num_actions)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
+        self.value_head = layer_init(nn.Linear(512, 1), std=1.0)
+        self.advantage_head = layer_init(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -238,7 +238,7 @@ def actor_worker(
                 batch_size=[len(local_batch)],
             )
             with torch.no_grad():
-                _, info_dict = bellman_error(
+                _, info_dict = compute_q_td_loss(
                     local_model,
                     collated,
                     local_model,
@@ -300,7 +300,7 @@ def learner_worker(
         is_weights = is_weights.to(device)
 
         # Loss
-        loss, info = bellman_error(
+        loss, info = compute_q_td_loss(
             local_model,
             batch,
             local_model,

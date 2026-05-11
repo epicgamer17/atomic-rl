@@ -21,6 +21,7 @@ from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
 from functional.utils import exponential_moving_average, standardize_tensor, scale_tensor_by_std
+from functional.network import layer_init
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -40,9 +41,9 @@ torch.manual_seed(SEED)
 class Actor(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], HIDDEN_SIZE)
-        self.l2 = nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)
-        self.mu_head = nn.Linear(HIDDEN_SIZE, num_actions)
+        self.l1 = layer_init(nn.Linear(input_shape[0], HIDDEN_SIZE))
+        self.l2 = layer_init(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE))
+        self.mu_head = layer_init(nn.Linear(HIDDEN_SIZE, num_actions), std=0.01)
         # Learnable parameter for log_std, independent of state
         self.log_std = nn.Parameter(torch.full((1, num_actions), INITIAL_LOG_STD))
 

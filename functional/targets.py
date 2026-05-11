@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 
+# TODO: I think truncation right now works for single env trajectories without auto resetting, but would fail for vectorized envs with auto resetting. as the next_q_values would be on the resetted state instead of the one from the info. verify this, and if it is an issue, unify the vectorization logic in our buffer to work with offline buffers as well somehow.
+
 
 def scalar_td_target(
     next_q_values: torch.Tensor,  # [batch, num_actions]
@@ -19,7 +21,7 @@ def scalar_td_target(
     and `gamma` should be the pre-computed effective discount factor (gamma^n).
 
     Formula: y = R_{t:t+n} + gamma^n * (1 - terminated) * max_a Q(s_{t+n}, a)
-    Note: Truncated states still bootstrap as they are not true environment terminations.
+    NOTE: Truncated states still bootstrap as they are not true environment terminations.
 
     Args:
         next_q_values: Q-values of the next states.

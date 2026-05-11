@@ -8,7 +8,8 @@ from typing import Callable, Tuple, Optional, Union
 from functional.action_selection import argmax_selector
 
 
-def bellman_error(
+# TODO: possibly make this take in a selector_fn in future when i implement sarsa or soft q learning etc
+def compute_q_td_loss(
     model: torch.nn.Module,
     batch: TensorDict,
     selector_model: torch.nn.Module,
@@ -39,7 +40,7 @@ def bellman_error(
         torch.Tensor: The loss for the batch.
         dict: Information for logging and debugging.
 
-    Note:
+    NOTE:
         - Assumes model.forward directly returns q-values for all actions for all observations.
     """
 
@@ -57,6 +58,7 @@ def bellman_error(
         # and neither do most implementations online.
         next_obs = batch["next_obs"]
         selector_predictions = selector_model(next_obs)
+        # TODO: possibly always require an eval_model and just do a check if eval_model = selector_model etc?
         if eval_model is None:
             # Standard DQN
             next_preds = selector_predictions
@@ -107,6 +109,7 @@ def bellman_error(
     return loss, info
 
 
+# TODO: wondering if this is necessary or can simply be inlined. For now its okay.
 def with_per_weights(base_loss_fn: Callable, is_weights: torch.Tensor) -> Callable:
     """
     Higher-order function that wraps a standard loss function to apply
@@ -266,6 +269,7 @@ def policy_gradient_loss(
     return loss, info
 
 
+# TODO: this is the objective but do we want to make it a loss (ie something to minimize) instead of making the user put a - sign in front of it when they use it?
 def entropy_loss(
     dist: D.Distribution,
 ) -> Tuple[torch.Tensor, dict]:
@@ -294,5 +298,122 @@ def entropy_loss(
     loss = entropy.mean()
 
     info = {"loss/entropy": loss.detach()}
+
+    return loss, info
+
+
+# TODO: is this good? should this take in torch.Distribution objects instead?
+def probability_ratio(
+    old_log_probs: torch.Tensor,
+    new_log_probs: torch.Tensor,
+):
+    """
+    Calculate the probability ratio between a new and an old log probability.
+    Used in algorithms like PPO, TRPO, and V-trace.
+    NOTE: The probability ratio $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}$ is mathematically an importance sampling weight.
+
+    Args:
+        old_log_probs (torch.Tensor): Tensor of old log probabilities.
+        new_log_probs (torch.Tensor): Tensor of new log probabilities.
+
+    Returns:
+        torch.Tensor: The probability ratio.
+
+    Expects flat tensors [B * T] or [B].
+    """
+    assert (
+        old_log_probs.shape == new_log_probs.shape
+    ), f"Shape mismatch: {old_log_probs.shape} vs {new_log_probs.shape}"
+    return torch.exp(new_log_probs - old_log_probs.detach())
+
+
+def clipped_surrogate_loss(
+    ratio: torch.Tensor, advantages: torch.Tensor, clip_coef: float
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Computes the PPO clipped surrogate loss.
+
+    Mathematically, PPO defines L^CLIP as an objective to be maximized.
+    Because PyTorch optimizers minimize by default, this function returns
+    the NEGATED objective so it can be directly minimized. L^CLIP is based on L^CLI which is the same loss without the penalty for moving the ratio away from 1 (the min statement with the clip coefficient)
+
+    Args:
+        ratio: The probability ratio r_t(θ) [B] or [B * T]
+        advantages: The estimated advantages [B] or [B * T]
+        clip_coef: The clipping coefficient (epsilon)
+
+    Returns:
+        Tuple containing the loss tensor and an info dictionary for logging.
+    """
+    # FAIL FAST: Prevent catastrophic broadcasting
+    assert (
+        ratio.shape == advantages.shape
+    ), f"Shape mismatch: ratio {ratio.shape} vs adv {advantages.shape}"
+
+    # Calculate the objective
+    # TODO: should this be its own function?
+    unclipped_objective = ratio * advantages.detach()
+    clipped_objective = (
+        torch.clamp(ratio, 1.0 - clip_coef, 1.0 + clip_coef) * advantages.detach()
+    )
+
+    # The PPO Objective to maximize
+    objective = torch.min(unclipped_objective, clipped_objective)
+
+    # Negate to turn the objective into a loss for gradient descent
+    loss = -objective
+
+    info = {
+        "loss/policy": loss.mean().detach(),
+        "objective/unclipped": unclipped_objective.mean().detach(),
+        "objective/clipped": clipped_objective.mean().detach(),
+    }
+
+    return loss, info
+
+
+# TODO: this is a value loss only at the moment. should this instead be considered more like a clipped MSE loss? right now switching this with mse is weird because all the arg names change despite being the same underlying loss. Thoughts?
+def clipped_value_loss(
+    new_values: torch.Tensor,
+    old_values: torch.Tensor,
+    returns: torch.Tensor,
+    clip_coef: float,
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Computes the PPO clipped value loss.
+
+    This prevents the value network from updating too aggressively in a single epoch
+    by clipping the value function estimate similar to how the policy ratio is clipped.
+
+    Args:
+        new_values (torch.Tensor): Predicted values from the current policy.
+        old_values (torch.Tensor): Predicted values from the old policy (at collection time).
+        returns (torch.Tensor): Target values (e.g., TD-lambda returns).
+        clip_coef (float): Clipping coefficient (epsilon).
+
+    Returns:
+        Tuple[torch.Tensor, dict]: The clipped value loss (raw) and logging info.
+    """
+    assert (
+        new_values.shape == old_values.shape == returns.shape
+    ), f"Shape mismatch: new {new_values.shape}, old {old_values.shape}, returns {returns.shape}"
+
+    # Unclipped MSE
+    v_loss_unclipped = F.mse_loss(new_values, returns, reduction="none")
+
+    # Clipped MSE: clip the predicted value to be within [old - clip, old + clip]
+    v_clipped = old_values + torch.clamp(new_values - old_values, -clip_coef, clip_coef)
+    v_loss_clipped = F.mse_loss(v_clipped, returns, reduction="none")
+
+    # PPO value loss is the max of clipped and unclipped losses
+    # (pessemistic estimate)
+    v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
+    loss = 0.5 * v_loss_max
+
+    info = {
+        "loss/value": loss.mean().detach(),
+        "value/unclipped_loss": v_loss_unclipped.mean().detach(),
+        "value/clipped_loss": v_loss_clipped.mean().detach(),
+    }
 
     return loss, info

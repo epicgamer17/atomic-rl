@@ -23,8 +23,12 @@ import wandb
 from tensordict import TensorDict
 from functools import partial
 
-from functional.replay_buffer import init_buffer, circular_write_strategy, uniform_sample
-from functional.losses import bellman_error, mse_loss
+from functional.replay_buffer import (
+    init_buffer,
+    circular_write_strategy,
+    uniform_sample,
+)
+from functional.losses import compute_q_td_loss, mse_loss
 from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
@@ -32,7 +36,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network, layer_init
 
 # Constants
 BATCH_SIZE = 128
@@ -58,19 +62,18 @@ class DuelingDQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
         # Shared feature extractor
-        self.feature_layer = NoisyLinear(input_shape[0], 512)
+        self.feature_layer = layer_init(nn.Linear(input_shape[0], 512))
 
         # Dueling Heads: Value and Advantage
-        # Both output distributions over atoms
         self.advantage_head = nn.Sequential(
-            NoisyLinear(512, 512),
+            layer_init(nn.Linear(512, 512)),
             nn.ReLU(),
-            NoisyLinear(512, num_actions),
+            layer_init(nn.Linear(512, num_actions), std=1.0),
         )
         self.value_head = nn.Sequential(
-            NoisyLinear(512, 512),
+            layer_init(nn.Linear(512, 512)),
             nn.ReLU(),
-            NoisyLinear(512, 1),
+            layer_init(nn.Linear(512, 1), std=1.0),
         )
 
     def forward(self, x):
@@ -177,7 +180,7 @@ for step in range(MAX_STEPS):
         batch = uniform_sample(buffer_state, rng_key, BATCH_SIZE)
 
         # Calculate Loss & Gradients
-        loss, info_dict = bellman_error(
+        loss, info_dict = compute_q_td_loss(
             model,
             batch,
             target_model,

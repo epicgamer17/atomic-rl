@@ -5,16 +5,18 @@ from dataclasses import dataclass, field
 import numpy as np
 from .replay_buffer import _allocate_tensordict
 
+
 @dataclass
 class RolloutBufferState:
     """
     State of a rollout buffer used for on-policy algorithms (PPO, A2C).
-    
+
     Attributes:
         data (TensorDict): The stored transitions with geometry [Batch, Time].
-        truncation_records (List[Tuple[int, int, torch.Tensor]]): Records of 
+        truncation_records (List[Tuple[int, int, torch.Tensor]]): Records of
             truncations and their final observations for patching next_values.
     """
+
     data: TensorDict
     truncation_records: List[Tuple[int, int, torch.Tensor]] = field(
         default_factory=list
@@ -86,3 +88,20 @@ def get_rollout_next_values(
 def flatten_rollout_buffer(buffer: RolloutBufferState) -> TensorDict:
     """Flattens [B, T] into [B*T]."""
     return buffer.data.flatten(0, 1)
+
+
+# TODO: this is both an offline (replay buffer) and online (rollout buffer) sampling method, can we make it more general? can we unify the files? what is happening in one that really isnt happening in the other file?
+def yield_shuffled_minibatches(
+    batch: TensorDict, minibatch_size: int, generator: torch.Generator = None
+):
+    """
+    Yields shuffled minibatches from a flattened TensorDict.
+    Used in PPO, SAC, Behaviour Cloning, and Offline RL (Efficient Zero, MuZero Unplugged, etc).
+    """
+    total_size = batch.batch_size[0]
+    indices = torch.randperm(total_size, generator=generator, device=batch.device)
+
+    for start_idx in range(0, total_size, minibatch_size):
+        end_idx = min(start_idx + minibatch_size, total_size)
+        mb_indices = indices[start_idx:end_idx]
+        yield batch[mb_indices]

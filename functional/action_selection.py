@@ -68,6 +68,8 @@ def argmax_selector(
 
 
 # TODO: right now this only handles logits, muzero will need to be able to handle probs.
+# TODO: should we make categorical sampling selector and gaussian sampling selector take in a distributions.Distribution object instead of taking in predictions/action_mean and action_std? (could we then merge these functions?)
+# TODO: is it better to have a universal dist selector that takes in a distribution object and samples/computes log_prob from it?
 def categorical_sampling_selector(
     predictions: torch.Tensor,
     extractor_fn: Optional[Callable] = None,

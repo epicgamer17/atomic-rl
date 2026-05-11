@@ -4,7 +4,7 @@ The idea is to decouple value prediction from action selection. To prevent the e
 
 Standard DQN Target: $Y_{t}^{DQN} \equiv R_{t+1} + \gamma \max_{a} Q(S_{t+1}, a; \theta_{t}^{-})$.  Double DQN Target: $Y_{t}^{DoubleDQN} \equiv R_{t+1} + \gamma Q(S_{t+1}, \text{argmax}_{a} Q(S_{t+1}, a; \theta_{t}); \theta_{t}^{-})$.
 
-Note this is implemented inline with common Rainbow Implementations and may not be in line with the original paper.
+NOTE: this is implemented inline with common Rainbow Implementations and may not be in line with the original paper.
 """
 
 import torch
@@ -19,8 +19,12 @@ import wandb
 from tensordict import TensorDict
 from functools import partial
 
-from functional.replay_buffer import init_buffer, circular_write_strategy, uniform_sample
-from functional.losses import bellman_error, mse_loss
+from functional.replay_buffer import (
+    init_buffer,
+    circular_write_strategy,
+    uniform_sample,
+)
+from functional.losses import compute_q_td_loss, mse_loss
 from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
@@ -28,7 +32,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network, layer_init
 
 # Constants
 BATCH_SIZE = 128
@@ -53,9 +57,9 @@ torch.manual_seed(SEED)
 class DQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 512)
-        self.l2 = nn.Linear(512, 512)
-        self.l3 = nn.Linear(512, num_actions)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init(nn.Linear(512, 512))
+        self.l3 = layer_init(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -161,7 +165,7 @@ for step in range(MAX_STEPS):
         batch = uniform_sample(buffer_state, rng_key, BATCH_SIZE)
 
         # Calculate Loss & Gradients
-        loss, info_dict = bellman_error(
+        loss, info_dict = compute_q_td_loss(
             model,
             batch,
             model,

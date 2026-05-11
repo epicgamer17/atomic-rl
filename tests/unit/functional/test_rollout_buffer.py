@@ -8,6 +8,7 @@ from functional.rollout_buffer import (
     record_truncations,
     get_rollout_next_values,
     flatten_rollout_buffer,
+    yield_shuffled_minibatches,
 )
 
 pytestmark = pytest.mark.unit
@@ -133,3 +134,38 @@ def test_flatten_rollout_buffer():
     assert torch.all(flat_data["obs"][3] == 0)
     assert torch.all(flat_data["obs"][4] == 1)
     assert torch.all(flat_data["obs"][5] == 2)
+
+
+def test_yield_shuffled_minibatches():
+    """Test yielding shuffled minibatches from a TensorDict."""
+    total_size = 10
+    minibatch_size = 3
+    data = TensorDict(
+        {
+            "obs": torch.arange(total_size).float(),
+            "action": torch.arange(total_size),
+        },
+        batch_size=[total_size],
+    )
+
+    # Use a fixed generator for determinism in the test
+    generator = torch.Generator().manual_seed(42)
+    
+    batches = list(yield_shuffled_minibatches(data, minibatch_size, generator=generator))
+
+    # Check number of batches: ceil(10 / 3) = 4
+    assert len(batches) == 4
+    
+    # Check batch sizes: 3, 3, 3, 1
+    assert batches[0].batch_size[0] == 3
+    assert batches[1].batch_size[0] == 3
+    assert batches[2].batch_size[0] == 3
+    assert batches[3].batch_size[0] == 1
+
+    # Check that all data is present exactly once
+    all_indices = torch.cat([b["action"] for b in batches])
+    assert torch.all(torch.sort(all_indices)[0] == torch.arange(total_size))
+
+    # Check shuffling: with seed 42, randperm(10) is [2, 0, 9, 8, 5, 1, 6, 3, 7, 4]
+    # We just want to ensure it's not the original order
+    assert not torch.all(all_indices == torch.arange(total_size))

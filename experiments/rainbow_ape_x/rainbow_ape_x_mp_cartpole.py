@@ -25,7 +25,7 @@ from functional.replay_buffer import (
     make_n_step_accumulator,
     PERBufferState,
 )
-from functional.losses import bellman_error, cross_entropy_loss
+from functional.losses import compute_q_td_loss, cross_entropy_loss
 from functional.targets import categorical_td_target
 from functional.action_selection import (
     double_selector,
@@ -250,7 +250,7 @@ def actor_worker(
                 k: torch.cat([t[k] for t in local_batch]) for k in local_batch[0].keys()
             }
             with torch.no_grad():
-                _, info_dict = bellman_error(
+                _, info_dict = compute_q_td_loss(
                     local_model,
                     collated,
                     local_model,
@@ -307,7 +307,7 @@ def learner_worker(
         local_model.reset_noise()
         target_model.reset_noise()
 
-        loss, info = bellman_error(
+        loss, info = compute_q_td_loss(
             local_model,
             batch,
             local_model,

@@ -5,11 +5,12 @@ import random
 from collections import deque
 from dataclasses import dataclass
 
+
 @dataclass(kw_only=True)
 class BufferState:
     """
     State of a standard replay buffer.
-    
+
     Attributes:
         data (TensorDict): The stored transitions.
         pointer (int): Current write position.
@@ -18,6 +19,7 @@ class BufferState:
         steps_seen (int): Total number of transitions processed by this buffer.
             Useful for Reservoir Sampling logic.
     """
+
     data: TensorDict
     pointer: int
     size: int
@@ -30,6 +32,7 @@ class PERBufferState(BufferState):
     """
     State of a Prioritized Experience Replay (PER) buffer.
     """
+
     sum_tree: torch.Tensor
     min_tree: torch.Tensor
     max_priority: float
@@ -149,7 +152,9 @@ def uniform_sample(
 ) -> TensorDict:
     """Uniform sampling."""
     if buffer_state.size < batch_size:
-        raise ValueError(f"Buffer size ({buffer_state.size}) is smaller than batch size ({batch_size}).")
+        raise ValueError(
+            f"Buffer size ({buffer_state.size}) is smaller than batch size ({batch_size})."
+        )
     indices = torch.randint(0, buffer_state.size, (batch_size,), generator=rng_key)
     return buffer_state.data[indices]
 
@@ -201,6 +206,7 @@ def sample_per(
     # Clamp to handle potential precision issues leading to out-of-bounds indices
     data_indices = torch.clamp(data_indices, 0, buffer_state.capacity - 1)
 
+    # TODO: should IS weight computation be its own function? similar to probability_ratio?
     # Importance Sampling (IS) Weights
     leaf_priorities = buffer_state.sum_tree[indices]
     min_prob = buffer_state.min_tree[0] / total_priority
@@ -213,6 +219,8 @@ def sample_per(
     return batch, indices, is_weights
 
 
+# TODO: is this possible to vectorize? should i?
+@torch.inference_mode()
 def _update_tree(
     sum_tree: torch.Tensor,
     min_tree: torch.Tensor,
@@ -323,12 +331,12 @@ def make_n_step_accumulator(n_steps: int, gamma: float, num_envs: int = 1) -> Ca
     histories = [deque(maxlen=n_steps) for _ in range(num_envs)]
 
     def process_transition(
-        obs: torch.Tensor, 
-        action: torch.Tensor, 
-        reward: torch.Tensor, 
-        next_obs: torch.Tensor, 
-        terminated: torch.Tensor, 
-        truncated: torch.Tensor
+        obs: torch.Tensor,
+        action: torch.Tensor,
+        reward: torch.Tensor,
+        next_obs: torch.Tensor,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
     ) -> TensorDict:
         ready_transitions = []
         # Fix for bitwise_or on Float tensors

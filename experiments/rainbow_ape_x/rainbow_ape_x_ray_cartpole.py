@@ -25,7 +25,7 @@ from functional.replay_buffer import (
     circular_write_strategy,
     make_n_step_accumulator,
 )
-from functional.losses import bellman_error, cross_entropy_loss
+from functional.losses import compute_q_td_loss, cross_entropy_loss
 from functional.targets import categorical_td_target
 from functional.action_selection import (
     double_selector,
@@ -243,7 +243,9 @@ class ActorActor:
 
             # 3. Act
             with torch.inference_mode():
-                obs_tensor = torch.as_tensor(self.obs[None, ...], dtype=torch.float32, device=self.device)
+                obs_tensor = torch.as_tensor(
+                    self.obs[None, ...], dtype=torch.float32, device=self.device
+                )
                 _, actions = self.selector_fn(self.model, None, obs_tensor)
                 action = actions.item()
 
@@ -282,7 +284,7 @@ class ActorActor:
 
                 # Compute Initial Priorities in one batched forward pass
                 with torch.no_grad():
-                    _, info_dict = bellman_error(
+                    _, info_dict = compute_q_td_loss(
                         self.model,
                         collated,
                         self.model,
@@ -387,7 +389,7 @@ class LearnerActor:
         self.model.reset_noise()
         self.target_model.reset_noise()
 
-        loss, info = bellman_error(
+        loss, info = compute_q_td_loss(
             self.model,
             batch,
             self.model,
@@ -413,7 +415,7 @@ class LearnerActor:
         metrics = {
             "learner/loss": weighted_loss.item(),
             "learner/mean_q": info["q_values/mean"],
-            # Note: buffer_size is no longer tracked here to avoid blocking calls
+            # NOTE: buffer_size is no longer tracked here to avoid blocking calls
         }
         wandb.log(metrics, step=self.step_count)
         return metrics

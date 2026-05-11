@@ -15,7 +15,7 @@ The $\beta$ parameter controls the degree of importance sampling. It is typicall
 
 In summary, PER is a simple but effective technique that can significantly improve sample efficiency. PER is very generally applicable and can be used in many different RL algorithms that use replay buffers and experience replay.
 
-Note: below we only implement the TD error based priority method for simplicity.
+NOTE: below we only implement the TD error based priority method for simplicity.
 """
 
 import torch
@@ -38,14 +38,14 @@ from functional.replay_buffer import (
     with_per_tracking,
 )
 from functional.schedules import get_linear_schedule
-from functional.losses import bellman_error, with_per_weights, mse_loss
+from functional.losses import compute_q_td_loss, with_per_weights, mse_loss
 from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
     with_epsilon_greedy,
 )
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network, layer_init
 
 # Constants
 BATCH_SIZE = 128
@@ -75,9 +75,9 @@ torch.manual_seed(SEED)
 class DQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 512)
-        self.l2 = nn.Linear(512, 512)
-        self.l3 = nn.Linear(512, num_actions)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init(nn.Linear(512, 512))
+        self.l3 = layer_init(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -192,8 +192,8 @@ for step in range(MAX_STEPS):
         per_loss_fn = with_per_weights(mse_loss, is_weights)
 
         # Calculate Loss & Gradients
-        # bellman_error returns whatever loss_fn returns (loss, info)
-        loss, info_dict = bellman_error(
+        # compute_q_td_loss returns whatever loss_fn returns (loss, info)
+        loss, info_dict = compute_q_td_loss(
             model,
             batch,
             target_model,

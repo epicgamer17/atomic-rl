@@ -29,7 +29,7 @@ from functional.replay_buffer import (
     make_n_step_accumulator,
 )
 from functional.schedules import get_linear_schedule
-from functional.losses import bellman_error, with_per_weights, cross_entropy_loss
+from functional.losses import compute_q_td_loss, with_per_weights, cross_entropy_loss
 from functional.targets import categorical_td_target
 from functional.action_selection import (
     argmax_selector,
@@ -200,7 +200,8 @@ for step in range(MAX_STEPS):
 
         predictions = model(obs_tensor)
         action, _ = argmax_selector(
-            predictions, extractor_fn=partial(expected_value, support=SUPPORT.to(device))
+            predictions,
+            extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
         )
         action = action.item()
 
@@ -250,7 +251,7 @@ for step in range(MAX_STEPS):
         # Calculate Loss & Gradients
         per_loss_fn = with_per_weights(cross_entropy_loss, is_weights)
 
-        loss, info_dict = bellman_error(
+        loss, info_dict = compute_q_td_loss(
             model,
             batch,
             model,

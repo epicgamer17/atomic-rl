@@ -3,7 +3,21 @@ Notes on A2C:
 
 Essentially REINFORCE + a value function for the baseline to compute advantages. Or another way of putting it is REINFORCE with learned state dependant baseline.
 
-# TODO: more notes and A2C and A3C, why A2C is chosen over A3C and decisions ive made that differ from the paper.
+Not exactly related to A2C, but argued in the A3C paper. To attempt to get the same benefits of Experience Replay without the memory footprint, we can use multiple workers (or a vectorized env) to collect data in parallel (asynchronously for A3C, synchronously for A2C). This helps to decorrelate the data similar to Experience Replay (since the samples come from different trajectories so they will have a different variety of states explored, even if they are from the same policy and environment). The data is online so it is discarded after each update step, allowing for a smaller memory footprint.
+
+Specific to the A3C paper, the method they used was significantly more efficient than DQN while using a single machine and no GPU. They achieve better results than DQN and Gorilla (APE-X predecessor) with less wall clock time, less compute resources, and without a massive distributed system. Our implementation will use a vectorized synchronous environment and attempt to benefit from the GPU in the update step, the standard way to implement A2C on one machine.
+
+The idea behind Advantage Actor-Critic is to reduce the variance of the policy gradient updates by using a baseline to compute advantages. The advantage uses a learned value function to approximate the expected return of the current state, and subtracts this from the actual return to get the advantage. This tells us how much better (or worse) the current action was compared to the average action in that state.
+
+The exact math is:
+
+A_t = Q(s_t, a_t) - V(s_t) but Q is approximated by G_t
+
+They also similar to APE-X have different exploration policies per worker (when doing q learning), instead of a deterministic epsilon at the start of training like APE-X they sample an epsilon for each worker from a distribution periodically throughout training. This has similar benefits to APE-X's multiple exploration strategies in that it provides more diverse data for updates.
+
+
+NOTE: perhaps this should be in VPG?
+NOTE: This does not implement the LSTM version which was also described in the A3C Paper or the equivalent Sarsa and DQN versions of the A3C algorithm.
 """
 
 import torch
@@ -24,6 +38,7 @@ from functional.returns import compute_n_step_returns
 from functional.losses import policy_gradient_loss, huber_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
+from functional.network import layer_init
 from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step,
@@ -59,10 +74,10 @@ torch.manual_seed(SEED)
 class ActorCritic(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 64)
-        self.l2 = nn.Linear(64, 64)
-        self.l3_actor = nn.Linear(64, num_actions)
-        self.l3_critic = nn.Linear(64, 1)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 64))
+        self.l2 = layer_init(nn.Linear(64, 64))
+        self.l3_actor = layer_init(nn.Linear(64, num_actions), std=0.01)
+        self.l3_critic = layer_init(nn.Linear(64, 1), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -84,7 +99,7 @@ def env_creator(**kwargs):
 # PufferLib automatically handles vectorization and auto-resetting
 envs = pufferlib.vector.make(
     env_creator, num_envs=NUM_ENVS, backend=pufferlib.vector.Serial
-)  # Note: For heavy environments, you can swap to:
+)  # NOTE: For heavy environments, you can swap to:
 # envs = pufferlib.vector.Multiprocessing(env_creator, num_envs=NUM_ENVS)
 obs_shape = envs.single_observation_space.shape
 num_actions = envs.single_action_space.n

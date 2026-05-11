@@ -6,4 +6,54 @@ look into possible coax like notation.
 
 implement models and functions from RLAX 
 
-add ability to not normalize advantages (how should this be done). should normalization be its own function and removed from advantages functions? or should a normalize flag be passed into advantages functions? (not normalization of advantages is dependant on the method use, ie EMA vs mean)
+figure out my naming convention for functions. sometimes i say compute_xyz and other times i just say xyz
+
+potentially consider making functions for getting log probs for distributions (trouble is when doing multi discrete or multi continuous envs which require summing log probs), is this needed though? I handle this in the action selectors but do not handle it in the re-eval step cleanly at the moment. the user is expected to handle it instead.
+
+Add examples on MuJoCo
+Add examples on Atari
+Add examples on Labyrinth (A3C Paper)
+
+Future models/examples: 
+A2C + Trust Regions? (from PPO paper, what is this)
+VPG (Adaptive)? (from PPO paper, what is this)
+TRPO (from PPO paper, what is this)
+PPO
+PPO LSTM 
+PPO ATARI
+PPO MULTI DISCRETE 
+PPO CONTINUOUS 
+...
+R2D2
+NGU
+...
+AlphaZero
+Batch MCTS (different than vectorized MCTS)
+MuZero (board game + atari)
+MuZero Reanalyze
+MuZero Unplugged
+Sampled MuZero
+Efficient Zero
+Efficient Zero V2
+Gumbel MuZero
+VQ-VAE Paper (before Stochastic MuZero)
+Stochastic MuZero
+OptionZero
+... 
+Option Critic
+... 
+Sarsa
+Soft Q Learning
+... 
+SAC
+DDPG
+... 
+World Models Paper
+Dreamer V1
+Dreamer V2
+Dreamer V3
+Dreamer V4
+... 
+JEPA BASED? 
+... 
+Sutton Based Methods (linear value functions, average rewards, Dyna, etc)

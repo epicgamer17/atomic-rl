@@ -4,13 +4,13 @@ DQN is a foundational algorithm in deep reinforcement learning that combines Q-l
 
 What made DQN revolutionary was that it was the first deep learning model to successfully learn control policies end-to-end directly from high-dimensional sensory input (raw pixels). Previous successes usually relied on hand-crafted features or low-dimensional state spaces. DQN proved that a Convolutional Neural Network (CNN) could act as the function approximator for raw video frames, and that Experience Replay could stabilize the normally chaotic process of training a neural network on correlated, non-stationary RL data
 
-The paper also popularized the use of Experience Replay. That instead of learning from consecutive samples (which are correlated), we store past experiences in a buffer and sample randomly from it. This breaks the correlation between samples and improves learning stability.
+The paper also popularized the use of Experience Replay. That instead of learning from consecutive samples (which are correlated), we store past experiences in a buffer and sample randomly from it. This breaks the correlation between samples and improves learning stability. It also helps to reduce non-stationarity. It can also be argued to improve sample efficiency, though this is not always the case, and depends on how experience replay is used.And although experience replay is widely used, it does come with some trade-offs, your algorithm must work well off policy (somewhat well, as DQN does), and this prevents experience replay from being used in on-policy algorithms like PPO or A2C, etc (many policy gradient methods). It also leads to a much larger memory foot print, and uses more memory per real interaction with the environment.
 
 Additionally, the paper introduced the concept of a separate target network to stabilize training. Instead of using the same network to calculate the target Q-values, a copy of the network is kept and updated only periodically. This prevents the network from chasing a moving target, which can lead to instability and divergence.
 
 End to end learning is now essentially standard practice, and tabular methods are rarely used in deep RL. Additionally Experience Replay is used in MANY deep RL algorithms, and target networks are very commonly used (although not always, e.g. in actor-critic methods).
 
-Note: DQN is fundamentally on off-policy algorithm and in theory works well with offline data. However, in practice, DQN can only be slightly off-policy without performance degradation. There are papers that improve DQNs ability with offline data.
+NOTE: DQN is fundamentally on off-policy algorithm and in theory works well with offline data. However, in practice, DQN can only be slightly off-policy without performance degradation. There are papers that improve DQNs ability with offline data.
 
 """
 
@@ -27,8 +27,12 @@ from tensordict import TensorDict
 from functools import partial
 from einops import rearrange
 
-from functional.replay_buffer import init_buffer, circular_write_strategy, uniform_sample
-from functional.losses import bellman_error, mse_loss
+from functional.replay_buffer import (
+    init_buffer,
+    circular_write_strategy,
+    uniform_sample,
+)
+from functional.losses import compute_q_td_loss, mse_loss
 from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
@@ -36,7 +40,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network, layer_init
 
 # Constants
 BATCH_SIZE = 128
@@ -61,9 +65,9 @@ torch.manual_seed(SEED)
 class DQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = nn.Linear(input_shape[0], 512)
-        self.l2 = nn.Linear(512, 512)
-        self.l3 = nn.Linear(512, num_actions)
+        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init(nn.Linear(512, 512))
+        self.l3 = layer_init(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -167,7 +171,7 @@ for step in range(MAX_STEPS):
         batch = uniform_sample(buffer_state, rng_key, BATCH_SIZE)
 
         # Calculate Loss & Gradients
-        loss, info_dict = bellman_error(
+        loss, info_dict = compute_q_td_loss(
             model,
             batch,
             target_model,

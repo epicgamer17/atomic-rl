@@ -11,7 +11,7 @@ This is useful for games like Montezuma's Revenge where exploration is very impo
 
 This method is very generally applicable as a method of exploration and in the original paper is applied both to DQN and A2C. It could feasibly be applied to any other algorithm that uses neural networks to output actions, whether they are deterministic or stochastic.
 
-Note: the below DQN implementation is not the same as used in the paper (it does not use dueling DQN, double DQN, etc).
+NOTE: the below DQN implementation is not the same as used in the paper (it does not use dueling DQN, double DQN, etc).
 """
 
 import torch
@@ -26,8 +26,12 @@ import wandb
 from tensordict import TensorDict
 from functools import partial
 
-from functional.replay_buffer import init_buffer, circular_write_strategy, uniform_sample
-from functional.losses import bellman_error, mse_loss
+from functional.replay_buffer import (
+    init_buffer,
+    circular_write_strategy,
+    uniform_sample,
+)
+from functional.losses import compute_q_td_loss, mse_loss
 from functional.targets import scalar_td_target
 from functional.action_selection import (
     argmax_selector,
@@ -168,7 +172,7 @@ for step in range(MAX_STEPS):
         target_model.reset_noise()
 
         # Calculate Loss & Gradients
-        loss, info_dict = bellman_error(
+        loss, info_dict = compute_q_td_loss(
             model,
             batch,
             target_model,
