@@ -1,32 +1,25 @@
+# Fully Generated
 """
-Notes on PPO:
+Notes on PPO for Pendulum (Continuous Action Space):
 
-The PPO paper argues that there is room for improvement in developing a method that is scalable (to large models and parallel implementations), data efficient, and robust (i.e., successful on a variety of problems without hyperparameter tuning).
+This example demonstrates Proximal Policy Optimization (PPO) applied to the Pendulum-v1 environment.
+Pendulum-v1 features a 3D observation space (cos(theta), sin(theta), theta_dot) and a 1D continuous
+action space (torque) in the range [-2.0, 2.0].
 
-Q-learning (with function approximation) fails on many simple problems (continuous control) and is poorly understood, vanilla policy gradient methods have poor data effiency and robustness; and trust region policy optimization (TRPO) is relatively complicated, and is not compatible with architectures that include noise (such as dropout) or parameter sharing (between the policy and value function, or with auxiliary tasks).
-
-PPO aims to achieve the data efficiency and reliable performance of TRPO, but with the implementation simplicity of a standard gradient method.
-
-It does this by taking multiple gradient steps on the same data (typically 10-20, compared to 1 for vanilla policy gradient and TRPO), but with a constraint that prevents it from deviating too far from the previous policy.
-
-The paper states that while it is appealing to perform multiple steps of optimization on the standard policy gradient loss using the same trajectory, doing so is not well-justified, and empirically it often leads to destructively large policy updates.
-
-It introduces a clipped surrogate objective function to get a lower bound on the performance of the policy and a update pattern where they sample data from the policy and then perform several epochs of updates on that data (as opposed to just one update per sample like in vanilla policy gradient, or doing updates on the fly like in A2C). The motivation is that L^CLI which L^CLIP (the PPO clipped surrogate loss) is based on, doesn't penalize moving away from the old policy, so it leads to large policy updates that move the policy ratio away from 1 (ie it becomes more off policy preventing multiple epochs).
-
-Another approach which can be used as an alternative to the clipped surrogate loss, or in addition to it is to add a penalty on have a target KL divergence. If the policy strays too far from the previous policy, it is penalized. The goal of this is to achieve a target kl divergence (change in policy) each policy update (after all epochs for a single update step). This was found to perform worse than the clipped surrogate loss in the papers experiments.
-
-It performs better on continuous control tasks than A2C and vanilla policy gradient and has better sample complexity than A2C on Atari.
-
-NOTE: the paper is a very easy read and it is recommend to read it
-NOTE: we do not implement the KL divergence penalty version of PPO in this implementation, as it was largely abandoned by the community in favor of the clipped objective.
-
-TODO: what is better sample complexity
-TODO: More on pessemistic lower bound, what it means, why its useful, etc
+Key Implementation Details:
+1.  **Explicit Continuous Architecture**: Uses independent actor and critic networks.
+    The actor predicts the mean of a Gaussian distribution, while the log standard deviation
+    is a standalone learnable parameter.
+2.  **Action Selection**: Employs `gaussian_sampling_selector` to handle continuous action sampling
+     and log-probability calculation.
+3.  **Normalization**: Uses `NormalizeObservation` and `NormalizeReward` wrappers, which are
+    typically critical for stable training in continuous control tasks.
+4.  **GAE & PPO Loss**: Implements Generalized Advantage Estimation (GAE) and the clipped surrogate
+    objective as per Schulman et al. (2017).
 """
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import gymnasium as gym
 from typing import Tuple
@@ -34,9 +27,8 @@ import numpy as np
 import random
 import wandb
 from einops import rearrange
-from functools import partial
 
-from functional.action_selection import categorical_sampling_selector
+from functional.action_selection import gaussian_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_gae, compute_td_lambda_returns
 from functional.losses import (
@@ -44,7 +36,6 @@ from functional.losses import (
     entropy_loss,
     probability_ratio,
     clipped_value_loss,
-    mse_loss,
 )
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
@@ -61,18 +52,18 @@ from functional.utils import standardize_tensor
 from tensordict import TensorDict
 
 # Constants
-LEARNING_RATE = 2.5e-4
-MAX_ITERATIONS = 976
-GAMMA = 0.99
+LEARNING_RATE = 3e-4
+MAX_ITERATIONS = 500  # Sufficient for Pendulum
+GAMMA = 0.9  # Pendulum often benefits from a slightly lower discount factor
 GAE_LAMBDA = 0.95
-ENTROPY_COEFF = 0.01
+ENTROPY_COEFF = 0.0
 CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5
-STEPS_PER_ENV = 128
-UPDATE_EPOCHS = 4
-MINIBATCH_SIZE = 128
+STEPS_PER_ENV = 128  # One full Pendulum episode
+UPDATE_EPOCHS = 10
+MINIBATCH_SIZE = 64
 CLIP_COEF = 0.2
-TARGET_KL = None
+TARGET_KL = 0.015
 NUM_ENVS = 4
 SEED = 42
 
@@ -82,17 +73,10 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 
-# NOTE: PPO can have a shared backbone between the actor and critic or seperate networks.
 class ActorCritic(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.actor = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, num_actions), std=0.01),
-        )
+        # 1. Critic Network
         self.critic = nn.Sequential(
             layer_init(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
@@ -101,19 +85,42 @@ class ActorCritic(nn.Module):
             layer_init(nn.Linear(64, 1), std=1.0),
         )
 
+        # 2. Actor Mean Network
+        self.actor_mean = nn.Sequential(
+            layer_init(nn.Linear(input_shape[0], 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, num_actions), std=0.01),
+        )
+
+        # 3. Actor LogStd (Independent, learnable parameter)
+        self.actor_logstd = nn.Parameter(torch.zeros(1, num_actions))
+
     def forward(self, x):
-        x_actor = self.actor(x)
-        x_critic = self.critic(x)
-        return x_actor, x_critic
+        """
+        Forward pass for the actor-critic network.
+
+        Args:
+            x (torch.Tensor): Observation input.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: action_mean, action_std, values
+        """
+        action_mean = self.actor_mean(x)
+        action_logstd = self.actor_logstd.expand_as(action_mean)
+        action_std = torch.exp(action_logstd)
+        values = self.critic(x)
+        return action_mean, action_std, values
 
 
-# --- 1. Initialization (Defining the State) ---
+# --- 1. Initialization ---
 def make_env(env_id, seed, idx):
     def thunk():
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        # Apply standard wrappers if needed here
-        # Standard continuous control wrappers
+        # Pendulum actions are in [-2, 2], ClipAction ensures they stay within bounds
+        env = gym.wrappers.ClipAction(env)
         env = gym.wrappers.NormalizeObservation(env)
         env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10).astype(np.float32))
         env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
@@ -125,19 +132,15 @@ def make_env(env_id, seed, idx):
     return thunk
 
 
-# Use standard Gymnasium Vector Envs instead of Pufferlib
 # TODO: switch to either procgen, envpool, isaac gym, brax, or pufferlib to decrease training time (same number iterations but faster)
+# Initialize vectorized environments
 envs = gym.vector.SyncVectorEnv(
-    [make_env("CartPole-v1", SEED + i, i) for i in range(NUM_ENVS)]
+    [make_env("Pendulum-v1", SEED + i, i) for i in range(NUM_ENVS)]
 )
 
-# NOTE: PPO on Cartpole at least seems to be highly sensitive to this.
-# envs = NormalizeObservation(envs)
-# NOTE: Reward scaling/normalization is also highly beneficial for PPO stability.
-# envs = NormalizeReward(envs, gamma=GAMMA)
 
 obs_shape = envs.single_observation_space.shape
-num_actions = envs.single_action_space.n
+num_actions = envs.single_action_space.shape[0]
 device = torch.device("cpu")
 
 model = ActorCritic(obs_shape, num_actions).to(device)
@@ -150,16 +153,17 @@ scheduler = LinearLR(
 
 obs, info = envs.reset(seed=SEED)
 
-# Pre-allocate rollout buffers using the new functional system
+# Pre-allocate rollout buffers
 shapes = {
     "observations": obs_shape,
-    "actions": (),
+    "actions": (num_actions,),
     "logprobs": (),
     "rewards": (),
     "terminated": (),
     "truncated": (),
     "values": (),
-    "logits": (num_actions,),
+    "means": (num_actions,),
+    "stds": (num_actions,),
 }
 buffer = init_rollout_buffer(
     steps_per_env=STEPS_PER_ENV,
@@ -168,14 +172,14 @@ buffer = init_rollout_buffer(
     device=device,
 )
 
-# Pre-allocate rollout buffers using the new functional system
+# Pre-allocate rollout buffers
 
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
 # Initialize W&B
 wandb.init(
-    project="ppo-cartpole",
+    project="ppo-pendulum",
     config={
         "lr": LEARNING_RATE,
         "gamma": GAMMA,
@@ -185,30 +189,37 @@ wandb.init(
         "clip_coef": CLIP_COEF,
         "num_envs": NUM_ENVS,
         "steps_per_env": STEPS_PER_ENV,
+        "env": "Pendulum-v1",
     },
 )
 wandb.define_metric("*", step_metric="global_step")
 global_step = 0
 
-# Using full episodes
+# Training Loop
 for iteration in range(MAX_ITERATIONS):
     # 1. Data Collection Phase
     with torch.inference_mode():
         for step in range(STEPS_PER_ENV):
             obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
-            logits, value = model(obs_tensor)
-            action, info_dict = categorical_sampling_selector(logits, temperature=1.0)
-            action_np = action.cpu().numpy().flatten().astype(np.int32)
+            action_mean, action_std, value = model(obs_tensor)
 
-            # 2. Step Env
+            # Use gaussian_sampling_selector for continuous actions
+            action, info_dict = gaussian_sampling_selector(
+                action_mean, action_std, explore=True
+            )
+
+            # Step Env expects numpy arrays for actions
+            action_np = action.cpu().numpy().astype(np.float32)
+
+            # Step Env
             next_obs, reward, terminated, truncated, info = envs.step(action_np)
             global_step += NUM_ENVS
 
-            # 3. Add to "online" buffers
+            # Store in rollout buffer
             transition = TensorDict(
                 {
                     "observations": obs_tensor,
-                    "actions": action.squeeze(-1),
+                    "actions": action,
                     "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
                     "rewards": torch.as_tensor(
                         reward, dtype=torch.float32, device=device
@@ -220,7 +231,8 @@ for iteration in range(MAX_ITERATIONS):
                         truncated, dtype=torch.float32, device=device
                     ),
                     "values": value.squeeze(-1).detach(),
-                    "logits": logits.detach(),
+                    "means": action_mean.detach(),
+                    "stds": action_std.detach(),
                 },
                 batch_size=[NUM_ENVS],
             )
@@ -252,17 +264,15 @@ for iteration in range(MAX_ITERATIONS):
                             }
                         )
 
-            # NOTE: obs = next_obs is moved to here.
             obs = next_obs
 
-        # Compute last values for the re-evaluation pass
+        # Compute last values for GAE
         last_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
-        _, last_values = model(last_obs_tensor)
+        _, _, last_values = model(last_obs_tensor)
         last_values = last_values.squeeze(-1)
 
-        # Calculate Next Values (handling truncations)
         next_values = get_rollout_next_values(
-            buffer, last_values, get_value_fn=lambda obs: model(obs)[1], device=device
+            buffer, last_values, get_value_fn=lambda obs: model(obs)[2], device=device
         )
 
     # 2. Advantage & Target Calculation
@@ -286,16 +296,15 @@ for iteration in range(MAX_ITERATIONS):
         lam=GAE_LAMBDA,
     )
 
-    # Flatten buffer for loss calculations
+    # Flatten buffer for training
     flat_data = flatten_rollout_buffer(buffer)
     flat_advantages = rearrange(advantages, "b t -> (b t)")
     flat_returns = rearrange(returns, "b t -> (b t)")
 
-    # Add advantages and returns to flat_data for easier minibatch sampling
     flat_data["advantages"] = flat_advantages
     flat_data["returns"] = flat_returns
 
-    # 3. The Update Loop (Multiple Epochs & Minibatches)
+    # 3. Optimization Phase
     epoch_losses = []
     clip_fractions = []
     approx_kls = []
@@ -305,15 +314,16 @@ for iteration in range(MAX_ITERATIONS):
         for mb in yield_shuffled_minibatches(
             flat_data, MINIBATCH_SIZE, generator=rng_key
         ):
-            # Re-evaluate the policy and value function on the minibatch
-            new_logits, new_values = model(mb["observations"])
+            # Re-evaluate model on minibatch
+            new_means, new_stds, new_values = model(mb["observations"])
             new_values = new_values.squeeze(-1)
 
-            # Re-calculate log probabilities and entropy
-            dist = torch.distributions.Categorical(logits=new_logits)
-            new_log_probs = dist.log_prob(mb["actions"])
+            # Re-create normal distribution for new log probabilities
+            dist = torch.distributions.Normal(new_means, new_stds)
+            # Log prob for continuous actions [B, num_actions] -> [B]
+            new_log_probs = dist.log_prob(mb["actions"]).sum(dim=-1)
 
-            # approx_kl computed for logging and per-epoch early-stop decision
+            # Compute KL divergence
             with torch.no_grad():
                 log_ratio = new_log_probs - mb["logprobs"]
                 approx_kl = ((torch.exp(log_ratio) - 1) - log_ratio).mean().item()
@@ -325,7 +335,6 @@ for iteration in range(MAX_ITERATIONS):
                 new_log_probs=new_log_probs,
             )
 
-            # Advantage Standardisation (Minibatch level as per CleanRL)
             mb_advantages = mb["advantages"]
             mb_advantages = standardize_tensor(mb_advantages)
 
@@ -352,29 +361,24 @@ for iteration in range(MAX_ITERATIONS):
             # Total Loss
             loss = pg_loss + CRITIC_COEFF * critic_loss - ENTROPY_COEFF * ent_loss
 
-            # Apply Updates
+            # Backprop
             optimizer = apply_gradients(
                 optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
             )
 
-            # Track Metrics
+            # Metrics tracking
             with torch.no_grad():
-                # Clip Fraction
                 clipped = (ratio - 1.0).abs() > CLIP_COEF
                 clip_fractions.append(clipped.float().mean().item())
                 approx_kls.append(approx_kl)
                 epoch_losses.append(loss.item())
 
-        # KL early stop on the per-epoch mean (CleanRL-style): break the
-        # epoch loop only, after the epoch's gradient steps have been taken.
+        # Early stopping based on KL
         if TARGET_KL is not None and np.mean(epoch_kls) > 1.5 * TARGET_KL:
             break
 
     # Step the learning rate down
     scheduler.step()
-
-    # Clear truncation records for the next iteration
-    # TODO: do this here or start of collection phase?
     buffer.truncation_records.clear()
 
     # Logging

@@ -3,7 +3,8 @@ from tensordict import TensorDict
 from typing import Tuple, Callable, List, Optional, Union
 from dataclasses import dataclass, field
 import numpy as np
-from .replay_buffer import _allocate_tensordict
+from einops import rearrange
+from .utils import _allocate_tensordict
 
 
 @dataclass
@@ -43,19 +44,21 @@ def store_rollout_step(
 def record_truncations(
     buffer: RolloutBufferState,
     step: int,
-    info: dict,
-    truncated: Union[np.ndarray, torch.Tensor],
+    truncated_envs: torch.Tensor,
+    final_observations: torch.Tensor,
 ) -> None:
-    """Checks the info dict for final observations (from Gymnasium auto-resets)
-    and records them in the buffer's truncation_records list ONLY if they were truncated.
     """
-    from .utils import extract_vector_env_final_obs
+    Records final observations for truncated environments.
+    Decoupled from Gymnasium's info dictionary structure.
 
-    env_indices, final_obs = extract_vector_env_final_obs(info)
-    for i, env_idx in enumerate(env_indices):
-        if truncated[env_idx]:
-            obs_tensor = torch.as_tensor(final_obs[i], dtype=torch.float32)
-            buffer.truncation_records.append((step, int(env_idx), obs_tensor))
+    Args:
+        buffer (RolloutBufferState): The rollout buffer state.
+        step (int): The current rollout step.
+        truncated_envs (torch.Tensor): 1D tensor of environment indices that were truncated.
+        final_observations (torch.Tensor): 2D tensor of final observations for those environments.
+    """
+    for i, env_idx in enumerate(truncated_envs):
+        buffer.truncation_records.append((step, env_idx.item(), final_observations[i]))
 
 
 def get_rollout_next_values(
@@ -98,6 +101,10 @@ def yield_shuffled_minibatches(
     Yields shuffled minibatches from a flattened TensorDict.
     Used in PPO, SAC, Behaviour Cloning, and Offline RL (Efficient Zero, MuZero Unplugged, etc).
     """
+    assert (
+        len(batch.batch_size) == 1
+    ), f"Expected 1D batched data, got {batch.batch_size}. Call flatten() first."
+
     total_size = batch.batch_size[0]
     indices = torch.randperm(total_size, generator=generator, device=batch.device)
 
@@ -105,3 +112,68 @@ def yield_shuffled_minibatches(
         end_idx = min(start_idx + minibatch_size, total_size)
         mb_indices = indices[start_idx:end_idx]
         yield batch[mb_indices]
+
+
+# TODO: is it possible to merge the two yield mini batch functions? is that a good idea?
+def yield_sequential_minibatches(
+    buffer_data: TensorDict,
+    num_envs: int,
+    num_minibatches: int,
+    initial_lstm_states: Tuple[torch.Tensor, torch.Tensor],
+    generator: torch.Generator = None,
+):
+    """
+    Yields mini-batches preserving the sequential order of time steps.
+    Instead of shuffling individual steps, it shuffles entire environments
+    and yields their full unrolled sequences.
+
+    Args:
+        buffer_data: TensorDict of shape [envs, steps, ...]
+        num_envs: Total number of environments
+        num_minibatches: How many mini-batches to split the environments into
+        initial_lstm_states: Tuple of (hidden, cell) states from the start of the rollout.
+            Expected shape: [layers, envs, hidden_dim]
+        generator: Optional torch generator for reproducibility.
+
+    Yields:
+        mb_flat: Flattened TensorDict of shape [steps * envs_per_batch, ...]
+        (mb_initial_h, mb_initial_c): Initial LSTM states for the selected environments.
+    """
+    assert (
+        num_envs % num_minibatches == 0
+    ), f"num_envs ({num_envs}) must be divisible by num_minibatches ({num_minibatches}) for LSTM PPO"
+    assert (
+        len(buffer_data.batch_size) == 2
+    ), f"Expected [envs, steps] data, got {buffer_data.batch_size}."
+
+    envs_per_batch = num_envs // num_minibatches
+
+    # Shuffle environment indices, NOT time indices
+    env_indices = torch.randperm(
+        num_envs, generator=generator, device=buffer_data.device
+    )
+
+    for start in range(0, num_envs, envs_per_batch):
+        end = start + envs_per_batch
+        mb_env_inds = env_indices[start:end]
+
+        # 1. Select the initial LSTM states for these specific environments
+        # Hidden/Cell states are typically [layers, envs, hidden_dim]
+        mb_initial_h = initial_lstm_states[0][:, mb_env_inds].detach()
+        mb_initial_c = initial_lstm_states[1][:, mb_env_inds].detach()
+
+        # 2. Slice the buffer data for these environments across ALL steps
+        # buffer_data is [envs, steps, ...] -> slice to [envs_per_batch, steps, ...]
+        mb_data = buffer_data[mb_env_inds, :]
+        steps = mb_data.batch_size[1]
+
+        # 3. Flatten the sequence and environment dimensions to [steps * envs_per_batch, ...]
+        # We use "b t ... -> (t b) ..." so that when reshaped to (T, B), it stays sequential
+        # Output shape: [T * B_per_batch, ...]
+        # NOTE: einops doesn't support TensorDict directly, so we use .apply()
+        mb_flat = mb_data.apply(
+            lambda x: rearrange(x, "b t ... -> (t b) ..."),
+            batch_size=[steps * envs_per_batch],
+        )
+
+        yield mb_flat, (mb_initial_h, mb_initial_c)

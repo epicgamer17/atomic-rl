@@ -78,6 +78,7 @@ class DQN(nn.Module):
 
 # --- 1. Initialization (Defining the State) ---
 env = gym.make("CartPole-v1")
+env = gym.wrappers.RecordEpisodeStatistics(env)
 obs_shape = env.observation_space.shape
 num_actions = env.action_space.n
 device = torch.device("cpu")
@@ -103,7 +104,6 @@ buffer_state = init_buffer(
 )
 
 obs, info = env.reset(seed=SEED)
-stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
@@ -141,7 +141,6 @@ for step in range(MAX_STEPS):
 
     # 2. Step Env
     next_obs, reward, terminated, truncated, info = env.step(action)
-    stat_episode_return += reward
 
     # 3. Add to Buffer
     transition = {
@@ -161,9 +160,15 @@ for step in range(MAX_STEPS):
     obs = next_obs
 
     if terminated or truncated:
-        wandb.log({"episode_return": stat_episode_return}, step=step)
+        if "episode" in info:
+            wandb.log(
+                {
+                    "episode_return": info["episode"]["r"][0],
+                    "episode_length": info["episode"]["l"][0],
+                },
+                step=step,
+            )
         obs, info = env.reset()
-        stat_episode_return = 0.0
 
     # --- 3. The Update Loop ---
     if step > MIN_BUFFER_SIZE and step % UPDATE_FREQ == 0:
@@ -175,7 +180,7 @@ for step in range(MAX_STEPS):
             model,
             batch,
             target_model,
-            partial(scalar_td_target, gamma=rearrange(batch["gamma"], "b -> b 1")),
+            partial(scalar_td_target, gamma=batch["gamma"]),
             loss_fn=mse_loss,
         )
         loss = loss.mean()

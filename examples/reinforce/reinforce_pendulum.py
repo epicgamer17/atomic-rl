@@ -20,17 +20,21 @@ from functional.action_selection import gaussian_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
-from functional.utils import exponential_moving_average, standardize_tensor, scale_tensor_by_std
+from functional.utils import (
+    exponential_moving_average,
+    standardize_tensor,
+    scale_tensor_by_std,
+)
 from functional.network import layer_init
 
 # Constants
 LEARNING_RATE = 1e-3
 MAX_EPISODES = 2_000
-GAMMA = 0.99
+GAMMA = 0.9
 SEED = 42
 MAX_ACTION = 2.0
-HIDDEN_SIZE = 256
-INITIAL_LOG_STD = -0.5
+HIDDEN_SIZE = 64
+INITIAL_LOG_STD = 0.0
 
 # Seeding for reproducibility
 random.seed(SEED)
@@ -69,16 +73,17 @@ class Actor(nn.Module):
 
 # --- 1. Initialization (Defining the State) ---
 env = gym.make("Pendulum-v1")
+env = gym.wrappers.RecordEpisodeStatistics(env)
+env = gym.wrappers.ClipAction(env)
 obs_shape = env.observation_space.shape
 num_actions = env.action_space.shape[0]
 device = torch.device("cpu")
 
 actor = Actor(obs_shape, num_actions).to(device)
-optimizer = optim.Adam(actor.parameters(), lr=LEARNING_RATE)
+optimizer = optim.Adam(actor.parameters(), lr=LEARNING_RATE, eps=1e-5)
 
 obs, info = env.reset(seed=SEED)
 terminated, truncated = False, False
-stat_episode_return = 0.0
 global_ema_baseline = 0.0
 
 # Initialize W&B
@@ -104,7 +109,6 @@ for episode in range(MAX_EPISODES):
 
         # 2. Step Env
         next_obs, reward, terminated, truncated, info = env.step(action)
-        stat_episode_return += reward
 
         # 3. Add to buffers
         rewards.append(reward)
@@ -116,10 +120,16 @@ for episode in range(MAX_EPISODES):
         obs = next_obs
 
     if terminated or truncated:
-        wandb.log({"episode_return": stat_episode_return}, step=episode)
+        if "episode" in info:
+            wandb.log(
+                {
+                    "episode_return": info["episode"]["r"][0],
+                    "episode_length": info["episode"]["l"][0],
+                },
+                step=episode,
+            )
         obs, info = env.reset()
         terminated, truncated = False, False
-        stat_episode_return = 0.0
 
     # --- 3. The Update Loop ---
     # 1. Compute Returns (Algorithm Agnostic)
@@ -128,7 +138,9 @@ for episode in range(MAX_EPISODES):
         torch.tensor(terminateds, dtype=torch.float32, device=device).unsqueeze(0),
         torch.tensor(truncateds, dtype=torch.float32, device=device).unsqueeze(0),
         GAMMA,
-    ).squeeze(0) # TODO: replace with rearrange
+    ).squeeze(
+        0
+    )  # TODO: replace with rearrange
 
     # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
     # Use EMA baseline for variance reduction
@@ -142,7 +154,7 @@ for episode in range(MAX_EPISODES):
 
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        log_probs=rearrange(torch.stack(log_probs), 't 1 1 -> t'),
+        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
     )
     loss = loss.mean()
 
@@ -153,3 +165,5 @@ for episode in range(MAX_EPISODES):
         log_dict = info_dict.copy()
         log_dict.update({"loss": loss.item(), "std": torch.exp(actor.log_std).item()})
         wandb.log(log_dict, step=episode)
+
+wandb.finish()

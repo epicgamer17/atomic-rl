@@ -12,6 +12,7 @@ from functional.losses import (
     probability_ratio,
     clipped_surrogate_loss,
     clipped_value_loss,
+    compute_is_weights,
 )
 import math
 
@@ -258,3 +259,19 @@ def test_clipped_value_loss():
     # Test shape mismatch
     with pytest.raises(AssertionError, match="Shape mismatch"):
         clipped_value_loss(new_values, old_values[:2], returns, clip_coef)
+
+def test_compute_is_weights():
+    """Test Importance Sampling weight computation."""
+    leaf_priorities = torch.tensor([1.0, 2.0, 4.0])
+    total_priority = 10.0
+    min_prob = 0.05
+    beta = torch.tensor(0.5)
+
+    is_weights = compute_is_weights(leaf_priorities, min_prob, total_priority, beta)
+
+    # probs = [0.1, 0.2, 0.4]
+    # is = [ (0.1/0.05)^-0.5, (0.2/0.05)^-0.5, (0.4/0.05)^-0.5 ]
+    # is = [ 2^-0.5, 4^-0.5, 8^-0.5 ]
+    # is = [ 0.7071, 0.5, 0.3535 ]
+    expected_is = torch.tensor([0.70710678118, 0.5, 0.35355339059])
+    torch.testing.assert_close(is_weights, expected_is)

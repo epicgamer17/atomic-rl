@@ -2,7 +2,7 @@
 Notes on A2C for Pendulum (Continuous Action Space):
 
 STRUCTURALLY SIMILAR TO a2c_cartpole.py but adapted for continuous actions.
-Uses pufferlib for vectorization and the functional rollout buffer system.
+Uses standard Gymnasium Vector Envs and the functional rollout buffer system.
 """
 
 import torch
@@ -33,26 +33,21 @@ from functional.rollout_buffer import (
 )
 from functional.utils import standardize_tensor
 from tensordict import TensorDict
-import pufferlib
-import pufferlib.vector
-import pufferlib.emulation
-
-# TODO: find a good set of hyperparameters for this (maybe based on PPO?)
 
 # Constants
 LEARNING_RATE = 1e-4
 MAX_ITERATIONS = 100_000
 GAMMA = 0.9
 CRITIC_COEFF = 0.5
-ENTROPY_COEFF = 0.001
+ENTROPY_COEFF = 0.0
 MAX_GRAD_NORM = 0.5
 N_STEP = 5
 STEPS_PER_ENV = N_STEP
 NUM_ENVS = 32
 SEED = 42
 MAX_ACTION = 2.0
-HIDDEN_SIZE = 256
-INITIAL_LOG_STD = -0.5
+HIDDEN_SIZE = 64
+INITIAL_LOG_STD = 0.0
 
 # Seeding for reproducibility
 random.seed(SEED)
@@ -86,7 +81,7 @@ class ActorCritic(nn.Module):
         self.actor_mu = layer_init(nn.Linear(HIDDEN_SIZE, num_actions), std=0.01)
         self.log_std = nn.Parameter(torch.ones(1, num_actions) * INITIAL_LOG_STD)
 
-        # Critic Network: Predicts the state value estimate (completely separate)
+        # Critic Network: Predicts the state value estimate
         self.critic = nn.Sequential(
             layer_init(nn.Linear(input_shape[0], HIDDEN_SIZE)),
             nn.Tanh(),
@@ -98,17 +93,6 @@ class ActorCritic(nn.Module):
     def forward(
         self, x: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Forward pass for the Actor-Critic network.
-
-        Args:
-            x: Input observation tensor.
-
-        Returns:
-            mu: Mean of the Gaussian distribution.
-            std: Standard deviation of the Gaussian distribution.
-            value: State value estimate.
-        """
         latent = self.actor_backbone(x)
         mu = torch.tanh(self.actor_mu(latent)) * MAX_ACTION
         std = torch.exp(self.log_std).expand_as(mu)
@@ -117,25 +101,34 @@ class ActorCritic(nn.Module):
 
 
 # --- 1. Initialization (Defining the State) ---
-def env_creator(**kwargs):
-    # Create the standard Gym environment
-    env = gym.make("Pendulum-v1")
-    return pufferlib.emulation.GymnasiumPufferEnv(env=env, **kwargs)
+def make_env(env_id, seed, idx):
+    def thunk():
+        env = gym.make(env_id)
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        env = gym.wrappers.ClipAction(env)
+        env.action_space.seed(seed)
+        env.observation_space.seed(seed)
+        return env
+
+    return thunk
 
 
-envs = pufferlib.vector.make(
-    env_creator, num_envs=NUM_ENVS, backend=pufferlib.vector.Serial
+# Initialize vectorized environments using standard Gymnasium Vector Envs
+# TODO: switch to either procgen, envpool, isaac gym, brax, or pufferlib to decrease training time (same number iterations but faster)
+envs = gym.vector.SyncVectorEnv(
+    [make_env("Pendulum-v1", SEED + i, i) for i in range(NUM_ENVS)]
 )
+
 obs_shape = envs.single_observation_space.shape
 num_actions = envs.single_action_space.shape[0]
 device = torch.device("cpu")
 
 model = ActorCritic(obs_shape, num_actions).to(device)
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, eps=1e-5)
 
 # Linearly decay LR from 1.0 * LEARNING_RATE to 0.0 * LEARNING_RATE over MAX_ITERATIONS
 scheduler = LinearLR(
-    optimizer, start_factor=1.0, end_factor=0.1, total_iters=MAX_ITERATIONS
+    optimizer, start_factor=1.0, end_factor=0.0, total_iters=MAX_ITERATIONS
 )
 
 obs, info = envs.reset(seed=SEED)
@@ -159,8 +152,7 @@ buffer = init_rollout_buffer(
     device=device,
 )
 
-# Track episodic returns
-stat_episode_returns = np.zeros(NUM_ENVS)
+# Pre-allocate rollout buffers
 
 # Initialize W&B
 wandb.init(project="a2c-pendulum", config={"lr": LEARNING_RATE, "gamma": GAMMA})
@@ -175,12 +167,12 @@ for iteration in range(MAX_ITERATIONS):
             mu, std, value = model(obs_tensor)
 
             action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
-            action = action_tensor.cpu().numpy()
+            action_np = action_tensor.cpu().numpy()
             # Pendulum actions are already scaled by mu head, but we can clip to be safe
-            action = np.clip(action, -MAX_ACTION, MAX_ACTION)
+            action_np = np.clip(action_np, -MAX_ACTION, MAX_ACTION)
 
             # 2. Step Env
-            next_obs, reward, terminated, truncated, info = envs.step(action)
+            next_obs, reward, terminated, truncated, info = envs.step(action_np)
             global_step += NUM_ENVS
 
             # 3. Add to buffers
@@ -205,18 +197,32 @@ for iteration in range(MAX_ITERATIONS):
                 batch_size=[NUM_ENVS],
             )
             store_rollout_step(buffer=buffer, step=step, transition=transition)
-            record_truncations(buffer, step, info, truncated)
 
-            stat_episode_returns += reward
-            for i, (t, tr) in enumerate(zip(terminated, truncated)):
-                if t or tr:
-                    wandb.log(
-                        {
-                            "episode_return": stat_episode_returns[i],
-                            "global_step": global_step,
-                        }
+            # 4. Handle Truncations (Gymnasium auto-resets)
+            if "final_observation" in info:
+                from functional.utils import extract_vector_env_final_obs
+
+                env_indices, final_obs = extract_vector_env_final_obs(info)
+                # Filter to only record environments that were truncated
+                trunc_mask = truncated[env_indices]
+                if trunc_mask.any():
+                    record_truncations(
+                        buffer,
+                        step,
+                        torch.as_tensor(env_indices[trunc_mask], dtype=torch.long, device=device),
+                        torch.as_tensor(final_obs[trunc_mask], dtype=torch.float32, device=device),
                     )
-                    stat_episode_returns[i] = 0.0
+
+            if "final_info" in info:
+                for item in info["final_info"]:
+                    if item is not None and "episode" in item:
+                        wandb.log(
+                            {
+                                "episode_return": item["episode"]["r"][0],
+                                "episode_length": item["episode"]["l"][0],
+                                "global_step": global_step,
+                            }
+                        )
 
             obs = next_obs
 
@@ -308,3 +314,5 @@ for iteration in range(MAX_ITERATIONS):
             }
         )
         wandb.log(log_dict)
+
+wandb.finish()

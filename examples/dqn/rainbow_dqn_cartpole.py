@@ -138,6 +138,7 @@ class RainbowNetwork(nn.Module):
 
 # --- 1. Initialization (Defining the State) ---
 env = gym.make("CartPole-v1")
+env = gym.wrappers.RecordEpisodeStatistics(env)
 obs_shape = env.observation_space.shape
 num_actions = env.action_space.n
 device = torch.device("cpu")
@@ -170,7 +171,6 @@ accumulate_n_step, reset_accumulator = make_n_step_accumulator(
 )
 
 obs, info = env.reset(seed=SEED)
-stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
@@ -207,7 +207,6 @@ for step in range(MAX_STEPS):
 
     # 2. Step Env
     next_obs, reward, terminated, truncated, info = env.step(action)
-    stat_episode_return += reward
 
     # 3. N-Step Accumulation and Buffer Addition
     # The accumulator now returns a list of 0, 1, or N transitions.
@@ -228,10 +227,16 @@ for step in range(MAX_STEPS):
     obs = next_obs
 
     if terminated or truncated:
-        wandb.log({"episode_return": stat_episode_return}, step=step)
+        if "episode" in info:
+            wandb.log(
+                {
+                    "episode_return": info["episode"]["r"][0],
+                    "episode_length": info["episode"]["l"][0],
+                },
+                step=step,
+            )
         obs, info = env.reset()
         reset_accumulator()
-        stat_episode_return = 0.0
 
     # --- 3. Update Loop ---
     if step > MIN_BUFFER_SIZE and step % UPDATE_FREQ == 0:
@@ -257,7 +262,7 @@ for step in range(MAX_STEPS):
             model,
             partial(
                 categorical_td_target,
-                gamma=rearrange(batch["gamma"], "b -> b 1"),
+                gamma=batch["gamma"],
                 support=SUPPORT.to(device).to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,

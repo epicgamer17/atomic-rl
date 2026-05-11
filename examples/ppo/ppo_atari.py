@@ -1,32 +1,7 @@
-"""
-Notes on PPO:
-
-The PPO paper argues that there is room for improvement in developing a method that is scalable (to large models and parallel implementations), data efficient, and robust (i.e., successful on a variety of problems without hyperparameter tuning).
-
-Q-learning (with function approximation) fails on many simple problems (continuous control) and is poorly understood, vanilla policy gradient methods have poor data effiency and robustness; and trust region policy optimization (TRPO) is relatively complicated, and is not compatible with architectures that include noise (such as dropout) or parameter sharing (between the policy and value function, or with auxiliary tasks).
-
-PPO aims to achieve the data efficiency and reliable performance of TRPO, but with the implementation simplicity of a standard gradient method.
-
-It does this by taking multiple gradient steps on the same data (typically 10-20, compared to 1 for vanilla policy gradient and TRPO), but with a constraint that prevents it from deviating too far from the previous policy.
-
-The paper states that while it is appealing to perform multiple steps of optimization on the standard policy gradient loss using the same trajectory, doing so is not well-justified, and empirically it often leads to destructively large policy updates.
-
-It introduces a clipped surrogate objective function to get a lower bound on the performance of the policy and a update pattern where they sample data from the policy and then perform several epochs of updates on that data (as opposed to just one update per sample like in vanilla policy gradient, or doing updates on the fly like in A2C). The motivation is that L^CLI which L^CLIP (the PPO clipped surrogate loss) is based on, doesn't penalize moving away from the old policy, so it leads to large policy updates that move the policy ratio away from 1 (ie it becomes more off policy preventing multiple epochs).
-
-Another approach which can be used as an alternative to the clipped surrogate loss, or in addition to it is to add a penalty on have a target KL divergence. If the policy strays too far from the previous policy, it is penalized. The goal of this is to achieve a target kl divergence (change in policy) each policy update (after all epochs for a single update step). This was found to perform worse than the clipped surrogate loss in the papers experiments.
-
-It performs better on continuous control tasks than A2C and vanilla policy gradient and has better sample complexity than A2C on Atari.
-
-NOTE: the paper is a very easy read and it is recommend to read it
-NOTE: we do not implement the KL divergence penalty version of PPO in this implementation, as it was largely abandoned by the community in favor of the clipped objective.
-
-TODO: what is better sample complexity
-TODO: More on pessemistic lower bound, what it means, why its useful, etc
-"""
-
+# Fully Generated
+# TODO: compare with 37 implementation details of PPO results
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import gymnasium as gym
 from typing import Tuple
@@ -34,7 +9,6 @@ import numpy as np
 import random
 import wandb
 from einops import rearrange
-from functools import partial
 
 from functional.action_selection import categorical_sampling_selector
 from functional.optimizer import apply_gradients
@@ -44,7 +18,6 @@ from functional.losses import (
     entropy_loss,
     probability_ratio,
     clipped_value_loss,
-    mse_loss,
 )
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
@@ -58,11 +31,12 @@ from functional.rollout_buffer import (
     yield_shuffled_minibatches,
 )
 from functional.utils import standardize_tensor
+from envs.wrappers import FireResetEnv
 from tensordict import TensorDict
 
 # Constants
 LEARNING_RATE = 2.5e-4
-MAX_ITERATIONS = 976
+MAX_ITERATIONS = 9765  # Adjust as needed for Pong
 GAMMA = 0.99
 GAE_LAMBDA = 0.95
 ENTROPY_COEFF = 0.01
@@ -70,54 +44,74 @@ CRITIC_COEFF = 0.5
 MAX_GRAD_NORM = 0.5
 STEPS_PER_ENV = 128
 UPDATE_EPOCHS = 4
-MINIBATCH_SIZE = 128
-CLIP_COEF = 0.2
-TARGET_KL = None
-NUM_ENVS = 4
+MINIBATCH_SIZE = 256
+CLIP_COEF = 0.1
+TARGET_KL = None  # Usually not used for Atari
+NUM_ENVS = 8
 SEED = 42
 
-# Seeding for reproducibility
+# Seeding
 random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 
-# NOTE: PPO can have a shared backbone between the actor and critic or seperate networks.
 class ActorCritic(nn.Module):
-    def __init__(self, input_shape: Tuple, num_actions: int):
+    def __init__(self, num_actions: int):
         super().__init__()
-        self.actor = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, num_actions), std=0.01),
+        # Explicit feature extraction (Nature CNN)
+        # Source: Mnih et al. (2015)
+        self.network = nn.Sequential(
+            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
+            nn.ReLU(),
+            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
+            nn.ReLU(),
+            nn.Flatten(),
+            layer_init(nn.Linear(64 * 7 * 7, 512)),
+            nn.ReLU(),
         )
-        self.critic = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
-            nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
-        )
+        self.actor = layer_init(nn.Linear(512, num_actions), std=0.01)
+        self.critic = layer_init(nn.Linear(512, 1), std=1.0)
 
     def forward(self, x):
-        x_actor = self.actor(x)
-        x_critic = self.critic(x)
-        return x_actor, x_critic
+        # NOTE: explicitly normalize pixels here to avoid passing huge floats in the buffer
+        # Source: Mnih et al. (2015) - Rescale to [0, 1]
+        # [B, C, H, W] -> [B, 512]
+        hidden = self.network(x / 255.0)
+        return self.actor(hidden), self.critic(hidden)
 
 
-# --- 1. Initialization (Defining the State) ---
 def make_env(env_id, seed, idx):
+    """
+    Standard Atari environment preprocessing.
+    - Pong is the default game.
+    - Frameskip (4): repeats action on skipped frames, sums rewards (Mnih et al., 2015).
+    - MaxPool: handles sprite flickering by taking max over last 2 frames.
+    - NoopReset (1-30): injects stochasticity into initial states (Machado et al., 2018).
+    - EpisodicLife: marks end-of-life as end-of-episode (Mnih et al., 2015).
+    - Grayscale + Resize (84x84): extracts luminance and reduces dimensionality.
+    - FrameStack (4): allows agent to infer velocity and direction.
+    """
+
     def thunk():
-        env = gym.make(env_id)
+        env = gym.make(env_id, frameskip=1)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        # Apply standard wrappers if needed here
-        # Standard continuous control wrappers
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10).astype(np.float32))
-        env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+        env = gym.wrappers.AtariPreprocessing(
+            env,
+            noop_max=30,
+            frame_skip=4,
+            screen_size=84,
+            terminal_on_life_loss=True,
+            grayscale_obs=True,
+        )
+
+        # FIRE on reset (necessary for Pong)
+        env = FireResetEnv(env)
+
+        # Frame Stack: 4 frames
+        env = gym.wrappers.FrameStack(env, 4)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -125,22 +119,17 @@ def make_env(env_id, seed, idx):
     return thunk
 
 
-# Use standard Gymnasium Vector Envs instead of Pufferlib
 # TODO: switch to either procgen, envpool, isaac gym, brax, or pufferlib to decrease training time (same number iterations but faster)
+# Initialize vectorized environments using standard Gymnasium Vector Envs
 envs = gym.vector.SyncVectorEnv(
-    [make_env("CartPole-v1", SEED + i, i) for i in range(NUM_ENVS)]
+    [make_env("ALE/Pong-v5", SEED + i, i) for i in range(NUM_ENVS)]
 )
-
-# NOTE: PPO on Cartpole at least seems to be highly sensitive to this.
-# envs = NormalizeObservation(envs)
-# NOTE: Reward scaling/normalization is also highly beneficial for PPO stability.
-# envs = NormalizeReward(envs, gamma=GAMMA)
 
 obs_shape = envs.single_observation_space.shape
 num_actions = envs.single_action_space.n
-device = torch.device("cpu")
+device = torch.device("cpu")  # Use CUDA if available
 
-model = ActorCritic(obs_shape, num_actions).to(device)
+model = ActorCritic(num_actions).to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, eps=1e-5)
 
@@ -150,7 +139,7 @@ scheduler = LinearLR(
 
 obs, info = envs.reset(seed=SEED)
 
-# Pre-allocate rollout buffers using the new functional system
+# Pre-allocate rollout buffers
 shapes = {
     "observations": obs_shape,
     "actions": (),
@@ -168,14 +157,14 @@ buffer = init_rollout_buffer(
     device=device,
 )
 
-# Pre-allocate rollout buffers using the new functional system
+# Pre-allocate rollout buffers
 
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
 # Initialize W&B
 wandb.init(
-    project="ppo-cartpole",
+    project="ppo-atari",
     config={
         "lr": LEARNING_RATE,
         "gamma": GAMMA,
@@ -185,33 +174,40 @@ wandb.init(
         "clip_coef": CLIP_COEF,
         "num_envs": NUM_ENVS,
         "steps_per_env": STEPS_PER_ENV,
+        "env": "ALE/Pong-v5",
     },
 )
 wandb.define_metric("*", step_metric="global_step")
 global_step = 0
 
-# Using full episodes
+# Training Loop
 for iteration in range(MAX_ITERATIONS):
     # 1. Data Collection Phase
     with torch.inference_mode():
         for step in range(STEPS_PER_ENV):
+            # Atari observations are [C, H, W] after wrappers
             obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
             logits, value = model(obs_tensor)
+
             action, info_dict = categorical_sampling_selector(logits, temperature=1.0)
             action_np = action.cpu().numpy().flatten().astype(np.int32)
 
-            # 2. Step Env
+            # Step Env
             next_obs, reward, terminated, truncated, info = envs.step(action_np)
             global_step += NUM_ENVS
 
-            # 3. Add to "online" buffers
+            # Reward Clipping: np.sign(reward)
+            # Source: Mnih et al. (2015) - Bins reward to {+1, 0, -1}
+            clipped_reward = np.sign(reward).astype(np.float32)
+
+            # Store in rollout buffer
             transition = TensorDict(
                 {
                     "observations": obs_tensor,
                     "actions": action.squeeze(-1),
                     "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
                     "rewards": torch.as_tensor(
-                        reward, dtype=torch.float32, device=device
+                        clipped_reward, dtype=torch.float32, device=device
                     ),
                     "terminated": torch.as_tensor(
                         terminated, dtype=torch.float32, device=device
@@ -252,15 +248,13 @@ for iteration in range(MAX_ITERATIONS):
                             }
                         )
 
-            # NOTE: obs = next_obs is moved to here.
             obs = next_obs
 
-        # Compute last values for the re-evaluation pass
+        # Compute last values for GAE
         last_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
         _, last_values = model(last_obs_tensor)
         last_values = last_values.squeeze(-1)
 
-        # Calculate Next Values (handling truncations)
         next_values = get_rollout_next_values(
             buffer, last_values, get_value_fn=lambda obs: model(obs)[1], device=device
         )
@@ -286,7 +280,7 @@ for iteration in range(MAX_ITERATIONS):
         lam=GAE_LAMBDA,
     )
 
-    # Flatten buffer for loss calculations
+    # Flatten buffer for training
     flat_data = flatten_rollout_buffer(buffer)
     flat_advantages = rearrange(advantages, "b t -> (b t)")
     flat_returns = rearrange(returns, "b t -> (b t)")
@@ -295,7 +289,7 @@ for iteration in range(MAX_ITERATIONS):
     flat_data["advantages"] = flat_advantages
     flat_data["returns"] = flat_returns
 
-    # 3. The Update Loop (Multiple Epochs & Minibatches)
+    # 3. Optimization Phase
     epoch_losses = []
     clip_fractions = []
     approx_kls = []
@@ -305,15 +299,15 @@ for iteration in range(MAX_ITERATIONS):
         for mb in yield_shuffled_minibatches(
             flat_data, MINIBATCH_SIZE, generator=rng_key
         ):
-            # Re-evaluate the policy and value function on the minibatch
+            # Re-evaluate model on minibatch
             new_logits, new_values = model(mb["observations"])
             new_values = new_values.squeeze(-1)
 
-            # Re-calculate log probabilities and entropy
+            # Categorical distribution for Atari
             dist = torch.distributions.Categorical(logits=new_logits)
             new_log_probs = dist.log_prob(mb["actions"])
 
-            # approx_kl computed for logging and per-epoch early-stop decision
+            # Compute KL divergence
             with torch.no_grad():
                 log_ratio = new_log_probs - mb["logprobs"]
                 approx_kl = ((torch.exp(log_ratio) - 1) - log_ratio).mean().item()
@@ -325,7 +319,6 @@ for iteration in range(MAX_ITERATIONS):
                 new_log_probs=new_log_probs,
             )
 
-            # Advantage Standardisation (Minibatch level as per CleanRL)
             mb_advantages = mb["advantages"]
             mb_advantages = standardize_tensor(mb_advantages)
 
@@ -352,29 +345,23 @@ for iteration in range(MAX_ITERATIONS):
             # Total Loss
             loss = pg_loss + CRITIC_COEFF * critic_loss - ENTROPY_COEFF * ent_loss
 
-            # Apply Updates
+            # Backprop
             optimizer = apply_gradients(
                 optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
             )
 
-            # Track Metrics
+            # Metrics tracking
             with torch.no_grad():
-                # Clip Fraction
                 clipped = (ratio - 1.0).abs() > CLIP_COEF
                 clip_fractions.append(clipped.float().mean().item())
                 approx_kls.append(approx_kl)
                 epoch_losses.append(loss.item())
 
-        # KL early stop on the per-epoch mean (CleanRL-style): break the
-        # epoch loop only, after the epoch's gradient steps have been taken.
+        # Early stopping based on KL (if TARGET_KL is set)
         if TARGET_KL is not None and np.mean(epoch_kls) > 1.5 * TARGET_KL:
             break
 
-    # Step the learning rate down
     scheduler.step()
-
-    # Clear truncation records for the next iteration
-    # TODO: do this here or start of collection phase?
     buffer.truncation_records.clear()
 
     # Logging

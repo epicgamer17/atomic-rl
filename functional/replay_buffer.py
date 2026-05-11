@@ -4,6 +4,8 @@ from typing import Tuple, Callable, List, Optional, Union
 import random
 from collections import deque
 from dataclasses import dataclass
+from functional.losses import compute_is_weights
+from .utils import _allocate_tensordict
 
 
 @dataclass(kw_only=True)
@@ -37,17 +39,6 @@ class PERBufferState(BufferState):
     min_tree: torch.Tensor
     max_priority: float
     tree_capacity: int
-
-
-def _allocate_tensordict(
-    shapes: dict, batch_size: List[int], device: str = "cpu"
-) -> TensorDict:
-    """Allocates a zeroed TensorDict of any arbitrary geometry."""
-    data = TensorDict({}, batch_size=batch_size, device=device)
-    for key, shape in shapes.items():
-        dtype = torch.long if "action" in key else torch.float32
-        data.set(key, torch.zeros((*batch_size, *shape), dtype=dtype))
-    return data
 
 
 def init_buffer(capacity: int, shapes: dict, device: str = "cpu") -> BufferState:
@@ -206,20 +197,17 @@ def sample_per(
     # Clamp to handle potential precision issues leading to out-of-bounds indices
     data_indices = torch.clamp(data_indices, 0, buffer_state.capacity - 1)
 
-    # TODO: should IS weight computation be its own function? similar to probability_ratio?
     # Importance Sampling (IS) Weights
     leaf_priorities = buffer_state.sum_tree[indices]
     min_prob = buffer_state.min_tree[0] / total_priority
 
-    probs = leaf_priorities / total_priority
-    is_weights = torch.pow(probs / min_prob, -beta)
+    is_weights = compute_is_weights(leaf_priorities, min_prob, total_priority, beta)
 
     batch = buffer_state.data[data_indices]
 
     return batch, indices, is_weights
 
 
-# TODO: is this possible to vectorize? should i?
 @torch.inference_mode()
 def _update_tree(
     sum_tree: torch.Tensor,

@@ -9,6 +9,7 @@ from functional.action_selection import (
     gaussian_sampling_selector,
     with_epsilon_greedy,
     get_ape_x_epsilon,
+    multidiscrete_sampling_selector,
 )
 from functional.schedules import get_linear_schedule, get_exponential_schedule
 
@@ -242,3 +243,35 @@ def test_action_selection_assertions():
         gaussian_sampling_selector(torch.randn(2, 2), torch.randn(2, 3))
     with pytest.raises(AssertionError, match="Expected at least 1D tensors"):
         gaussian_sampling_selector(torch.tensor(0.0), torch.tensor(1.0))
+
+
+def test_multidiscrete_sampling_selector():
+    """Test MultiDiscrete action sampling selector."""
+    torch.manual_seed(42)
+
+    # nvec = (3, 2)
+    # logits shape [Batch=1, sum(nvec)=5]
+    nvec = (3, 2)
+    # High logit for index 1 in first component, index 0 in second component
+    logits = torch.tensor([[0.0, 10.0, 0.0, 10.0, 0.0]])
+
+    actions, info = multidiscrete_sampling_selector(logits, nvec, temperature=1.0)
+    log_prob = info["log_prob"]
+
+    assert actions.shape == (1, 2)
+    assert log_prob.shape == (1,)
+
+    # Check selected actions
+    assert actions[0, 0] == 1
+    assert actions[0, 1] == 0
+
+    # Manual check for log_prob
+    # First component: Categorical(logits=[0, 10, 0]) -> log_prob[1]
+    # Second component: Categorical(logits=[10, 0]) -> log_prob[0]
+    split_logits = torch.split(logits, list(nvec), dim=-1)
+    expected_log_prob = torch.distributions.Categorical(
+        logits=split_logits[0]
+    ).log_prob(actions[0, 0]) + torch.distributions.Categorical(
+        logits=split_logits[1]
+    ).log_prob(actions[0, 1])
+    torch.testing.assert_close(log_prob, expected_log_prob)

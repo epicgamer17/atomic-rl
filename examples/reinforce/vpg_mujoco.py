@@ -1,10 +1,14 @@
-"""
-Notes on Vanilla Policy Gradient for Pendulum (Continuous Action Space):
+# Fully Generated
 
-VPG (REINFORCE + Critic baseline) adapted for continuous action spaces.
-The Actor outputs mean (mu) and has a learnable log standard deviation (log_std).
-The Critic predicts state values to compute advantages.
-NOTE: very similar to A2C/A3C
+"""
+Notes on Vanilla Policy Gradient for MuJoCo (Continuous Action Space):
+
+This example demonstrates Vanilla Policy Gradient (VPG) with a Critic baseline applied to
+the HalfCheetah-v4 MuJoCo environment.
+
+VPG is the foundation for most policy-based methods but suffers from high variance and
+poor sample efficiency on complex tasks like HalfCheetah. Without the clipping or
+KL-divergence constraints of PPO, VPG updates can be too large, leading to instability.
 """
 
 import torch
@@ -27,12 +31,11 @@ from functional.visualization import compute_explained_variance
 from functional.network import layer_init
 
 # Constants
-LEARNING_RATE = 1e-3
-MAX_EPISODES = 2_000
-GAMMA = 0.9
+LEARNING_RATE = 3e-4
+MAX_EPISODES = 5000  # Sufficient for benchmarking against PPO
+GAMMA = 0.99
 SEED = 42
 CRITIC_COEFF = 0.5
-MAX_ACTION = 2.0
 HIDDEN_SIZE = 64
 INITIAL_LOG_STD = 0.0
 
@@ -51,20 +54,10 @@ class Actor(nn.Module):
         self.log_std = nn.Parameter(torch.full((1, num_actions), INITIAL_LOG_STD))
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass for the Actor network.
-
-        Args:
-            x (torch.Tensor): The input observation tensor. # [B, obs_dim]
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]: The mean (mu) and standard deviation (std)
-                of the Gaussian action distribution. # [B, num_actions], [B, num_actions]
-        """
-        x = torch.tanh(self.l1(x))  # [B, HIDDEN_SIZE]
-        x = torch.tanh(self.l2(x))  # [B, HIDDEN_SIZE]
-        mu = torch.tanh(self.mu_head(x)) * MAX_ACTION  # [B, num_actions]
-        std = torch.exp(self.log_std).expand_as(mu)  # [B, num_actions]
+        x = torch.tanh(self.l1(x))
+        x = torch.tanh(self.l2(x))
+        mu = self.mu_head(x)
+        std = torch.exp(self.log_std).expand_as(mu)
         return mu, std
 
 
@@ -76,27 +69,32 @@ class Critic(nn.Module):
         self.l3 = layer_init(nn.Linear(HIDDEN_SIZE, 1), std=1.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass for the Critic network.
-
-        Args:
-            x (torch.Tensor): The input observation tensor. # [B, obs_dim]
-
-        Returns:
-            torch.Tensor: The predicted state value. # [B, 1]
-        """
-        x = torch.tanh(self.l1(x))  # [B, HIDDEN_SIZE]
-        x = torch.tanh(self.l2(x))  # [B, HIDDEN_SIZE]
-        x = self.l3(x)  # [B, 1]
+        x = torch.tanh(self.l1(x))
+        x = torch.tanh(self.l2(x))
+        x = self.l3(x)
         return x
 
 
 # --- 1. Initialization ---
-env = gym.make("Pendulum-v1")
-env = gym.wrappers.RecordEpisodeStatistics(env)
-env = gym.wrappers.ClipAction(env)
-obs_shape = env.observation_space.shape
-num_actions = env.action_space.shape[0]
+# For VPG, we use a single environment instance to collect full episodes
+def make_single_env(env_id, seed):
+    env = gym.make(env_id)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    env = gym.wrappers.ClipAction(env)
+    env = gym.wrappers.NormalizeObservation(env)
+    env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10).astype(np.float32))
+    env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
+    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
+    # Wrap in dummy vector env to keep downstream code consistent (using .single_observation_space)
+    env = gym.vector.SyncVectorEnv([lambda: env])
+    env.action_space.seed(seed)
+    env.observation_space.seed(seed)
+    return env
+
+
+env = make_single_env("HalfCheetah-v4", SEED)
+obs_shape = env.single_observation_space.shape
+num_actions = env.single_action_space.shape[0]
 device = torch.device("cpu")
 
 actor = Actor(obs_shape, num_actions).to(device)
@@ -111,7 +109,16 @@ terminated, truncated = False, False
 
 
 # Initialize W&B
-wandb.init(project="vpg-pendulum", config={"lr": LEARNING_RATE, "gamma": GAMMA})
+wandb.init(
+    project="vpg-mujoco",
+    config={
+        "lr": LEARNING_RATE,
+        "gamma": GAMMA,
+        "env": "HalfCheetah-v4",
+    },
+)
+wandb.define_metric("*", step_metric="global_step")
+global_step = 0
 
 for episode in range(MAX_EPISODES):
     rewards = []
@@ -121,43 +128,43 @@ for episode in range(MAX_EPISODES):
     truncateds = []
 
     while not (terminated or truncated):
-        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
+        obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
         mu, std = actor(obs_tensor)
         value = critic(obs_tensor)
 
         action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
-        action = action_tensor.detach().cpu().numpy().flatten()
-        # Clip action to env bounds just in case, though mu is already scaled
-        action = np.clip(action, -MAX_ACTION, MAX_ACTION)
+        action_np = action_tensor.detach().cpu().numpy()
 
         # 2. Step Env
-        next_obs, reward, terminated, truncated, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action_np)
+        global_step += 1
 
         # 3. Add to buffers
-        rewards.append(reward)
+        rewards.append(reward[0])
         log_probs.append(info_dict["log_prob"])
         values.append(value)
-        terminateds.append(terminated)
-        truncateds.append(truncated)
+        terminateds.append(terminated[0])
+        truncateds.append(truncated[0])
 
         # Update state
         obs = next_obs
 
-    if terminated or truncated:
-        if "episode" in info:
-            wandb.log(
-                {
-                    "episode_return": info["episode"]["r"][0],
-                    "episode_length": info["episode"]["l"][0],
-                },
-                step=episode,
-            )
-        obs, info = env.reset()
-        terminated, truncated = False, False
+    # End of episode
+    if "final_info" in info:
+        for item in info["final_info"]:
+            if item is not None and "episode" in item:
+                wandb.log(
+                    {
+                        "episode_return": item["episode"]["r"][0],
+                        "episode_length": item["episode"]["l"][0],
+                        "global_step": global_step,
+                    }
+                )
+    obs, info = env.reset()
+    terminated, truncated = False, False
 
     # --- 3. The Update Loop ---
-    # TODO: replace with rearrange and einops
-    # 1. Compute Returns (Algorithm Agnostic)
+    # 1. Compute Returns
     returns = compute_mc_returns(
         torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
         torch.tensor(terminateds, dtype=torch.float32, device=device).unsqueeze(0),
@@ -195,9 +202,10 @@ for episode in range(MAX_EPISODES):
                 "loss/total": loss.item(),
                 "loss/critic": critic_loss.item(),
                 "value/explained_variance": explained_var,
-                "std": torch.exp(actor.log_std).item(),
+                "std": torch.exp(actor.log_std).mean().item(),
+                "global_step": global_step,
             }
         )
-        wandb.log(log_dict, step=episode)
+        wandb.log(log_dict)
 
 wandb.finish()

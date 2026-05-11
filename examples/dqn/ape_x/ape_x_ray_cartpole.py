@@ -153,6 +153,7 @@ class ActorActor:
     ):
         self.actor_id = actor_id
         self.env = gym.make(ENV_NAME)
+        self.env = gym.wrappers.RecordEpisodeStatistics(self.env)
 
         # Unique exploration rate per actor to ensure diverse experience
         self.epsilon = get_ape_x_epsilon(
@@ -174,7 +175,6 @@ class ActorActor:
 
         self.local_batch = []
         self.obs, _ = self.env.reset(seed=SEED + actor_id)
-        self.episode_return = 0.0
         self.step_count = 0
         self.n_step_proc, self.n_step_reset = make_n_step_accumulator(N_STEP, GAMMA)
 
@@ -219,8 +219,7 @@ class ActorActor:
                     action = greedy_actions.item()
 
             # 3. Step Env
-            next_obs, reward, terminated, truncated, _ = self.env.step(action)
-            self.episode_return += reward
+            next_obs, reward, terminated, truncated, info = self.env.step(action)
 
             # 4. Compute N-step transitions
             n_step_transitions = self.n_step_proc(
@@ -241,15 +240,20 @@ class ActorActor:
 
             # Handle Episode End
             if terminated or truncated:
-                wandb.log(
-                    {
-                        f"actor_{self.actor_id}/episode_return": self.episode_return,
-                        "global/episode_return": self.episode_return,
-                    },
-                    step=self.step_count,
-                )
+                if "episode" in info:
+                    wandb.log(
+                        {
+                            f"actor_{self.actor_id}/episode_return": info["episode"][
+                                "r"
+                            ][0],
+                            f"actor_{self.actor_id}/episode_length": info["episode"][
+                                "l"
+                            ][0],
+                            "global/episode_return": info["episode"]["r"][0],
+                        },
+                        step=self.step_count,
+                    )
                 self.obs, _ = self.env.reset()
-                self.episode_return = 0.0
                 self.n_step_reset()
 
             # 6. Batched Priority Calculation and Push to remote buffer
@@ -352,7 +356,7 @@ class LearnerActor:
             self.model,
             batch,
             self.model,
-            partial(self.target_fn, gamma=rearrange(batch["gamma"], "b -> b 1")),
+            partial(self.target_fn, gamma=batch["gamma"]),
             eval_model=self.target_model,
             loss_fn=self.loss_fn,
         )

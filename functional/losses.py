@@ -49,7 +49,11 @@ def compute_q_td_loss(
 
     batch_size = predictions.shape[0]
     batch_idx = torch.arange(batch_size, device=predictions.device)
-    actions = batch["action"].long().squeeze(-1)
+    # Handle both [B] and [B, 1] action shapes gracefully
+    actions = batch["action"].long()
+    if actions.dim() == 2:
+        actions = actions.squeeze(-1)
+    
     pred_sa = predictions[batch_idx, actions]
 
     # 2. Next State Evaluation
@@ -70,10 +74,11 @@ def compute_q_td_loss(
         next_actions, _ = argmax_selector(selector_predictions, extractor_fn)
 
         # 3. Target Calculation
-        # Ensure rewards and terminated are [B, 1] for target calculator
-        rewards = rearrange(batch["reward"], "b -> b 1")
-        terminated = rearrange(batch["terminated"], "b -> b 1")
-        truncated = rearrange(batch["truncated"], "b -> b 1")
+        # Pass through rewards and termination flags as they are (expected to be [B])
+        rewards = batch["reward"]
+        terminated = batch["terminated"]
+        truncated = batch["truncated"]
+        gamma = batch["gamma"]
 
         # Calculate TD target (standard, n-step, or categorical)
         td_target = target_calculator_fn(
@@ -82,16 +87,16 @@ def compute_q_td_loss(
             rewards,
             terminated,
             truncated,
+            gamma,
         )
 
     # 4. Compute Loss (Force shape alignment to prevent broadcasting bugs)
     if loss_fn is None:
         loss_fn = mse_loss
 
-    # Align shapes for loss: [B] or [B, Atoms]
-    # If standard DQN, pred_sa is [B], td_target is [B, 1] -> squeeze td_target
-    if td_target.dim() == 2 and td_target.shape[1] == 1:
-        td_target = td_target.squeeze(-1)
+    # FAIL FAST: Ensure shapes match exactly for standard DQN
+    if pred_sa.dim() == 1:
+        assert pred_sa.shape == td_target.shape, f"Shape mismatch: pred {pred_sa.shape} vs target {td_target.shape}"
 
     loss, info = loss_fn(pred_sa, td_target)
 
@@ -325,6 +330,37 @@ def probability_ratio(
         old_log_probs.shape == new_log_probs.shape
     ), f"Shape mismatch: {old_log_probs.shape} vs {new_log_probs.shape}"
     return torch.exp(new_log_probs - old_log_probs.detach())
+
+
+def compute_is_weights(
+    leaf_priorities: torch.Tensor,
+    min_prob: Union[float, torch.Tensor],
+    total_priority: Union[float, torch.Tensor],
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Computes Importance Sampling (IS) weights for Prioritized Experience Replay (PER).
+
+    IS weights correct for the bias introduced by non-uniform sampling in PER.
+    Mathematically: $w_i = ( (1/N) * (1/P_i) )^\beta / \max_j w_j$, where $P_i$ is the
+    sampling probability of transition $i$. This simplifies to:
+    $w_i = ( P_i / \min_j P_j )^{-\beta}$.
+
+    Args:
+        leaf_priorities (torch.Tensor): The priority values of the sampled transitions.
+        min_prob (Union[float, torch.Tensor]): The minimum sampling probability in the tree.
+        total_priority (Union[float, torch.Tensor]): The sum of all priorities in the tree.
+        beta (torch.Tensor): The correction coefficient (usually scheduled from 0.4 to 1.0).
+
+    Returns:
+        torch.Tensor: The normalized IS weights for the batch.
+    """
+    # Sampling probability: P_i = priority_i / sum(priorities)
+    probs = leaf_priorities / total_priority
+    # IS weight: (P_i / min_P)^-beta
+    # This simplifies the (1/N * 1/P_i)^beta / max_w normalization
+    is_weights = torch.pow(probs / min_prob, -beta)
+    return is_weights
 
 
 def clipped_surrogate_loss(

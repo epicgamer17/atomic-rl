@@ -7,11 +7,11 @@ from einops import rearrange
 
 def scalar_td_target(
     next_q_values: torch.Tensor,  # [batch, num_actions]
-    next_actions: torch.Tensor,  # [batch, 1]
-    rewards: torch.Tensor,  # [batch, 1]
-    terminated: torch.Tensor,  # [batch, 1]
-    truncated: torch.Tensor,  # [batch, 1]
-    gamma: torch.Tensor,  # [batch, 1]
+    next_actions: torch.Tensor,  # [batch]
+    rewards: torch.Tensor,  # [batch]
+    terminated: torch.Tensor,  # [batch]
+    truncated: torch.Tensor,  # [batch]
+    gamma: torch.Tensor,  # [batch]
 ) -> torch.Tensor:
     """
     Calculates the TD target for scalar Q-values.
@@ -32,24 +32,17 @@ def scalar_td_target(
         gamma: Discount factors (or effective gamma^n).
 
     Returns:
-        The TD target of shape [batch, 1].
+        The TD target of shape [batch].
     """
     assert (
         next_q_values.ndim == 2
     ), f"Expected 2D next_q_values [B, A], got {next_q_values.shape}"
     assert (
-        next_actions.shape
-        == rewards.shape
-        == terminated.shape
-        == truncated.shape
-        == gamma.shape
-    ), "Shape mismatch in TD target inputs"
-    assert (
-        next_actions.ndim == 2 and next_actions.shape[1] == 1
-    ), f"Expected [B, 1] next_actions, got {next_actions.shape}"
+        next_actions.ndim == 1
+    ), f"Expected [B] next_actions, got {next_actions.shape}"
 
     # Pure Math: Guaranteed to broadcast perfectly if shapes are correct
-    max_q_next = torch.gather(next_q_values, 1, next_actions)
+    max_q_next = torch.gather(next_q_values, 1, next_actions.unsqueeze(-1)).squeeze(-1)
 
     # Bootstrap if not terminated.
     return rewards + gamma * max_q_next * (1 - terminated.float())
@@ -57,11 +50,11 @@ def scalar_td_target(
 
 def categorical_td_target(
     next_logits: torch.Tensor,  # [batch, num_actions, atom_size]
-    next_actions: torch.Tensor,  # [batch, 1]
-    rewards: torch.Tensor,  # [batch, 1]
-    terminated: torch.Tensor,  # [batch, 1]
-    truncated: torch.Tensor,  # [batch, 1]
-    gamma: torch.Tensor,  # [batch, 1]
+    next_actions: torch.Tensor,  # [batch]
+    rewards: torch.Tensor,  # [batch]
+    terminated: torch.Tensor,  # [batch]
+    truncated: torch.Tensor,  # [batch]
+    gamma: torch.Tensor,  # [batch]
     support: torch.Tensor,  # [atom_size]
     v_min: float,
     v_max: float,
@@ -93,28 +86,25 @@ def categorical_td_target(
         next_logits.ndim == 3
     ), f"Expected 3D next_logits [B, A, Atoms], got {next_logits.shape}"
     assert (
-        next_actions.shape
-        == rewards.shape
-        == terminated.shape
-        == truncated.shape
-        == gamma.shape
-    ), "Shape mismatch in Categorical target inputs"
-    assert (
-        next_actions.ndim == 2 and next_actions.shape[1] == 1
-    ), f"Expected [B, 1] next_actions, got {next_actions.shape}"
+        next_actions.ndim == 1
+    ), f"Expected [B] next_actions, got {next_actions.shape}"
 
     # 1. Get probabilities of the next states
     next_probs = F.softmax(next_logits, dim=-1)
 
     # 2. Gather the probabilities for the chosen next actions
-    # next_actions is [B, 1], expand to [B, 1, Atoms] to match next_probs
-    next_actions_expanded = next_actions.unsqueeze(-1).expand(-1, -1, atom_size)
+    # next_actions is [B], expand to [B, 1, Atoms] to match next_probs
+    next_actions_expanded = next_actions.view(-1, 1, 1).expand(-1, -1, atom_size)
     next_probs_a = next_probs.gather(1, next_actions_expanded).squeeze(1)  # [B, Atoms]
 
     # 3. Compute the target support (Tz) [B, Atoms]
     # Formula: Tz = R + gamma * support * (1 - terminated)
     support_b = rearrange(support, "a -> 1 a")
-    Tz = rewards + gamma * support_b * (1 - terminated.float())
+    rewards_b = rearrange(rewards, "b -> b 1")
+    gamma_b = rearrange(gamma, "b -> b 1")
+    term_b = rearrange(terminated, "b -> b 1")
+
+    Tz = rewards_b + gamma_b * support_b * (1 - term_b.float())
     Tz = Tz.clamp(min=v_min, max=v_max)
 
     # 4. Compute projection bins

@@ -9,6 +9,7 @@ from functional.rollout_buffer import (
     get_rollout_next_values,
     flatten_rollout_buffer,
     yield_shuffled_minibatches,
+    yield_sequential_minibatches,
 )
 
 pytestmark = pytest.mark.unit
@@ -51,24 +52,19 @@ def test_record_truncations():
     shapes = {"obs": (4,)}
     buffer = init_rollout_buffer(steps, num_envs, shapes)
 
-    # Info dict with two truncations
-    final_obs_1 = np.ones(4, dtype=np.float32)
-    final_obs_3 = np.ones(4, dtype=np.float32) * 3.0
-    info = {
-        "final_observation": [None, final_obs_1, None, final_obs_3],
-        "_final_observation": np.array([False, True, False, True]),
-    }
-    # Only env 1 and 3 are in the info dict
-    # But let's say only env 1 was actually 'truncated' (env 3 might be 'terminated')
-    truncated = torch.tensor([False, True, False, False])
+    # Simulation of example script logic:
+    # 1. We have one ended env (1) that was truncated
+    final_obs_1 = torch.ones(4, dtype=torch.float32)
+    truncated_envs = torch.tensor([1], dtype=torch.long)
+    final_observations = torch.stack([final_obs_1])
 
-    record_truncations(buffer, step=2, info=info, truncated=truncated)
+    record_truncations(buffer, step=2, truncated_envs=truncated_envs, final_observations=final_observations)
 
     assert len(buffer.truncation_records) == 1
     step_rec, env_idx, obs = buffer.truncation_records[0]
     assert step_rec == 2
     assert env_idx == 1
-    torch.testing.assert_close(obs, torch.from_numpy(final_obs_1))
+    torch.testing.assert_close(obs, final_obs_1)
 
 
 def test_get_rollout_next_values():
@@ -169,3 +165,68 @@ def test_yield_shuffled_minibatches():
     # Check shuffling: with seed 42, randperm(10) is [2, 0, 9, 8, 5, 1, 6, 3, 7, 4]
     # We just want to ensure it's not the original order
     assert not torch.all(all_indices == torch.arange(total_size))
+
+
+def test_yield_sequential_minibatches():
+    """Test yielding sequential minibatches for LSTM PPO."""
+    num_envs = 4
+    steps = 5
+    num_minibatches = 2
+    hidden_dim = 8
+    num_layers = 1
+
+    # buffer_data [envs, steps]
+    data = TensorDict(
+        {
+            "obs": torch.zeros(num_envs, steps, 1),
+        },
+        batch_size=[num_envs, steps],
+    )
+
+    # Fill with recognizable values: data[env, step] = env * 10 + step
+    for e in range(num_envs):
+        for t in range(steps):
+            data["obs"][e, t] = e * 10 + t
+
+    initial_h = torch.randn(num_layers, num_envs, hidden_dim)
+    initial_c = torch.randn(num_layers, num_envs, hidden_dim)
+    initial_states = (initial_h, initial_c)
+
+    generator = torch.Generator().manual_seed(42)
+
+    batches = list(
+        yield_sequential_minibatches(
+            data, num_envs, num_minibatches, initial_states, generator=generator
+        )
+    )
+
+    # num_envs=4, num_minibatches=2 -> 2 batches, each with 2 envs
+    assert len(batches) == 2
+
+    seen_envs = []
+    for mb_flat, (mb_h, mb_c) in batches:
+        # mb_flat should be [steps * envs_per_batch, ...] = [5 * 2, 1] = [10, 1]
+        assert mb_flat.batch_size[0] == steps * 2
+        assert mb_h.shape == (num_layers, 2, hidden_dim)
+        assert mb_c.shape == (num_layers, 2, hidden_dim)
+
+        # Reshape mb_flat to [steps, envs_per_batch]
+        mb_reshaped = mb_flat["obs"].view(steps, 2, 1)
+
+        # Verify that for each env in the batch, the steps are sequential: [env*10+0, env*10+1, ...]
+        for i in range(2):
+            env_data = mb_reshaped[:, i, 0]
+            start_val = env_data[0].item()
+            env_idx = int(start_val // 10)
+            seen_envs.append(env_idx)
+            expected = torch.tensor(
+                [env_idx * 10 + t for t in range(steps)], dtype=torch.float32
+            )
+            torch.testing.assert_close(env_data, expected)
+
+            # Verify LSTM states match the env_idx
+            torch.testing.assert_close(mb_h[:, i], initial_h[:, env_idx])
+            torch.testing.assert_close(mb_c[:, i], initial_c[:, env_idx])
+
+    # Verify all envs were seen
+    assert sorted(seen_envs) == list(range(num_envs))

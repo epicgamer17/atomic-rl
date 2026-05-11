@@ -21,7 +21,7 @@ from functional.action_selection import categorical_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss, mse_loss
-from functional.utils import exponential_moving_average, scale_tensor_by_std
+from functional.utils import standardize_tensor
 from functional.visualization import compute_explained_variance
 from functional.network import layer_init
 
@@ -31,7 +31,6 @@ MAX_EPISODES = 1_000
 GAMMA = 0.99
 SEED = 42
 CRITIC_COEFF = 0.5
-EMA_ALPHA = 0.01  # Smoothing factor for EMA baseline
 
 # Seeding for reproducibility
 random.seed(SEED)
@@ -71,6 +70,7 @@ class Critic(nn.Module):
 
 # --- 1. Initialization (Defining the State) ---
 env = gym.make("CartPole-v1")
+env = gym.wrappers.RecordEpisodeStatistics(env)
 obs_shape = env.observation_space.shape
 num_actions = env.action_space.n
 device = torch.device("cpu")
@@ -85,12 +85,9 @@ optimizer = optim.Adam(
 
 obs, info = env.reset(seed=SEED)
 terminated, truncated = False, False
-stat_episode_return = 0.0
 rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
-# Initialize EMA baseline
-ema_baseline = torch.zeros(1, device=device)
 
 # Initialize W&B
 wandb.init(project="vpg-cartpole", config={"lr": LEARNING_RATE, "gamma": GAMMA})
@@ -112,7 +109,6 @@ for episode in range(MAX_EPISODES):
 
         # 2. Step Env
         next_obs, reward, terminated, truncated, info = env.step(action)
-        stat_episode_return += reward
 
         # 3. Add to "online" buffers
         rewards.append(reward)
@@ -124,10 +120,16 @@ for episode in range(MAX_EPISODES):
         obs = next_obs
 
     if terminated or truncated:
-        wandb.log({"episode_return": stat_episode_return}, step=episode)
+        if "episode" in info:
+            wandb.log(
+                {
+                    "episode_return": info["episode"]["r"][0],
+                    "episode_length": info["episode"]["l"][0],
+                },
+                step=episode,
+            )
         obs, info = env.reset()
         terminated, truncated = False, False
-        stat_episode_return = 0.0
 
     # --- 3. The Update Loop ---
     # NOTE: Again unlike PPO, we don't sample as a learning step always occurs at the end of an episode.
@@ -144,26 +146,15 @@ for episode in range(MAX_EPISODES):
         gamma=GAMMA,
     ).squeeze(0)
 
-    # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
-    # Using EMA baseline instead of critic for raw advantages as requested
-    raw_advantages = returns - ema_baseline.detach()
-
-    # 3. Optional Scaling (Standard practice for EMA advantages)
-    advantages = scale_tensor_by_std(raw_advantages)
-
-    # Update EMA baseline with the mean return of this episode
-    ema_baseline = exponential_moving_average(
-        old_ema=ema_baseline,
-        new_value=returns.mean(dim=0, keepdim=True),
-        alpha=EMA_ALPHA,
-    )
-
     values = rearrange(torch.stack(values), "t 1 1 -> t")
 
-    # Handle scaling
-    # Others: learn a baseline with a neural network (advantage) (not done here)
+    # 2. Define Baseline & Calculate Advantage using the Critic
+    # VPG traditionally uses the learned value function as the baseline
+    raw_advantages = returns - values.detach()
+    advantages = standardize_tensor(raw_advantages)
+
     pg_loss, info_dict = policy_gradient_loss(
-        advantages=advantages,  # NOTE: calculate this outside
+        advantages=advantages,
         log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
     )
     pg_loss = pg_loss.mean()

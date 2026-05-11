@@ -1,5 +1,5 @@
 import math
-from typing import Tuple, Callable, Optional
+from typing import Tuple, Callable, Optional, Dict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -233,3 +233,81 @@ def get_ape_x_epsilon(
     if num_actors <= 1:
         return base_eps
     return base_eps ** (1 + (actor_id / (num_actors - 1)) * alpha)
+
+
+# TODO: is this algorithm agnostic right now? should this be a higher order function so it can more easily be used on any algorithm?
+def multidiscrete_sampling_selector(
+    logits: torch.Tensor, nvec: Tuple[int, ...], temperature: float = 1.0
+) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+    """
+    Samples actions for a MultiDiscrete action space.
+
+    Theory (Independent action components): PPO treats MultiDiscrete actions
+    as probabilistically independent components. Therefore:
+    prob(a) = prob(a_1) * prob(a_2) -> logprob(a) = logprob(a_1) + logprob(a_2)
+
+    Args:
+        logits: Flat tensor of logits shape [batch_size, sum(nvec)]
+        nvec: Tuple of integers denoting the number of actions per discrete space.
+        temperature: Sampling temperature for exploration.
+
+    Returns:
+        A tuple containing:
+            - The selected actions of shape [batch_size, len(nvec)].
+            - An info dictionary containing "log_prob".
+    """
+    # Explicitly split the flat logits into a list of tensors for each discrete action
+    split_logits = torch.split(logits, list(nvec), dim=-1)
+
+    actions = []
+    log_probs = []
+
+    for component_logits in split_logits:
+        dist = torch.distributions.Categorical(logits=component_logits / temperature)
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
+
+        actions.append(action)
+        log_probs.append(log_prob)
+
+    # Stack actions to shape [batch_size, len(nvec)]
+    actions_stacked = torch.stack(actions, dim=-1)
+
+    # Sum log probabilities across the action components
+    total_log_prob = torch.stack(log_probs, dim=-1).sum(dim=-1)
+
+    return actions_stacked, {"log_prob": total_log_prob}
+
+
+# TODO: should we make this work for q value selection? or should we at least make it more clear with the args?
+def apply_action_mask(logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """
+    Explicitly replaces logits of invalid actions with a large negative number (-1e8).
+    This forces the probability of these actions to approach 0 after softmax.
+    """
+    mask_bool = mask.to(torch.bool)
+    return torch.where(
+        mask_bool,
+        logits,
+        torch.tensor(-1e8, device=logits.device, dtype=logits.dtype),
+    )
+
+
+def compute_masked_entropy(
+    logits: torch.Tensor, probs: torch.Tensor, mask: torch.Tensor
+) -> torch.Tensor:
+    """
+    Computes categorical entropy manually to prevent NaNs.
+    PyTorch's Categorical.entropy() can yield NaNs if logits are extremely negative.
+
+    Math: entropy = -sum(p * log(p))
+    """
+    mask_bool = mask.to(torch.bool)
+    p_log_p = logits * probs
+    # Force masked out p_log_p elements to 0.0 before summing
+    p_log_p = torch.where(
+        mask_bool,
+        p_log_p,
+        torch.tensor(0.0, device=logits.device, dtype=logits.dtype),
+    )
+    return -p_log_p.sum(dim=-1)

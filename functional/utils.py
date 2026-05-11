@@ -1,6 +1,18 @@
 import torch
 import numpy as np
-from typing import Tuple
+from typing import Tuple, List
+from tensordict import TensorDict
+
+
+def _allocate_tensordict(
+    shapes: dict, batch_size: List[int], device: str = "cpu"
+) -> TensorDict:
+    """Allocates a zeroed TensorDict of any arbitrary geometry."""
+    data = TensorDict({}, batch_size=batch_size, device=device)
+    for key, shape in shapes.items():
+        dtype = torch.long if "action" in key else torch.float32
+        data.set(key, torch.zeros((*batch_size, *shape), dtype=dtype))
+    return data
 
 
 # NOTE: DONT LET THIS FILE BUILD UP AND HAVE A LOT FUNCTIONS, THAT IS A SIGN OF BAD ORGANIZATION.

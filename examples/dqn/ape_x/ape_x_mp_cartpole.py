@@ -160,6 +160,7 @@ def actor_worker(
 ):
     # Setup environment
     env = gym.make(ENV_NAME)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
     epsilon = get_ape_x_epsilon(
         actor_id, num_actors, base_eps=BASE_EPSILON, alpha=EPSILON_ALPHA
     )
@@ -175,7 +176,6 @@ def actor_worker(
 
     n_step_proc, n_step_reset = make_n_step_accumulator(N_STEP, GAMMA)
     obs, _ = env.reset(seed=SEED + actor_id)
-    episode_return = 0.0
     step_count = 0
     local_batch = []
 
@@ -204,8 +204,7 @@ def actor_worker(
                 action = greedy_actions.item()
 
         # Step
-        next_obs, reward, terminated, truncated, _ = env.step(action)
-        episode_return += reward
+        next_obs, reward, terminated, truncated, info = env.step(action)
 
         n_step_transitions = n_step_proc(
             obs, action, reward, next_obs, terminated, truncated
@@ -217,15 +216,16 @@ def actor_worker(
         step_count += 1
 
         if terminated or truncated:
-            wandb.log(
-                {
-                    f"actor_{actor_id}/episode_return": episode_return,
-                    "global/episode_return": episode_return,
-                },
-                step=step_count,
-            )
+            if "episode" in info:
+                wandb.log(
+                    {
+                        f"actor_{actor_id}/episode_return": info["episode"]["r"][0],
+                        f"actor_{actor_id}/episode_length": info["episode"]["l"][0],
+                        "global/episode_return": info["episode"]["r"][0],
+                    },
+                    step=step_count,
+                )
             obs, _ = env.reset()
-            episode_return = 0.0
             n_step_reset()
 
         # Push to buffer
@@ -304,7 +304,7 @@ def learner_worker(
             local_model,
             batch,
             local_model,
-            partial(target_fn, gamma=rearrange(batch["gamma"], "b -> b 1")),
+            partial(target_fn, gamma=batch["gamma"]),
             eval_model=target_model,
             loss_fn=loss_fn,
         )
