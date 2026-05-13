@@ -8,35 +8,39 @@ from einops import rearrange
 
 def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
     """
-    Calculate expected values from a distribution.
-    Useful for distributional value prediction methods like Categorical DQN, Dreamer, MuZero, etc.
+    Calculate expected values from a categorical distribution over a support.
+
+    Works for both Q-value prediction [B, A, N] and state-value prediction [B, N].
 
     Args:
-        predictions: The logits output from the model for the distribution [B, A, N].
-        support: The support for the distribution [N] or [B, A, N].
+        predictions: Logits output from the model [B, A, N] or [B, N].
+        support: The support for the distribution [N], [B, N], or [B, A, N].
 
     Returns:
-        The expected values of the distributions [B, A].
+        The expected values of shape [B, A] or [B].
     """
-    # TODO: also accept B, N? for value prediction instead of action value (q value) prediction for algos like muzero?
-    assert (
-        predictions.ndim == 3
-    ), f"Expected 3D predictions [B, A, N], got {predictions.shape}"
-    assert support.ndim in [
-        1,
+    # Fail Fast: Enforce exact dimensionality explicitly
+    assert predictions.ndim in [
+        2,
         3,
-    ], f"Expected 1D [N] or 3D [B, A, N] support, got {support.shape}"
+    ], f"Expected 2D [B, N] or 3D [B, A, N] predictions, got {predictions.shape}"
 
-    # B x A x N
     probs = F.softmax(predictions, dim=-1)
 
-    # Handle both [N] and [B, A, N] support
-    # NOTE: support must be same shape as predictions (B x A x N) to compute correctly
-    if support.dim() == 1:
-        # TODO: will this shape work for muzero categorical value prediction?
-        support = rearrange(support, "n -> 1 1 n")
+    # Broadcast support safely to match probs
+    if support.ndim == 1:
+        # Support is [N], broadcast to match [..., N]
+        # TODO: using expand_as instead of einops. make a decision to keep or remove einops
+        support = support.expand_as(probs)
+    else:
+        assert (
+            support.shape == probs.shape
+        ), f"If support is not 1D, it must match predictions shape exactly. Got {support.shape}"
 
+    # Dot product over the atoms dimension
     values = (probs * support).sum(dim=-1)
+
+    # Returns [B] if input was [B, N], or [B, A] if input was [B, A, N]
     return values
 
 
@@ -67,109 +71,45 @@ def argmax_selector(
     return action, {}
 
 
-# TODO: right now this only handles logits, muzero will need to be able to handle probs.
-# TODO: should we make categorical sampling selector and gaussian sampling selector take in a distributions.Distribution object instead of taking in predictions/action_mean and action_std? (could we then merge these functions?)
-# TODO: is it better to have a universal dist selector that takes in a distribution object and samples/computes log_prob from it?
-def categorical_sampling_selector(
-    predictions: torch.Tensor,
-    extractor_fn: Optional[Callable] = None,
-    temperature: float = 1.0,
+# TODO: is multidiscrete sampling handled and is it handled well? should we make a helper function for making the multi discrete distribution?
+def sample_distribution(
+    dist: torch.distributions.Distribution, explore: bool = True
 ) -> Tuple[torch.Tensor, dict]:
     """
-    Samples an action from a categorical distribution.
-    Expects predictions [B, A] or similar.
+    Samples an action from a generic PyTorch distribution.
+
+    Rule Enforcement (Explicit over Implicit):
+    The caller is responsible for constructing the appropriate distribution
+    (e.g., Categorical, Normal) and wrapping it in `Independent` if joint
+    probabilities are required.
 
     Args:
-        predictions: The model predictions (logits).
-        extractor_fn: Optional extractor.
-        temperature: Sampling temperature for exploration.
-
-    Returns:
-        A tuple containing:
-            - The selected actions of shape [B, 1].
-            - An info dictionary containing "log_prob".
-    """
-    # TODO: does this assert work for multi-discrete action spaces? does this code work for multi-discrete action spaces?
-    assert (
-        predictions.ndim >= 2
-    ), f"Expected predictions with at least batch and action dims, got {predictions.shape}"
-
-    if temperature == 0.0:
-        # For temp=0, we just take the argmax
-        # TODO: how should log_prob be computed here?
-        action, info = argmax_selector(predictions, extractor_fn)
-        info["log_prob"] = torch.zeros_like(action, dtype=torch.float32)
-        return action, info
-
-    if extractor_fn is not None:
-        vals = extractor_fn(predictions)
-    else:
-        vals = predictions
-
-    temperature_logits = vals / temperature
-    dist = torch.distributions.Categorical(logits=temperature_logits)
-
-    # action will be [Batch] for standard, or [Batch, Num_Vars] for multi-discrete
-    action = dist.sample()
-    log_prob = dist.log_prob(action)
-
-    # TODO: CONSISTENT LOG PROB SHAPE ACROSS FUNCTIONAL LIBRARY.
-    # IN POLICY GRADIENT LOSS WE USE [T, ] for log_prob, NOT [T, 1]. WHY???.
-    # For now we ensure [B, 1] for consistency in off-policy selectors.
-    if log_prob.ndim > 1 and log_prob.shape[-1] > 1:
-        # NOTE: sum assumes independent for each action in the vector.
-        log_prob = log_prob.sum(dim=-1, keepdim=True)
-
-    if action.ndim == 1:
-        action = action.unsqueeze(-1)
-    if log_prob.ndim == 1:
-        log_prob = log_prob.unsqueeze(-1)
-
-    return action, {"log_prob": log_prob}
-
-
-def gaussian_sampling_selector(
-    action_mean: torch.Tensor, action_std: torch.Tensor, explore: bool = True
-) -> Tuple[torch.Tensor, dict]:
-    """
-    Samples from a Gaussian policy for continuous actions.
-
-    Args:
-        action_mean (torch.Tensor): The mean of the Gaussian distribution.
-        action_std (torch.Tensor): The standard deviation of the Gaussian distribution.
-        explore (bool): Whether to explore or not.
+        dist: The PyTorch distribution object.
+        explore: Whether to sample from the distribution or take the mode/mean.
 
     Returns:
         A tuple containing:
             - The selected actions.
             - An info dictionary containing "log_prob".
     """
-    # TODO: does this assert work for multi-discrete action spaces? does this code work for multi-discrete action spaces?
-    assert (
-        action_mean.shape == action_std.shape
-    ), f"Mean {action_mean.shape} and Std {action_std.shape} must match"
-    assert (
-        action_mean.ndim >= 1
-    ), f"Expected at least 1D tensors, got {action_mean.ndim}D"
-
     if not explore:
-        # log prob is 0 for deterministic. Ensure [B, 1] if input is [B, 1]
-        log_prob = torch.zeros_like(action_mean)
-        if log_prob.ndim == 1:
-            log_prob = log_prob.unsqueeze(-1)
-        return action_mean, {"log_prob": log_prob}
+        # Deterministic selection
+        if isinstance(dist, torch.distributions.Categorical):
+            action = torch.argmax(dist.probs, dim=-1)
+        elif hasattr(dist, "mean"):
+            action = dist.mean
+        else:
+            raise NotImplementedError(
+                f"Deterministic selection for {type(dist)} is not implemented."
+            )
+    else:
+        action = dist.sample()
 
-    dist = torch.distributions.Normal(action_mean, action_std)
-    action = dist.sample()
     log_prob = dist.log_prob(action)
 
-    # NOTE: Many continuous envs have an action dimension (multiple values per step).
-    # If the action space has multiple dimensions (e.g., [Batch, 6]),
-    # we sum the log probs of each independent joint to get the total joint probability.
-    if log_prob.ndim > 1 and log_prob.shape[-1] > 1:
-        # NOTE: sum assumes independent for each action in the vector.
-        log_prob = log_prob.sum(dim=-1, keepdim=True)
-    elif log_prob.ndim == 1:
+    if action.ndim == 1:
+        action = action.unsqueeze(-1)
+    if log_prob.ndim == 1:
         log_prob = log_prob.unsqueeze(-1)
 
     return action, {"log_prob": log_prob}
@@ -216,67 +156,6 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
         return final_actions, {**info, "generator": generator}
 
     return epsilon_greedy_selector
-
-
-def get_ape_x_epsilon(
-    actor_id: int, num_actors: int, base_eps: float = 0.4, alpha: float = 7.0
-) -> float:
-    """
-    Calculates the fixed epsilon for a specific actor in APE-X.
-
-    Args:
-        actor_id (int): The ID of the actor.
-        num_actors (int): The total number of actors.
-        base_eps (float): The base epsilon value.
-        alpha (float): The alpha parameter for the distribution.
-    """
-    if num_actors <= 1:
-        return base_eps
-    return base_eps ** (1 + (actor_id / (num_actors - 1)) * alpha)
-
-
-# TODO: is this algorithm agnostic right now? should this be a higher order function so it can more easily be used on any algorithm?
-def multidiscrete_sampling_selector(
-    logits: torch.Tensor, nvec: Tuple[int, ...], temperature: float = 1.0
-) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    """
-    Samples actions for a MultiDiscrete action space.
-
-    Theory (Independent action components): PPO treats MultiDiscrete actions
-    as probabilistically independent components. Therefore:
-    prob(a) = prob(a_1) * prob(a_2) -> logprob(a) = logprob(a_1) + logprob(a_2)
-
-    Args:
-        logits: Flat tensor of logits shape [batch_size, sum(nvec)]
-        nvec: Tuple of integers denoting the number of actions per discrete space.
-        temperature: Sampling temperature for exploration.
-
-    Returns:
-        A tuple containing:
-            - The selected actions of shape [batch_size, len(nvec)].
-            - An info dictionary containing "log_prob".
-    """
-    # Explicitly split the flat logits into a list of tensors for each discrete action
-    split_logits = torch.split(logits, list(nvec), dim=-1)
-
-    actions = []
-    log_probs = []
-
-    for component_logits in split_logits:
-        dist = torch.distributions.Categorical(logits=component_logits / temperature)
-        action = dist.sample()
-        log_prob = dist.log_prob(action)
-
-        actions.append(action)
-        log_probs.append(log_prob)
-
-    # Stack actions to shape [batch_size, len(nvec)]
-    actions_stacked = torch.stack(actions, dim=-1)
-
-    # Sum log probabilities across the action components
-    total_log_prob = torch.stack(log_probs, dim=-1).sum(dim=-1)
-
-    return actions_stacked, {"log_prob": total_log_prob}
 
 
 # TODO: should we make this work for q value selection? or should we at least make it more clear with the args?

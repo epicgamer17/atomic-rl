@@ -139,3 +139,39 @@ def test_extract_vector_env_final_obs_edge_cases():
     indices, obs = extract_vector_env_final_obs(info_missing_mask)
     assert indices.size == 0
     assert obs.size == 0
+
+
+def test_allocate_tensordict():
+    from functional.utils import _allocate_tensordict
+
+    shapes = {"obs": (4, 84, 84), "action": ()}
+    batch_size = [2, 3]
+    td = _allocate_tensordict(shapes, batch_size)
+
+    assert list(td.shape) == [2, 3]
+    assert td["obs"].shape == (2, 3, 4, 84, 84)
+    assert td["obs"].dtype == torch.float32
+    assert td["action"].shape == (2, 3)
+    assert td["action"].dtype == torch.long
+
+
+def test_add_dirichlet_noise():
+    from functional.utils import add_dirichlet_noise
+
+    probs = torch.tensor([[1.0, 0.0], [0.5, 0.5]])
+    epsilon = 0.25
+    alpha = 0.3
+
+    torch.manual_seed(42)
+    noisy_probs = add_dirichlet_noise(probs, epsilon, alpha)
+
+    assert noisy_probs.shape == probs.shape
+    torch.testing.assert_close(noisy_probs.sum(dim=-1), torch.ones(2))
+    assert noisy_probs[0, 0] >= 0.75
+
+
+# TODO: Implement actual test for this
+def test_add_gumbel_noise():
+    from functional.utils import add_gumbel_noise
+
+    add_gumbel_noise()

@@ -14,6 +14,7 @@ from functional.replay_buffer import (
     with_per_tracking,
     make_n_step_accumulator,
     BufferState,
+    compute_is_weights,
 )
 
 pytestmark = pytest.mark.unit
@@ -224,3 +225,20 @@ def test_n_step_accumulator():
     reset()
     trans_after_reset = process(obs[None], action[None], reward[None], next_obs[None], terminated[None], truncated[None])
     assert len(trans_after_reset) == 0  # history was cleared
+
+
+def test_compute_is_weights():
+    """Test Importance Sampling weight computation."""
+    leaf_priorities = torch.tensor([1.0, 2.0, 4.0])
+    total_priority = 10.0
+    min_prob = 0.05
+    beta = torch.tensor(0.5)
+
+    is_weights = compute_is_weights(leaf_priorities, min_prob, total_priority, beta)
+
+    # probs = [0.1, 0.2, 0.4]
+    # is = [ (0.1/0.05)^-0.5, (0.2/0.05)^-0.5, (0.4/0.05)^-0.5 ]
+    # is = [ 2^-0.5, 4^-0.5, 8^-0.5 ]
+    # is = [ 0.7071, 0.5, 0.3535 ]
+    expected_is = torch.tensor([0.70710678118, 0.5, 0.35355339059])
+    torch.testing.assert_close(is_weights, expected_is)

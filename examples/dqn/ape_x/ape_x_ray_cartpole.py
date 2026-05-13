@@ -60,8 +60,8 @@ from functional.losses import compute_q_td_loss, mse_loss, huber_loss
 from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
-    get_ape_x_epsilon,
 )
+from functional.schedules import get_ape_x_epsilon
 from functional.optimizer import apply_gradients
 from functional.network import hard_update_target_network, layer_init
 

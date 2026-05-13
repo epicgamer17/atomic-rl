@@ -12,7 +12,7 @@ import random
 import wandb
 from einops import rearrange
 
-from functional.action_selection import categorical_sampling_selector
+from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_gae, compute_td_lambda_returns
 from functional.losses import (
@@ -251,7 +251,8 @@ for iteration in range(MAX_ITERATIONS):
                 obs_tensor, next_lstm_state, next_done
             )
 
-            action, info_dict = categorical_sampling_selector(logits, temperature=1.0)
+            dist = torch.distributions.Categorical(logits=logits)
+            action, info_dict = sample_distribution(dist, explore=True)
             action_np = action.cpu().numpy().flatten().astype(np.int32)
 
             # Step Env

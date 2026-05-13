@@ -12,7 +12,7 @@ from functional.losses import (
     probability_ratio,
     clipped_surrogate_loss,
     clipped_mse_loss,
-    compute_is_weights,
+    compute_v_td_loss,
 )
 import math
 
@@ -98,6 +98,7 @@ def test_entropy_loss():
     mu = torch.tensor([[0.0, 0.0]])
     std = torch.tensor([[1.0, 1.0]])
     dist = torch.distributions.Normal(mu, std)
+    dist = torch.distributions.Independent(dist, 1)
     loss, info = entropy_loss(dist)
     # Entropy of Normal(0, 1) is 0.5 * log(2 * pi * e) approx 1.4189
     expected_entropy = (
@@ -262,18 +263,73 @@ def test_clipped_mse_loss():
     with pytest.raises(AssertionError, match="Shape mismatch"):
         clipped_mse_loss(predictions, targets[:2], old_predictions, clip_coef)
 
-def test_compute_is_weights():
-    """Test Importance Sampling weight computation."""
-    leaf_priorities = torch.tensor([1.0, 2.0, 4.0])
-    total_priority = 10.0
-    min_prob = 0.05
-    beta = torch.tensor(0.5)
 
-    is_weights = compute_is_weights(leaf_priorities, min_prob, total_priority, beta)
+def test_compute_v_td_loss():
+    from functional.losses import compute_v_td_loss
+    from tensordict import TensorDict
+    
+    class MockModel(nn.Module):
+        def forward(self, x):
+            return x.sum(dim=-1, keepdim=True) # V(s) = sum(obs)
+            
+    model = MockModel()
+    batch = TensorDict({
+        "obs": torch.tensor([[1.0, 2.0], [1.0, 1.0]]),
+        "next_obs": torch.tensor([[2.0, 2.0], [0.0, 0.0]]),
+        "reward": torch.tensor([1.0, 0.5]),
+        "terminated": torch.tensor([0.0, 1.0]),
+        "gamma": torch.tensor([0.9, 0.9])
+    }, batch_size=[2])
+    
+    # V(s) = [3.0, 2.0]
+    # V(s') = [4.0, 0.0]
+    # targets: 
+    #   0: 1.0 + 0.9 * 4.0 * 1 = 4.6
+    #   1: 0.5 + 0.9 * 0.0 * 0 = 0.5
+    # MSE loss:
+    #   0: (3.0 - 4.6)^2 = 1.6^2 = 2.56
+    #   1: (2.0 - 0.5)^2 = 1.5^2 = 2.25
+    # avg loss = (2.56 + 2.25)/2 = 2.405
+    
+    loss, info = compute_v_td_loss(model, batch)
+    assert math.isclose(loss.mean().item(), 2.405, rel_tol=1e-4)
+    assert "v_values/mean" in info
+    assert "v_targets/mean" in info
 
-    # probs = [0.1, 0.2, 0.4]
-    # is = [ (0.1/0.05)^-0.5, (0.2/0.05)^-0.5, (0.4/0.05)^-0.5 ]
-    # is = [ 2^-0.5, 4^-0.5, 8^-0.5 ]
-    # is = [ 0.7071, 0.5, 0.3535 ]
-    expected_is = torch.tensor([0.70710678118, 0.5, 0.35355339059])
-    torch.testing.assert_close(is_weights, expected_is)
+
+def test_losses_assertions():
+    with pytest.raises(AssertionError, match="Shape mismatch"):
+        mse_loss(torch.randn(2), torch.randn(3))
+        
+    with pytest.raises(AssertionError, match="Shape mismatch"):
+        cross_entropy_loss(torch.randn(2), torch.randn(3))
+        
+    with pytest.raises(AssertionError, match="Shape mismatch"):
+        huber_loss(torch.randn(2), torch.randn(3))
+        
+    with pytest.raises(AssertionError, match="Shape mismatch"):
+        policy_gradient_loss(torch.randn(2), torch.randn(3))
+        
+    dist = torch.distributions.Normal(torch.zeros(1, 2), torch.ones(1, 2))
+    with pytest.raises(AssertionError, match="Expected 1D entropy"):
+        entropy_loss(dist)
+        
+    class MockModel(nn.Module):
+        def forward(self, x): return torch.tensor([[1.0, 2.0]])
+    batch = {"obs": torch.zeros(1, 4), "action": torch.tensor([1]), "next_obs": torch.ones(1, 4), "reward": torch.tensor([0.5]), "terminated": torch.tensor([0.0]), "gamma": torch.tensor([0.9])}
+    
+    def bad_target_calculator(*args):
+        return torch.tensor([1.0, 2.0]) # Returns [2] instead of [1]
+        
+    with pytest.raises(AssertionError, match="Shape mismatch"):
+        compute_q_td_loss(MockModel(), batch, MockModel(), lambda obs, preds: torch.tensor([1]), bad_target_calculator)
+        
+    class BadModel(nn.Module):
+        def forward(self, x):
+            # Return 2D for obs, 1D for next_obs to bypass v_next shape checks
+            if torch.equal(x, batch["obs"]):
+                return torch.tensor([[1.0, 2.0]]) # v_pred squeezed to [1, 2]
+            return torch.tensor([[1.0]]) # v_next squeezed to [1]
+            
+    with pytest.raises(AssertionError, match="Prediction and target shapes must match"):
+        compute_v_td_loss(BadModel(), batch)

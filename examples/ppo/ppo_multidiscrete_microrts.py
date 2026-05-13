@@ -15,7 +15,7 @@ from tensordict import TensorDict
 from functools import partial
 
 from functional.action_selection import (
-    multidiscrete_sampling_selector,
+    sample_distribution,
     apply_action_mask,
     compute_masked_entropy,
 )
@@ -204,10 +204,20 @@ for iteration in range(MAX_ITERATIONS):
             # Apply the mask to logits before sampling
             masked_logits = apply_action_mask(logits, action_mask)
 
-            # Use the MultiDiscrete functional selector with masked logits
-            action, info_dict = multidiscrete_sampling_selector(
-                masked_logits, nvec, temperature=1.0
-            )
+            # 2. Split logits and sample
+            # TODO: should this be a helper function?
+            split_logits = torch.split(masked_logits, list(nvec), dim=-1)
+            actions_list = []
+            log_probs_list = []
+
+            for component_logits in split_logits:
+                dist = torch.distributions.Categorical(logits=component_logits)
+                act, info_dict_sub = sample_distribution(dist, explore=True)
+                actions_list.append(act.squeeze(-1))
+                log_probs_list.append(info_dict_sub["log_prob"].squeeze(-1))
+
+            action = torch.stack(actions_list, dim=-1)
+            info_dict = {"log_prob": torch.stack(log_probs_list, dim=-1).sum(dim=-1)}
             # Step env expects numpy array (batch_size, len(nvec))
             action_np = action.cpu().numpy().astype(np.int32)
 

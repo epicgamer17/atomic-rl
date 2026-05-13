@@ -130,8 +130,14 @@ def entropy_loss(
     dist: D.Distribution,
 ) -> Tuple[torch.Tensor, dict]:
     """
-    Calculate the entropy loss for ANY action distribution.
-    Returns the NEGATIVE entropy, so that minimizing this "loss" maximizes entropy.
+    Calculate the entropy loss for an action distribution.
+    Returns the NEGATIVE mean entropy, so that minimizing this "loss" maximizes entropy.
+
+    Rule Enforcement (Explicit over Implicit): 
+    This function expects the distribution's `event_shape` to be configured correctly. 
+    If you have a multi-dimensional action space and want joint entropy, you MUST wrap 
+    your base distribution in `torch.distributions.Independent` before passing it here.
+    We strictly avoid guessing whether to sum over extra dimensions.
 
     Args:
         dist: The PyTorch distribution object.
@@ -139,29 +145,19 @@ def entropy_loss(
     Returns:
         Tuple[torch.Tensor, dict]: The negative mean entropy and logging info.
     """
-    # 1. dist.entropy() automatically handles the underlying math
+    # 1. dist.entropy() automatically handles the underlying math based on event_shape
     entropy = dist.entropy()
-
-    # 2. Sum over independent event dimensions if necessary
-    # When using `torch.distributions.Normal` without `Independent`, the event_shape
-    # is empty and the action dimension is treated as a batch dimension.
-    # If the user wrapped their distribution in `Independent(..., 1)`, event_shape
-    # will handle the summing internally. Here, we manually sum over any dimensions
-    # strictly beyond the batch dimension (which is usually the first 1 or 2 dims).
-    # A safe fallback is to check if the entropy tensor has more dimensions than
-    # the expected batch shape (e.g., [B] or [B, T]).
-    # For now, we assume standard [B, A] where dim=1 is action, but only if
-    # the distribution's event_shape is empty.
-    if len(dist.event_shape) == 0 and entropy.dim() > 1:
-        # NOTE: This assumes shape is [B, A]. If shape is [B, T], this incorrectly
-        # sums over T. The best practice is to use `torch.distributions.Independent`.
-        entropy = entropy.sum(dim=-1)
+    
+    # Fail Fast: If the user didn't use `Independent`, entropy will incorrectly retain 
+    # the action dimension as a batch dimension. We check against the expected batch dim.
+    # Note: We assume scalar entropy per transition here.
+    assert entropy.ndim == 1, (
+        f"Expected 1D entropy [B], got {entropy.shape}. If your action space is "
+        "multi-dimensional, ensure you wrap your distribution in `Independent`."
+    )
 
     loss = -entropy.mean()
-
-    info = {"loss/entropy": loss.detach()}
-
-    return loss, info
+    return loss, {"loss/entropy": loss.detach()}
 
 
 def compute_v_td_loss(
@@ -360,35 +356,6 @@ def probability_ratio(
     return torch.exp(new_log_probs - old_log_probs.detach())
 
 
-def compute_is_weights(
-    leaf_priorities: torch.Tensor,
-    min_prob: Union[float, torch.Tensor],
-    total_priority: Union[float, torch.Tensor],
-    beta: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Computes Importance Sampling (IS) weights for Prioritized Experience Replay (PER).
-
-    IS weights correct for the bias introduced by non-uniform sampling in PER.
-    Mathematically: $w_i = ( (1/N) * (1/P_i) )^\beta / \max_j w_j$, where $P_i$ is the
-    sampling probability of transition $i$. This simplifies to:
-    $w_i = ( P_i / \min_j P_j )^{-\beta}$.
-
-    Args:
-        leaf_priorities (torch.Tensor): The priority values of the sampled transitions.
-        min_prob (Union[float, torch.Tensor]): The minimum sampling probability in the tree.
-        total_priority (Union[float, torch.Tensor]): The sum of all priorities in the tree.
-        beta (torch.Tensor): The correction coefficient (usually scheduled from 0.4 to 1.0).
-
-    Returns:
-        torch.Tensor: The normalized IS weights for the batch.
-    """
-    # Sampling probability: P_i = priority_i / sum(priorities)
-    probs = leaf_priorities / total_priority
-    # IS weight: (P_i / min_P)^-beta
-    # This simplifies the (1/N * 1/P_i)^beta / max_w normalization
-    is_weights = torch.pow(probs / min_prob, -beta)
-    return is_weights
 
 
 def clipped_surrogate_loss(

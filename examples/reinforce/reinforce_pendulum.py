@@ -16,7 +16,7 @@ import random
 import wandb
 from einops import rearrange
 
-from functional.action_selection import gaussian_sampling_selector
+from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
@@ -100,7 +100,8 @@ for episode in range(MAX_EPISODES):
         mu, std = actor(obs_tensor)
 
         # Sample action using Gaussian selector
-        action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
+        dist = torch.distributions.Normal(mu, std)
+        action_tensor, info_dict = sample_distribution(dist, explore=True)
 
         # Pendulum expects a numpy array for actions
         action = action_tensor.detach().cpu().numpy().flatten()
@@ -112,7 +113,7 @@ for episode in range(MAX_EPISODES):
 
         # 3. Add to buffers
         rewards.append(reward)
-        log_probs.append(info_dict["log_prob"])
+        log_probs.append(info_dict["log_prob"].sum(dim=-1))
         terminateds.append(terminated)
         truncateds.append(truncated)
 
@@ -154,7 +155,7 @@ for episode in range(MAX_EPISODES):
 
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
+        log_probs=rearrange(torch.stack(log_probs), "t 1 -> t"),
     )
     loss = loss.mean()
 

@@ -22,7 +22,7 @@ import random
 import wandb
 from einops import rearrange
 
-from functional.action_selection import gaussian_sampling_selector
+from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss, mse_loss
@@ -132,7 +132,8 @@ for episode in range(MAX_EPISODES):
         mu, std = actor(obs_tensor)
         value = critic(obs_tensor)
 
-        action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
+        dist = torch.distributions.Normal(mu, std)
+        action_tensor, info_dict = sample_distribution(dist, explore=True)
         action_np = action_tensor.detach().cpu().numpy()
 
         # 2. Step Env
@@ -141,7 +142,7 @@ for episode in range(MAX_EPISODES):
 
         # 3. Add to buffers
         rewards.append(reward[0])
-        log_probs.append(info_dict["log_prob"])
+        log_probs.append(info_dict["log_prob"].sum(dim=-1))
         values.append(value)
         terminateds.append(terminated[0])
         truncateds.append(truncated[0])
@@ -180,7 +181,7 @@ for episode in range(MAX_EPISODES):
 
     pg_loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
+        log_probs=rearrange(torch.stack(log_probs), "t 1 -> t"),
     )
     pg_loss = pg_loss.mean()
 

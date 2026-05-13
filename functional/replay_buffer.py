@@ -4,7 +4,6 @@ from typing import Tuple, Callable, List, Optional, Union
 import random
 from collections import deque
 from dataclasses import dataclass
-from functional.losses import compute_is_weights
 from .utils import _allocate_tensordict
 
 
@@ -148,6 +147,37 @@ def uniform_sample(
         )
     indices = torch.randint(0, buffer_state.size, (batch_size,), generator=rng_key)
     return buffer_state.data[indices]
+
+
+def compute_is_weights(
+    leaf_priorities: torch.Tensor,
+    min_prob: Union[float, torch.Tensor],
+    total_priority: Union[float, torch.Tensor],
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Computes Importance Sampling (IS) weights for Prioritized Experience Replay (PER).
+
+    IS weights correct for the bias introduced by non-uniform sampling in PER.
+    Mathematically: $w_i = ( (1/N) * (1/P_i) )^\beta / \max_j w_j$, where $P_i$ is the
+    sampling probability of transition $i$. This simplifies to:
+    $w_i = ( P_i / \min_j P_j )^{-\beta}$.
+
+    Args:
+        leaf_priorities (torch.Tensor): The priority values of the sampled transitions.
+        min_prob (Union[float, torch.Tensor]): The minimum sampling probability in the tree.
+        total_priority (Union[float, torch.Tensor]): The sum of all priorities in the tree.
+        beta (torch.Tensor): The correction coefficient (usually scheduled from 0.4 to 1.0).
+
+    Returns:
+        torch.Tensor: The normalized IS weights for the batch.
+    """
+    # Sampling probability: P_i = priority_i / sum(priorities)
+    probs = leaf_priorities / total_priority
+    # IS weight: (P_i / min_P)^-beta
+    # This simplifies the (1/N * 1/P_i)^beta / max_w normalization
+    is_weights = torch.pow(probs / min_prob, -beta)
+    return is_weights
 
 
 def sample_per(

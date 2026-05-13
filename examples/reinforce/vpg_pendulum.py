@@ -135,7 +135,7 @@ for episode in range(MAX_EPISODES):
 
         # 3. Add to buffers
         rewards.append(reward)
-        log_probs.append(info_dict["log_prob"])
+        log_probs.append(info_dict["log_prob"].sum(dim=-1))
         values.append(value)
         terminateds.append(terminated)
         truncateds.append(truncated)
@@ -173,7 +173,7 @@ for episode in range(MAX_EPISODES):
 
     pg_loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
+        log_probs=rearrange(torch.stack(log_probs), "t 1 -> t"),
     )
     pg_loss = pg_loss.mean()
 

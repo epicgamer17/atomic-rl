@@ -12,7 +12,7 @@ import random
 import wandb
 from einops import rearrange
 
-from functional.action_selection import gaussian_sampling_selector
+from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_gae, compute_td_lambda_returns
 from functional.losses import (
@@ -189,10 +189,9 @@ for iteration in range(MAX_ITERATIONS):
             obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
             action_mean, action_std, value = model(obs_tensor)
 
-            # Use gaussian_sampling_selector for continuous actions
-            action, info_dict = gaussian_sampling_selector(
-                action_mean, action_std, explore=True
-            )
+            # Use sample_distribution for continuous actions
+            dist = torch.distributions.Normal(action_mean, action_std)
+            action, info_dict = sample_distribution(dist, explore=True)
 
             # Step Env expects numpy arrays for actions
             action_np = action.cpu().numpy().astype(np.float32)
@@ -206,7 +205,7 @@ for iteration in range(MAX_ITERATIONS):
                 {
                     "observations": obs_tensor,
                     "actions": action,
-                    "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
+                    "logprobs": info_dict["log_prob"].sum(dim=-1).detach(),
                     "rewards": torch.as_tensor(
                         reward, dtype=torch.float32, device=device
                     ),
@@ -310,8 +309,9 @@ for iteration in range(MAX_ITERATIONS):
 
             # Re-create normal distribution for new log probabilities
             dist = torch.distributions.Normal(new_means, new_stds)
-            # Log prob for continuous actions [B, num_actions] -> [B]
-            new_log_probs = dist.log_prob(mb["actions"]).sum(dim=-1)
+            dist = torch.distributions.Independent(dist, 1)
+            # Log prob for continuous actions [B, num_actions] -> [B] automatically via Independent
+            new_log_probs = dist.log_prob(mb["actions"])
 
             # Compute KL divergence
             with torch.no_grad():

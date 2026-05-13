@@ -22,7 +22,7 @@ import wandb
 from einops import rearrange
 from functools import partial
 
-from functional.action_selection import gaussian_sampling_selector
+from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_n_step_returns
 from functional.losses import policy_gradient_loss, mse_loss, entropy_loss
@@ -171,7 +171,8 @@ for iteration in range(MAX_ITERATIONS):
             obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
             mu, std, value = model(obs_tensor)
 
-            action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
+            dist = torch.distributions.Normal(mu, std)
+            action_tensor, info_dict = sample_distribution(dist, explore=True)
             action_np = action_tensor.cpu().numpy()
 
             # 2. Step Env
@@ -183,7 +184,7 @@ for iteration in range(MAX_ITERATIONS):
                 {
                     "observations": obs_tensor,
                     "actions": action_tensor,
-                    "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
+                    "logprobs": info_dict["log_prob"].sum(dim=-1).detach(),
                     "rewards": torch.as_tensor(
                         reward, dtype=torch.float32, device=device
                     ),
@@ -268,7 +269,8 @@ for iteration in range(MAX_ITERATIONS):
 
     # Re-calculate log probabilities
     dist = torch.distributions.Normal(new_mu, new_std)
-    new_log_probs = dist.log_prob(flat_data["actions"]).sum(dim=-1)
+    dist = torch.distributions.Independent(dist, 1)
+    new_log_probs = dist.log_prob(flat_data["actions"])
 
     pg_loss, info_dict = policy_gradient_loss(
         advantages=flat_advantages,

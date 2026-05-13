@@ -5,11 +5,8 @@ import math
 from functional.action_selection import (
     expected_value,
     argmax_selector,
-    categorical_sampling_selector,
-    gaussian_sampling_selector,
+    sample_distribution,
     with_epsilon_greedy,
-    get_ape_x_epsilon,
-    multidiscrete_sampling_selector,
 )
 from functional.schedules import get_linear_schedule, get_exponential_schedule
 
@@ -60,105 +57,63 @@ def test_argmax_selector():
     assert actions_flipped[1, 0] == 1
 
 
-def test_categorical_sampling_selector():
-    """Test categorical sampling selector."""
+def test_sample_distribution_categorical():
+    """Test sample_distribution with Categorical."""
     torch.manual_seed(42)  # Local seed for determinism in sampling
 
     # [1, 3] logits
     predictions = torch.tensor([[0.0, 10.0, 0.0]])
+    dist = torch.distributions.Categorical(logits=predictions)
 
-    # Temperature 0 should be argmax and return 0 log_prob
-    action, info = categorical_sampling_selector(predictions, temperature=0.0)
+    # explore=False
+    action, info = sample_distribution(dist, explore=False)
     assert action.item() == 1
-    assert info["log_prob"].item() == 0.0
+    # Note: deterministic mode doesn't zero log_prob by default, it computes the actual log_prob of the argmax
+    assert info["log_prob"].shape == (1, 1)
 
-    # Temperature 0 with extractor_fn
-    action_0_ext, _ = categorical_sampling_selector(
-        predictions, extractor_fn=lambda x: x * -1.0, temperature=0.0
-    )
-    # flipped signs: [0, -10, 0] -> argmax is 0 or 2. argmax(0) = 0
-    assert action_0_ext.item() == 0
-
-    # Temperature 1.0
-    action, info = categorical_sampling_selector(predictions, temperature=1.0)
+    # explore=True
+    action, info = sample_distribution(dist, explore=True)
     log_prob = info["log_prob"]
     assert action.shape == (1, 1)
     assert log_prob.shape == (1, 1)
     # With logits [0, 10, 0], action 1 is extremely likely
     assert action.item() == 1
 
-    # Verify log_prob calculation manually
-    # probs = softmax([0, 10, 0]) approx [0, 1, 0]
-    # log_prob = log(probs[1]) approx 0
     expected_log_prob = F.log_softmax(predictions, dim=-1)[0, 1]
     torch.testing.assert_close(log_prob[0], expected_log_prob.view(1))
 
-    # Test with extractor_fn
-    def dummy_extractor(x):
-        return x * 2.0
 
-    action_ext, _ = categorical_sampling_selector(
-        predictions, extractor_fn=dummy_extractor
-    )
-    assert action_ext.item() == 1
-
-    # Test multi-discrete (e.g. 2 categorical variables)
-    # Shape [Batch, Num_Vars, Num_Actions] -> [1, 2, 3]
-    multi_predictions = torch.tensor([[[10.0, 0.0, 0.0], [0.0, 10.0, 0.0]]])
-    action_multi, info_multi = categorical_sampling_selector(multi_predictions)
-    log_prob_multi = info_multi["log_prob"]
-    # The correct implementation preserves batch dimension: [Batch, Num_Vars]
-    assert action_multi.shape == (1, 2)
-    assert log_prob_multi.shape == (1, 1)
-    assert action_multi[0, 0] == 0
-    assert action_multi[0, 1] == 1
-
-
-def test_gaussian_sampling_selector():
-    """Test gaussian sampling selector."""
+def test_sample_distribution_gaussian():
+    """Test sample_distribution with Gaussian."""
     torch.manual_seed(42)
 
     mean = torch.tensor([[10.0, -10.0]])
     std = torch.tensor([[0.1, 0.1]])
+    dist = torch.distributions.Normal(mean, std)
 
     # Test explore=False
-    action, info = gaussian_sampling_selector(mean, std, explore=False)
+    action, info = sample_distribution(dist, explore=False)
     log_prob = info["log_prob"]
     torch.testing.assert_close(action, mean)
-    torch.testing.assert_close(log_prob, torch.zeros_like(log_prob))
 
     # Test explore=True
-    action, info = gaussian_sampling_selector(mean, std, explore=True)
+    action, info = sample_distribution(dist, explore=True)
     log_prob = info["log_prob"]
     assert action.shape == (1, 2)
-    assert log_prob.shape == (1, 1)  # Summed over action dimension
+    assert log_prob.shape == (1, 2)  # Log prob is independent, so [1, 2]
 
     # Manual check for log_prob
-    # log_prob = log_pdf(action, mean, std).sum()
-    dist = torch.distributions.Normal(mean, std)
-    expected_log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
+    expected_log_prob = dist.log_prob(action)
     torch.testing.assert_close(log_prob, expected_log_prob)
 
     # Test multi-dimensional continuous action space
     mean_multi = torch.randn(2, 3)  # [Batch 2, Actions 3]
     std_multi = torch.ones(2, 3) * 0.1
-    action_multi, info_multi = gaussian_sampling_selector(mean_multi, std_multi)
+    dist_multi = torch.distributions.Normal(mean_multi, std_multi)
+    action_multi, info_multi = sample_distribution(dist_multi)
     log_prob_multi = info_multi["log_prob"]
     assert action_multi.shape == (2, 3)
-    assert log_prob_multi.shape == (2, 1)
-
-
-def test_gaussian_sampling_selector_1d():
-    mean = torch.tensor([10.0, -10.0])  # 1D
-    std = torch.tensor([0.1, 0.1])
-
-    # Covers line 157 (explore=False)
-    _, info_det = gaussian_sampling_selector(mean, std, explore=False)
-    assert info_det["log_prob"].shape == (2, 1)
-
-    # Covers lines 170-171 (explore=True)
-    _, info_sample = gaussian_sampling_selector(mean, std, explore=True)
-    assert info_sample["log_prob"].shape == (2, 1)
+    assert log_prob_multi.shape == (2, 3)
 
 
 def test_with_epsilon_greedy():
@@ -209,69 +164,44 @@ def test_exponential_schedule():
     assert math.isclose(get_exponential_schedule(5, 1.0, 0.1, 10), expected_middle)
 
 
-def test_ape_x_epsilon():
-    """Test Ape-X fixed epsilon calculation."""
-    # If num_actors <= 1, return base_eps
-    assert get_ape_x_epsilon(0, 1, base_eps=0.4) == 0.4
-
-    # Check extremes for multiple actors
-    # actor 0 should have base_eps ^ (1 + 0) = base_eps
-    assert math.isclose(get_ape_x_epsilon(0, 5, base_eps=0.4), 0.4)
-    # actor last should have base_eps ^ (1 + alpha)
-    expected_last = 0.4 ** (1 + 7.0)
-    assert math.isclose(get_ape_x_epsilon(4, 5, base_eps=0.4, alpha=7.0), expected_last)
 
 
 def test_action_selection_assertions():
     """Test that action selection functions raise assertions on invalid input shapes."""
     # expected_value
-    with pytest.raises(AssertionError, match="Expected 3D predictions"):
-        expected_value(torch.randn(2, 2), torch.randn(2))
+    with pytest.raises(AssertionError, match="Expected 2D \[B, N\] or 3D \[B, A, N\] predictions"):
+        expected_value(torch.randn(2), torch.randn(2))
     with pytest.raises(
-        AssertionError, match="Expected 1D \[N\] or 3D \[B, A, N\] support"
+        AssertionError, match="If support is not 1D, it must match predictions shape exactly."
     ):
         expected_value(torch.randn(1, 2, 3), torch.randn(2, 3))
 
-    # categorical_sampling_selector
-    with pytest.raises(
-        AssertionError, match="Expected predictions with at least batch and action dims"
-    ):
-        categorical_sampling_selector(torch.randn(3))
 
-    # gaussian_sampling_selector
-    with pytest.raises(AssertionError, match="Mean .* and Std .* must match"):
-        gaussian_sampling_selector(torch.randn(2, 2), torch.randn(2, 3))
-    with pytest.raises(AssertionError, match="Expected at least 1D tensors"):
-        gaussian_sampling_selector(torch.tensor(0.0), torch.tensor(1.0))
+def test_sample_distribution_not_implemented():
+    class DummyDist:
+        pass
+    
+    dist = DummyDist()
+    with pytest.raises(NotImplementedError, match="Deterministic selection"):
+        sample_distribution(dist, explore=False)
 
 
-def test_multidiscrete_sampling_selector():
-    """Test MultiDiscrete action sampling selector."""
-    torch.manual_seed(42)
+def test_apply_action_mask():
+    from functional.action_selection import apply_action_mask
+    logits = torch.tensor([[1.0, 2.0, 3.0]])
+    mask = torch.tensor([[1, 0, 1]])
+    masked = apply_action_mask(logits, mask)
+    expected = torch.tensor([[1.0, -1e8, 3.0]])
+    torch.testing.assert_close(masked, expected)
 
-    # nvec = (3, 2)
-    # logits shape [Batch=1, sum(nvec)=5]
-    nvec = (3, 2)
-    # High logit for index 1 in first component, index 0 in second component
-    logits = torch.tensor([[0.0, 10.0, 0.0, 10.0, 0.0]])
 
-    actions, info = multidiscrete_sampling_selector(logits, nvec, temperature=1.0)
-    log_prob = info["log_prob"]
+def test_compute_masked_entropy():
+    from functional.action_selection import compute_masked_entropy
+    logits = torch.tensor([[-0.6931, -1e8, -0.6931]])
+    probs = torch.tensor([[0.5, 0.0, 0.5]])
+    mask = torch.tensor([[1, 0, 1]])
+    entropy = compute_masked_entropy(logits, probs, mask)
+    # entropy = -(0.5 * -0.6931 + 0 + 0.5 * -0.6931) = 0.6931
+    expected = torch.tensor([0.6931])
+    torch.testing.assert_close(entropy, expected)
 
-    assert actions.shape == (1, 2)
-    assert log_prob.shape == (1,)
-
-    # Check selected actions
-    assert actions[0, 0] == 1
-    assert actions[0, 1] == 0
-
-    # Manual check for log_prob
-    # First component: Categorical(logits=[0, 10, 0]) -> log_prob[1]
-    # Second component: Categorical(logits=[10, 0]) -> log_prob[0]
-    split_logits = torch.split(logits, list(nvec), dim=-1)
-    expected_log_prob = torch.distributions.Categorical(
-        logits=split_logits[0]
-    ).log_prob(actions[0, 0]) + torch.distributions.Categorical(
-        logits=split_logits[1]
-    ).log_prob(actions[0, 1])
-    torch.testing.assert_close(log_prob, expected_log_prob)

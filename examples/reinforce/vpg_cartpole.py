@@ -17,7 +17,7 @@ import wandb
 from einops import rearrange
 from functools import partial
 
-from functional.action_selection import categorical_sampling_selector
+from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss, mse_loss
@@ -104,7 +104,8 @@ for episode in range(MAX_EPISODES):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
         logits = actor(obs_tensor)
         value = critic(obs_tensor)
-        action, log_prob = categorical_sampling_selector(logits, temperature=1.0)
+        dist = torch.distributions.Categorical(logits=logits)
+        action, info_dict = sample_distribution(dist, explore=True)
         action = action.item()
 
         # 2. Step Env
@@ -112,7 +113,7 @@ for episode in range(MAX_EPISODES):
 
         # 3. Add to "online" buffers
         rewards.append(reward)
-        log_probs.append(log_prob)
+        log_probs.append(info_dict["log_prob"])
         values.append(value)
         terminated.append(terminated)
 
