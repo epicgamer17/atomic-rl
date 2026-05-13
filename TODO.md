@@ -53,3 +53,14 @@ Dreamer V4
 JEPA BASED? 
 ... 
 Sutton Based Methods (linear value functions, average rewards, Dyna, etc)
+- AdaGain (was too hard to implement? or maybe not, maybe I should just try again)
+- MetaOptimize (also too hard? very optimizer specific, not a lot of freedom)
+- Continual Back Prop (again very not friendly to general use, every new layer and architecture needs a new branch in the code, hence removed)
+- Horde and GVF
+
+ADD METRICS
+PPO METRICS
+Percent of Dead Units 
+Weight Magnitude
+Effective rank of representation layers
+
