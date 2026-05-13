@@ -46,3 +46,18 @@ Should follow best practices of this library and ideally libraries it uses. Shou
 
 *networks/*
 This layer contains the neural network architectures used in the examples.
+
+*envs/* 
+This layer contains the environments used in the examples.
+These environments are not only gym or RL environments, they can also be any function that returns data/examples that can be used to train or learn a model.
+Some examples of what should exist here: 
+- all gym environments
+- all openAI Gym environments
+- all deepMind Environments
+- custom synthetic environments (for meta optimization, function learning, etc)
+- Streaming Envs and Data (for continual learning and online learning examples)
+- Toy examples (like tabular cases, etc)
+Essentially the goal here is to provide reusable "environments" that can be used to train or learn a model. Many of these will be used by the examples, but they can also be used by other examples, or by other projects. 
+These tend to be based of experiments from papers, but they don't have to be. For example the Permuted MNIST. 
+Wrappers for environments should be included here as well. Things like some of the wrappers for gym environments used in PPO for Atari. 
+By default if possible existing gym envs etc should be used instead of creating new ones. But if an env doesn't exist or needs to be modified for a specific purpose (e.g. for an algorithm), then it should be included here.

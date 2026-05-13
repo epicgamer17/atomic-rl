@@ -203,8 +203,8 @@ for step in range(MAX_STEPS):
             batch,
             target_model,
             lambda obs, preds: argmax_selector(preds)[0],
-            partial(compute_q_td_target, gamma=batch["gamma"]),
-            loss_fn=with_per_weights(mse_loss, batch["is_weights"]),
+            partial(compute_q_td_target),
+            loss_fn=per_loss_fn,
         )
 
         # Apply Updates

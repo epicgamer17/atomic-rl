@@ -315,6 +315,14 @@ def with_per_tracking(write_strategy_fn: Callable) -> Callable:
 def make_n_step_accumulator(n_steps: int, gamma: float, num_envs: int = 1) -> Callable:
     """
     Creates a stateful function for N-step transition accumulation.
+
+    # TODO: Performance Violation
+    # This implementation iterates over the batch dimension (`num_envs`) in Python 
+    # using a for-loop and uses Python `deque`s. This directly violates the rule 
+    # "STRICTLY AVOID iterating over tensor dimensions in Python" and creates a massive
+    # CPU overhead for highly vectorized environments (e.g., thousands of envs).
+    # Future enhancement: Rewrite this to use a fully vectorized PyTorch circular 
+    # buffer [num_envs, n_steps, ...] using cumprod and sum on GPU/CPU natively.
     """
     histories = [deque(maxlen=n_steps) for _ in range(num_envs)]
 

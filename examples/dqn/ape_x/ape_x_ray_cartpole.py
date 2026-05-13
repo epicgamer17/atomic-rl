@@ -359,7 +359,7 @@ class LearnerActor:
             batch,
             self.target_model,
             lambda obs, preds: argmax_selector(self.model(obs))[0],
-            partial(self.target_fn, gamma=batch["gamma"]),
+            partial(self.target_fn),
             loss_fn=self.loss_fn,
         )
 

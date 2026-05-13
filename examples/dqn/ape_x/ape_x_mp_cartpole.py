@@ -307,7 +307,7 @@ def learner_worker(
             batch,
             target_model,
             lambda obs, preds: argmax_selector(local_model(obs))[0],
-            partial(target_fn, gamma=batch["gamma"]),
+            partial(target_fn),
             loss_fn=loss_fn,
         )
 

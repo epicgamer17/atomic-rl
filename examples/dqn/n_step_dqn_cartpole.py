@@ -151,8 +151,10 @@ for step in range(MAX_STEPS):
         torch.tensor([terminated], dtype=torch.float32),
         torch.tensor([truncated], dtype=torch.float32),
     )
-    for transition in n_step_transitions:
-        buffer_state, _ = circular_write_strategy(buffer_state, transition)
+
+    # TODO: this is a bit yuckier than the list but also more efficient. maybe update.
+    if n_step_transitions.batch_size[0] > 0:
+        buffer_state, _ = circular_write_strategy(buffer_state, n_step_transitions)
 
     # Update state for next tick
     obs = next_obs
@@ -180,7 +182,7 @@ for step in range(MAX_STEPS):
             batch,
             target_model,
             lambda obs, preds: argmax_selector(preds)[0],
-            partial(compute_q_td_target, gamma=batch["gamma"]),
+            partial(compute_q_td_target),
             loss_fn=mse_loss,
         )
         loss = loss.mean()

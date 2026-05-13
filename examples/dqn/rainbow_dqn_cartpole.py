@@ -219,9 +219,10 @@ for step in range(MAX_STEPS):
         torch.tensor([truncated], dtype=torch.float32),
     )
 
-    # Iterate through whatever the accumulator yielded and write to the buffer
-    for transition in n_step_transitions:
-        buffer_state = per_add_transition(buffer_state, transition)
+    # If the accumulator yielded any transitions, write them as a single batch
+    # TODO: this is a bit yuckier than the list but also more efficient. maybe update.
+    if n_step_transitions.batch_size[0] > 0:
+        buffer_state = per_add_transition(buffer_state, n_step_transitions)
 
     # Update state
     obs = next_obs
@@ -266,8 +267,7 @@ for step in range(MAX_STEPS):
             )[0],
             partial(
                 compute_categorical_q_td_target,
-                gamma=batch["gamma"],
-                support=SUPPORT.to(device),
+                                support=SUPPORT.to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,

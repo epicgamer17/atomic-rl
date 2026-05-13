@@ -139,17 +139,22 @@ def entropy_loss(
     Returns:
         Tuple[torch.Tensor, dict]: The negative mean entropy and logging info.
     """
-    # 1. dist.entropy() automatically handles the underlying math,
-    # whether it's Shannon Entropy (Categorical) or Differential Entropy (Normal)
+    # 1. dist.entropy() automatically handles the underlying math
     entropy = dist.entropy()
 
-    # 2. Take the mean across the batch
-    # NOTE: for multivariate distributions, entropy might be [B, A] or [B].
-    # Normal returns [B, A], so we sum across actions first if needed,
-    # but dist.entropy() for Normal usually returns [B, A].
-    # Wait, torch.distributions.Normal(mu, std).entropy() returns [B, A].
-    # We usually want the total entropy of the joint distribution, which is the sum.
-    if entropy.dim() > 1:
+    # 2. Sum over independent event dimensions if necessary
+    # When using `torch.distributions.Normal` without `Independent`, the event_shape
+    # is empty and the action dimension is treated as a batch dimension.
+    # If the user wrapped their distribution in `Independent(..., 1)`, event_shape
+    # will handle the summing internally. Here, we manually sum over any dimensions
+    # strictly beyond the batch dimension (which is usually the first 1 or 2 dims).
+    # A safe fallback is to check if the entropy tensor has more dimensions than
+    # the expected batch shape (e.g., [B] or [B, T]).
+    # For now, we assume standard [B, A] where dim=1 is action, but only if
+    # the distribution's event_shape is empty.
+    if len(dist.event_shape) == 0 and entropy.dim() > 1:
+        # NOTE: This assumes shape is [B, A]. If shape is [B, T], this incorrectly
+        # sums over T. The best practice is to use `torch.distributions.Independent`.
         entropy = entropy.sum(dim=-1)
 
     loss = -entropy.mean()
@@ -257,7 +262,9 @@ def compute_q_td_loss(
         # Calculate TD target (standard, n-step, or categorical)
         td_target = target_calculator_fn(
             next_preds,
-            next_actions,
+            next_actions.squeeze(
+                -1
+            ),  # TODO: need to be careful with this reshaping stuff in functions
             batch["reward"],
             batch["terminated"],
             batch["gamma"],
@@ -464,6 +471,9 @@ def clipped_mse_loss(
     assert (
         predictions.shape == old_predictions.shape == targets.shape
     ), f"Shape mismatch: pred {predictions.shape}, old {old_predictions.shape}, targets {targets.shape}"
+
+    # Explicitly detach old_predictions to prevent gradient leak
+    old_predictions = old_predictions.detach()
 
     # Unclipped MSE
     v_loss_unclipped = F.mse_loss(predictions, targets, reduction="none")

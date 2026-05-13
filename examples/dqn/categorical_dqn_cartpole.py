@@ -208,8 +208,7 @@ for step in range(MAX_STEPS):
             )[0],
             partial(
                 compute_categorical_q_td_target,
-                gamma=batch["gamma"],
-                support=SUPPORT.to(device),
+                                support=SUPPORT.to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,

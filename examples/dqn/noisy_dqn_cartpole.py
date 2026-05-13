@@ -182,7 +182,7 @@ for step in range(MAX_STEPS):
             batch,
             target_model,
             lambda obs, preds: argmax_selector(preds)[0],
-            partial(compute_q_td_target, gamma=batch["gamma"]),
+            partial(compute_q_td_target),
             loss_fn=mse_loss,
         )
         loss = loss.mean()
