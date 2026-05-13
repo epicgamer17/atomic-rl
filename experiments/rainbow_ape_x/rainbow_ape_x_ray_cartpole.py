@@ -26,7 +26,7 @@ from functional.replay_buffer import (
     make_n_step_accumulator,
 )
 from functional.losses import compute_q_td_loss, cross_entropy_loss
-from functional.targets import categorical_td_target
+from functional.td import compute_categorical_q_td_target
 from functional.action_selection import (
     double_selector,
     categorical_extractor,
@@ -287,9 +287,12 @@ class ActorActor:
                     _, info_dict = compute_q_td_loss(
                         self.model,
                         collated,
-                        self.model,
+                        self.target_model,
+                        lambda obs, preds: argmax_selector(
+                            self.model(obs),
+                            extractor_fn=partial(categorical_extractor, support=self.support),
+                        )[0],
                         partial(self.target_fn, gamma=collated["gamma"]),
-                        eval_model=self.target_model,
                         loss_fn=self.loss_fn,
                     )
 
@@ -392,9 +395,12 @@ class LearnerActor:
         loss, info = compute_q_td_loss(
             self.model,
             batch,
-            self.model,
+            self.target_model,
+            lambda obs, preds: argmax_selector(
+                self.model(obs),
+                extractor_fn=partial(categorical_extractor, support=self.support),
+            )[0],
             partial(self.target_fn, gamma=batch["gamma"]),
-            eval_model=self.target_model,
             loss_fn=self.loss_fn,
         )
 
@@ -440,7 +446,7 @@ def main():
     )
 
     my_selector_fn = double_selector
-    my_target_fn = categorical_td_target
+    my_target_fn = compute_categorical_q_td_target
     my_loss_fn = cross_entropy_loss
 
     print("Creating Replay Buffer...")

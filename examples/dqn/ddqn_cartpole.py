@@ -25,7 +25,7 @@ from functional.replay_buffer import (
     uniform_sample,
 )
 from functional.losses import compute_q_td_loss, mse_loss
-from functional.targets import scalar_td_target
+from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
     with_epsilon_greedy,
@@ -173,9 +173,9 @@ for step in range(MAX_STEPS):
         loss, info_dict = compute_q_td_loss(
             model,
             batch,
-            model,
-            partial(scalar_td_target, gamma=batch["gamma"]),
-            eval_model=target_model,
+            target_model,
+            lambda obs, preds: argmax_selector(model(obs))[0],
+            partial(compute_q_td_target, gamma=batch["gamma"]),
             loss_fn=mse_loss,
         )
         loss = loss.mean()

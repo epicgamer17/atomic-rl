@@ -39,7 +39,7 @@ from functional.replay_buffer import (
 )
 from functional.schedules import get_linear_schedule
 from functional.losses import compute_q_td_loss, with_per_weights, mse_loss
-from functional.targets import scalar_td_target
+from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
     with_epsilon_greedy,
@@ -202,8 +202,9 @@ for step in range(MAX_STEPS):
             model,
             batch,
             target_model,
-            partial(scalar_td_target, gamma=batch["gamma"]),
-            loss_fn=per_loss_fn,
+            lambda obs, preds: argmax_selector(preds)[0],
+            partial(compute_q_td_target, gamma=batch["gamma"]),
+            loss_fn=with_per_weights(mse_loss, batch["is_weights"]),
         )
 
         # Apply Updates

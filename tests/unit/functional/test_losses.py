@@ -11,7 +11,7 @@ from functional.losses import (
     compute_q_td_loss,
     probability_ratio,
     clipped_surrogate_loss,
-    clipped_value_loss,
+    clipped_mse_loss,
     compute_is_weights,
 )
 import math
@@ -86,13 +86,13 @@ def test_entropy_loss():
     dist = torch.distributions.Categorical(logits=logits)
     loss, info = entropy_loss(dist)
     expected_entropy = math.log(2.0)
-    assert math.isclose(loss.item(), expected_entropy, rel_tol=1e-5)
-    assert math.isclose(info["loss/entropy"].item(), expected_entropy, rel_tol=1e-5)
+    assert math.isclose(loss.item(), -expected_entropy, rel_tol=1e-5)
+    assert math.isclose(info["loss/entropy"].item(), -expected_entropy, rel_tol=1e-5)
 
     logits = torch.tensor([[100.0, 0.0]])
     dist = torch.distributions.Categorical(logits=logits)
     loss, info = entropy_loss(dist)
-    assert loss.item() < 1e-5
+    assert abs(loss.item()) < 1e-5
 
     # Test Continuous (Normal)
     mu = torch.tensor([[0.0, 0.0]])
@@ -103,7 +103,7 @@ def test_entropy_loss():
     expected_entropy = (
         0.5 * math.log(2 * math.pi * math.e) * 2
     )  # sum across 2 dimensions
-    assert math.isclose(loss.item(), expected_entropy, rel_tol=1e-5)
+    assert math.isclose(loss.item(), -expected_entropy, rel_tol=1e-5)
 
 
 def test_compute_q_td_loss():
@@ -118,18 +118,18 @@ def test_compute_q_td_loss():
         "next_obs": torch.zeros(1, 4),
         "reward": torch.tensor([0.5]),  # [B]
         "terminated": torch.tensor([0.0]),  # [B]
-        "truncated": torch.tensor([0.0]),
+        "gamma": torch.tensor([0.9]),
     }
 
-    def target_calculator(next_preds, next_actions, reward, terminated, truncated):
+    def target_calculator(next_preds, next_actions, reward, terminated, gamma):
         # target = reward + gamma * next_q
-        # reward is [B, 1], terminated is [B, 1], next_actions is [B, 1]
-        return reward + 0.9 * next_preds[0, next_actions.squeeze(-1)]
+        return reward + gamma * next_preds[0, next_actions.squeeze(-1)]
 
     loss, info = compute_q_td_loss(
         model=model,
         batch=batch,
-        selector_model=model,
+        target_model=model,
+        next_action_selector_fn=lambda obs, preds: torch.tensor([1]),
         target_calculator_fn=target_calculator,
     )
 
@@ -150,25 +150,25 @@ def test_compute_q_td_loss_with_eval_model():
         def forward(self, x):
             return torch.tensor([[self.val, self.val]])
 
-    selector_model = MockModel(1.0)
-    eval_model = MockModel(2.0)
+    online_model = MockModel(1.0)
+    target_model = MockModel(2.0)
     batch = {
         "obs": torch.zeros(1, 4),
         "action": torch.tensor([0]),
         "next_obs": torch.zeros(1, 4),
         "reward": torch.tensor([0.5]),
         "terminated": torch.tensor([0.0]),
-        "truncated": torch.tensor([0.0]),
+        "gamma": torch.tensor([0.9]),
     }
 
-    def target_calculator(next_preds, next_actions, reward, terminated, truncated):
-        return reward + 0.9 * next_preds[0, next_actions.squeeze(-1)]
+    def target_calculator(next_preds, next_actions, reward, terminated, gamma):
+        return reward + gamma * next_preds[0, next_actions.squeeze(-1)]
 
     loss, info = compute_q_td_loss(
-        model=selector_model,
+        model=online_model,
         batch=batch,
-        selector_model=selector_model,
-        eval_model=eval_model,
+        target_model=target_model,
+        next_action_selector_fn=lambda obs, preds: torch.tensor([0]),
         target_calculator_fn=target_calculator,
     )
 
@@ -208,6 +208,8 @@ def test_clipped_surrogate_loss():
     torch.testing.assert_close(loss, expected_loss)
     
     assert "loss/policy" in info
+    assert "policy/approx_kl" in info
+    assert "policy/clip_fraction" in info
     assert "objective/unclipped" in info
     assert "objective/clipped" in info
     
@@ -216,38 +218,38 @@ def test_clipped_surrogate_loss():
         clipped_surrogate_loss(ratio, advantages[:2], clip_coef)
 
 
-def test_clipped_value_loss():
-    """Test the PPO clipped value loss."""
-    new_values = torch.tensor([1.0, 2.0, 3.0, 4.0])
-    old_values = torch.tensor([1.1, 1.9, 2.5, 4.5])
-    returns = torch.tensor([1.5, 1.5, 1.5, 1.5])
+def test_clipped_mse_loss():
+    """Test the PPO clipped MSE loss."""
+    predictions = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    old_predictions = torch.tensor([1.1, 1.9, 2.5, 4.5])
+    targets = torch.tensor([1.5, 1.5, 1.5, 1.5])
     clip_coef = 0.2
 
-    # Case 1: new=1.0, old=1.1, return=1.5
+    # Case 1: pred=1.0, old=1.1, target=1.5
     # unclipped_loss = (1.0 - 1.5)^2 = 0.25
     # clipped_v = 1.1 + clamp(1.0-1.1, -0.2, 0.2) = 1.1 - 0.1 = 1.0
     # clipped_loss = (1.0 - 1.5)^2 = 0.25
     # max(0.25, 0.25) * 0.5 = 0.125
 
-    # Case 2: new=2.0, old=1.9, return=1.5
+    # Case 2: pred=2.0, old=1.9, target=1.5
     # unclipped_loss = (2.0 - 1.5)^2 = 0.25
     # clipped_v = 1.9 + clamp(2.0-1.9, -0.2, 0.2) = 1.9 + 0.1 = 2.0
     # clipped_loss = (2.0 - 1.5)^2 = 0.25
     # max(0.25, 0.25) * 0.5 = 0.125
 
-    # Case 3: new=3.0, old=2.5, return=1.5
+    # Case 3: pred=3.0, old=2.5, target=1.5
     # unclipped_loss = (3.0 - 1.5)^2 = 2.25
     # clipped_v = 2.5 + clamp(3.0-2.5, -0.2, 0.2) = 2.5 + 0.2 = 2.7
     # clipped_loss = (2.7 - 1.5)^2 = 1.44
     # max(2.25, 1.44) * 0.5 = 1.125
 
-    # Case 4: new=4.0, old=4.5, return=1.5
+    # Case 4: pred=4.0, old=4.5, target=1.5
     # unclipped_loss = (4.0 - 1.5)^2 = 6.25
     # clipped_v = 4.5 + clamp(4.0-4.5, -0.2, 0.2) = 4.5 - 0.2 = 4.3
     # clipped_loss = (4.3 - 1.5)^2 = 7.84
     # max(6.25, 7.84) * 0.5 = 3.92
 
-    loss, info = clipped_value_loss(new_values, old_values, returns, clip_coef)
+    loss, info = clipped_mse_loss(predictions, targets, old_predictions, clip_coef)
 
     expected_loss = torch.tensor([0.125, 0.125, 1.125, 3.92])
     torch.testing.assert_close(loss, expected_loss)
@@ -258,7 +260,7 @@ def test_clipped_value_loss():
 
     # Test shape mismatch
     with pytest.raises(AssertionError, match="Shape mismatch"):
-        clipped_value_loss(new_values, old_values[:2], returns, clip_coef)
+        clipped_mse_loss(predictions, targets[:2], old_predictions, clip_coef)
 
 def test_compute_is_weights():
     """Test Importance Sampling weight computation."""

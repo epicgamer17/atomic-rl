@@ -30,7 +30,7 @@ from functional.replay_buffer import (
 )
 from functional.schedules import get_linear_schedule
 from functional.losses import compute_q_td_loss, with_per_weights, cross_entropy_loss
-from functional.targets import categorical_td_target
+from functional.td import compute_categorical_q_td_target
 from functional.action_selection import (
     argmax_selector,
     expected_value,
@@ -259,18 +259,20 @@ for step in range(MAX_STEPS):
         loss, info_dict = compute_q_td_loss(
             model,
             batch,
-            model,
+            target_model,
+            lambda obs, preds: argmax_selector(
+                model(obs),
+                extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
+            )[0],
             partial(
-                categorical_td_target,
+                compute_categorical_q_td_target,
                 gamma=batch["gamma"],
-                support=SUPPORT.to(device).to(device),
+                support=SUPPORT.to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,
             ),
-            eval_model=target_model,
             loss_fn=per_loss_fn,
-            extractor_fn=partial(expected_value, support=SUPPORT.to(device).to(device)),
         )
 
         # Apply Gradients

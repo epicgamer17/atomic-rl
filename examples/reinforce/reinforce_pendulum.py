@@ -21,7 +21,7 @@ from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
 from functional.utils import (
-    exponential_moving_average,
+    ema_update,
     standardize_tensor,
     scale_tensor_by_std,
 )
@@ -144,7 +144,7 @@ for episode in range(MAX_EPISODES):
 
     # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
     # Use EMA baseline for variance reduction
-    global_ema_baseline = exponential_moving_average(
+    global_ema_baseline = ema_update(
         torch.tensor(global_ema_baseline, device=device), returns.mean(), alpha=0.01
     ).item()
     raw_advantages = returns - global_ema_baseline

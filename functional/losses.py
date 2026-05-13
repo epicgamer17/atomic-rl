@@ -6,155 +6,7 @@ from einops import rearrange
 from tensordict import TensorDict
 from typing import Callable, Tuple, Optional, Union
 from functional.action_selection import argmax_selector
-
-
-# TODO: possibly make this take in a selector_fn in future when i implement sarsa or soft q learning etc
-def compute_q_td_loss(
-    model: torch.nn.Module,
-    batch: TensorDict,
-    selector_model: torch.nn.Module,
-    target_calculator_fn: Callable,
-    eval_model: Optional[torch.nn.Module] = None,
-    loss_fn: Optional[Callable] = None,
-    # TODO: should this just be part of a partial on the selector or be a "selector_fn" instead of argmax selector always?
-    extractor_fn: Optional[Callable] = None,
-) -> Tuple[torch.Tensor, dict]:
-    """
-    Calculate the Bellman error for a batch of transitions.
-    The 'Imperative Shell' for DQN-style updates.
-
-    This function orchestrates the evaluation of next-states and target calculation,
-    ensuring that the pure math functions receive correctly formatted tensors.
-
-    Args:
-        model (nn.Module): The online Q-network.
-        batch (dict): A dictionary containing the batch of transitions.
-        selector_model (nn.Module): Model used to select the best action for bootstrapping.
-        target_calculator_fn (Callable): Function to calculate targets.
-        eval_model (Optional[nn.Module]): Model used to evaluate the selected action's value.
-            Defaults to selector_model (standard DQN).
-        loss_fn (Callable): Function to calculate loss (e.g. mse_loss).
-        extractor_fn (Optional[Callable]): Function to extract scalar values for action selection.
-
-    Returns:
-        torch.Tensor: The loss for the batch.
-        dict: Information for logging and debugging.
-
-    NOTE:
-        - Assumes model.forward directly returns q-values for all actions for all observations.
-    """
-
-    # 1. Current Q-values (Prediction)
-    predictions = model(batch["obs"])
-
-    batch_size = predictions.shape[0]
-    batch_idx = torch.arange(batch_size, device=predictions.device)
-    # Handle both [B] and [B, 1] action shapes gracefully
-    actions = batch["action"].long()
-    if actions.dim() == 2:
-        actions = actions.squeeze(-1)
-    
-    pred_sa = predictions[batch_idx, actions]
-
-    # 2. Next State Evaluation
-    with torch.no_grad():
-        # NOTE: Noisy DQN with Double DQN/Dueling samples a 3rd epsilon here but we do not,
-        # and neither do most implementations online.
-        next_obs = batch["next_obs"]
-        selector_predictions = selector_model(next_obs)
-        # TODO: possibly always require an eval_model and just do a check if eval_model = selector_model etc?
-        if eval_model is None:
-            # Standard DQN
-            next_preds = selector_predictions
-        else:
-            # Double DQN
-            next_preds = eval_model(next_obs)
-
-        # Select the best next action using the selector model
-        next_actions, _ = argmax_selector(selector_predictions, extractor_fn)
-
-        # 3. Target Calculation
-        # Pass through rewards and termination flags as they are (expected to be [B])
-        rewards = batch["reward"]
-        terminated = batch["terminated"]
-        truncated = batch["truncated"]
-        gamma = batch["gamma"]
-
-        # Calculate TD target (standard, n-step, or categorical)
-        td_target = target_calculator_fn(
-            next_preds,
-            next_actions,
-            rewards,
-            terminated,
-            truncated,
-            gamma,
-        )
-
-    # 4. Compute Loss (Force shape alignment to prevent broadcasting bugs)
-    if loss_fn is None:
-        loss_fn = mse_loss
-
-    # FAIL FAST: Ensure shapes match exactly for standard DQN
-    if pred_sa.dim() == 1:
-        assert pred_sa.shape == td_target.shape, f"Shape mismatch: pred {pred_sa.shape} vs target {td_target.shape}"
-
-    loss, info = loss_fn(pred_sa, td_target)
-
-    # 5. Augment info with orchestration-level metrics for W&B
-    info.update(
-        {
-            "q_values/mean": pred_sa.mean().detach(),
-            "q_values/min": pred_sa.min().detach(),
-            "q_values/max": pred_sa.max().detach(),
-            "td_targets/mean": td_target.mean().detach(),
-            "rewards/mean": batch["reward"].mean().detach(),
-        }
-    )
-
-    return loss, info
-
-
-# TODO: wondering if this is necessary or can simply be inlined. For now its okay.
-def with_per_weights(base_loss_fn: Callable, is_weights: torch.Tensor) -> Callable:
-    """
-    Higher-order function that wraps a standard loss function to apply
-    PER Importance Sampling weights and extract TD errors.
-
-    Args:
-        base_loss_fn (Callable): Function to calculate loss. Must return a tuple of
-            (raw_losses, info_dict).
-        is_weights (torch.Tensor): Importance sampling weights.
-
-    Returns:
-        Callable: The loss function with PER weights applied.
-    """
-
-    def per_loss_fn(
-        predictions: torch.Tensor, targets: torch.Tensor
-    ) -> Tuple[torch.Tensor, dict]:
-        """
-        Calculate the weighted loss for a batch of transitions.
-
-        Args:
-            predictions (torch.Tensor): Predicted Q-values.
-            targets (torch.Tensor): Target Q-values.
-
-        Returns:
-            torch.Tensor: The weighted loss for the batch.
-            info_dict (dict): A dictionary containing the weighted loss and priorities.
-        """
-        # 1. Compute raw loss and priorities
-        raw_losses, info_dict = base_loss_fn(predictions, targets)
-
-        # 2. Compute weighted loss for the optimizer
-        weighted_loss = (raw_losses * is_weights).mean()
-
-        # Update info with weighted loss and priorities
-        info_dict["loss/weighted"] = weighted_loss.detach()
-
-        return weighted_loss, info_dict
-
-    return per_loss_fn
+from functional.td import compute_v_td_target
 
 
 def mse_loss(
@@ -274,18 +126,18 @@ def policy_gradient_loss(
     return loss, info
 
 
-# TODO: this is the objective but do we want to make it a loss (ie something to minimize) instead of making the user put a - sign in front of it when they use it?
 def entropy_loss(
     dist: D.Distribution,
 ) -> Tuple[torch.Tensor, dict]:
     """
-    Calculate the entropy loss for ANY action distribution (Discrete or Continuous).
+    Calculate the entropy loss for ANY action distribution.
+    Returns the NEGATIVE entropy, so that minimizing this "loss" maximizes entropy.
 
     Args:
-        dist (torch.distributions.Distribution): The PyTorch distribution object.
+        dist: The PyTorch distribution object.
 
     Returns:
-        Tuple[torch.Tensor, dict]: The mean entropy loss and logging info.
+        Tuple[torch.Tensor, dict]: The negative mean entropy and logging info.
     """
     # 1. dist.entropy() automatically handles the underlying math,
     # whether it's Shannon Entropy (Categorical) or Differential Entropy (Normal)
@@ -300,11 +152,180 @@ def entropy_loss(
     if entropy.dim() > 1:
         entropy = entropy.sum(dim=-1)
 
-    loss = entropy.mean()
+    loss = -entropy.mean()
 
     info = {"loss/entropy": loss.detach()}
 
     return loss, info
+
+
+def compute_v_td_loss(
+    model: torch.nn.Module,
+    batch: TensorDict,
+    loss_fn: Callable = mse_loss,
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Calculate the Bellman error for a batch of state-value transitions.
+    The 'Imperative Shell' for V-prediction updates (e.g., standard TD(0)).
+
+    Args:
+        model: The value network predicting V(s).
+        batch: TensorDict containing obs, next_obs, reward, terminated.
+        loss_fn: Function to calculate loss (defaults to mse_loss).
+    """
+    # 1. Current State Value
+    v_pred = model(batch["obs"]).squeeze(-1)  # Expects [B]
+
+    # 2. Next State Evaluation
+    with torch.no_grad():
+        v_next = model(batch["next_obs"]).squeeze(-1)
+
+    # 3. Target Calculation
+    targets = compute_v_td_target(
+        next_values=v_next,
+        rewards=batch["reward"],
+        terminated=batch["terminated"],
+        gamma=batch["gamma"],
+    )
+
+    # 4. Compute Loss
+    assert v_pred.shape == targets.shape, "Prediction and target shapes must match."
+    loss, info = loss_fn(v_pred, targets)
+
+    info.update(
+        {
+            "v_values/mean": v_pred.mean().detach(),
+            "v_targets/mean": targets.mean().detach(),
+        }
+    )
+
+    return loss, info
+
+
+def compute_q_td_loss(
+    model: torch.nn.Module,
+    batch: TensorDict,
+    target_model: torch.nn.Module,
+    next_action_selector_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    target_calculator_fn: Callable,
+    loss_fn: Callable = mse_loss,
+) -> Tuple[torch.Tensor, dict]:
+    """
+    Calculate the Bellman error for a batch of transitions.
+    The 'Imperative Shell' for DQN-style updates.
+
+    This function orchestrates the evaluation of next-states and target calculation,
+    ensuring that the pure math functions receive correctly formatted tensors.
+
+    Args:
+        model: The online Q-network.
+        batch: A dictionary containing the batch of transitions.
+        target_model: Model used to evaluate the selected action's value.
+        next_action_selector_fn: Function to select the best action for bootstrapping.
+            Takes (next_obs, next_preds) and returns next_actions.
+        target_calculator_fn: Function to calculate targets.
+        loss_fn: Function to calculate loss (e.g. mse_loss).
+
+    Returns:
+        torch.Tensor: The loss for the batch.
+        dict: Information for logging and debugging.
+    """
+
+    # 1. Current Q-values (Prediction)
+    predictions = model(batch["obs"])
+
+    batch_size = predictions.shape[0]
+    batch_idx = torch.arange(batch_size, device=predictions.device)
+    # Handle both [B] and [B, 1] action shapes gracefully
+    actions = batch["action"].long()
+    if actions.dim() == 2:
+        actions = actions.squeeze(-1)
+
+    pred_sa = predictions[batch_idx, actions]
+
+    # 2. Next State Evaluation
+    with torch.no_grad():
+        # NOTE: Noisy DQN with Double DQN/Dueling samples a 3rd epsilon here but we do not,
+        # and neither do most implementations online.
+        next_obs = batch["next_obs"]
+        next_preds = target_model(next_obs)
+
+        # Select the best next action using the provided selector logic
+        next_actions = next_action_selector_fn(next_obs, next_preds)
+
+        # 3. Target Calculation
+        # Calculate TD target (standard, n-step, or categorical)
+        td_target = target_calculator_fn(
+            next_preds,
+            next_actions,
+            batch["reward"],
+            batch["terminated"],
+            batch["gamma"],
+        )
+
+    # FAIL FAST: Ensure shapes match exactly for standard DQN
+    if pred_sa.dim() == 1:
+        assert (
+            pred_sa.shape == td_target.shape
+        ), f"Shape mismatch: pred {pred_sa.shape} vs target {td_target.shape}"
+
+    loss, info = loss_fn(pred_sa, td_target)
+
+    # 5. Augment info with orchestration-level metrics for W&B
+    info.update(
+        {
+            "q_values/mean": pred_sa.mean().detach(),
+            "q_values/min": pred_sa.min().detach(),
+            "q_values/max": pred_sa.max().detach(),
+            "td_targets/mean": td_target.mean().detach(),
+            "rewards/mean": batch["reward"].mean().detach(),
+        }
+    )
+
+    return loss, info
+
+
+# TODO: wondering if this is necessary or can simply be inlined. For now its okay.
+def with_per_weights(base_loss_fn: Callable, is_weights: torch.Tensor) -> Callable:
+    """
+    Higher-order function that wraps a standard loss function to apply
+    PER Importance Sampling weights and extract TD errors.
+
+    Args:
+        base_loss_fn (Callable): Function to calculate loss. Must return a tuple of
+            (raw_losses, info_dict).
+        is_weights (torch.Tensor): Importance sampling weights.
+
+    Returns:
+        Callable: The loss function with PER weights applied.
+    """
+
+    def per_loss_fn(
+        predictions: torch.Tensor, targets: torch.Tensor
+    ) -> Tuple[torch.Tensor, dict]:
+        """
+        Calculate the weighted loss for a batch of transitions.
+
+        Args:
+            predictions (torch.Tensor): Predicted Q-values.
+            targets (torch.Tensor): Target Q-values.
+
+        Returns:
+            torch.Tensor: The weighted loss for the batch.
+            info_dict (dict): A dictionary containing the weighted loss and priorities.
+        """
+        # 1. Compute raw loss and priorities
+        raw_losses, info_dict = base_loss_fn(predictions, targets)
+
+        # 2. Compute weighted loss for the optimizer
+        weighted_loss = (raw_losses * is_weights).mean()
+
+        # Update info with weighted loss and priorities
+        info_dict["loss/weighted"] = weighted_loss.detach()
+
+        return weighted_loss, info_dict
+
+    return per_loss_fn
 
 
 # TODO: is this good? should this take in torch.Distribution objects instead?
@@ -399,8 +420,18 @@ def clipped_surrogate_loss(
     # Negate to turn the objective into a loss for gradient descent
     loss = -objective
 
+    # Metrics for debugging and evaluating the clip_coef
+    with torch.no_grad():
+        log_ratio = torch.log(ratio)
+        # Standard PPO approximate KL divergence: ((ratio - 1.0) - log_ratio).mean()
+        approx_kl = ((ratio - 1.0) - log_ratio).mean()
+        # Fraction of the batch that was clipped
+        clip_fraction = (torch.abs(ratio - 1.0) > clip_coef).float().mean()
+
     info = {
         "loss/policy": loss.mean().detach(),
+        "policy/approx_kl": approx_kl.detach(),
+        "policy/clip_fraction": clip_fraction.detach(),
         "objective/unclipped": unclipped_objective.mean().detach(),
         "objective/clipped": clipped_objective.mean().detach(),
     }
@@ -408,41 +439,42 @@ def clipped_surrogate_loss(
     return loss, info
 
 
-# TODO: this is a value loss only at the moment. should this instead be considered more like a clipped MSE loss? right now switching this with mse is weird because all the arg names change despite being the same underlying loss. Thoughts?
-def clipped_value_loss(
-    new_values: torch.Tensor,
-    old_values: torch.Tensor,
-    returns: torch.Tensor,
+def clipped_mse_loss(
+    predictions: torch.Tensor,
+    targets: torch.Tensor,
+    old_predictions: torch.Tensor,
     clip_coef: float,
 ) -> Tuple[torch.Tensor, dict]:
     """
-    Computes the PPO clipped value loss.
+    Computes a Clipped MSE loss, commonly used in PPO for value function updates.
 
-    This prevents the value network from updating too aggressively in a single epoch
-    by clipping the value function estimate similar to how the policy ratio is clipped.
+    This loss clips the predicted value to be within a certain range of the old value,
+    and then takes the maximum of the unclipped and clipped MSE losses. This provides
+    a pessimistic estimate of the value, which can help stabilize training.
 
     Args:
-        new_values (torch.Tensor): Predicted values from the current policy.
-        old_values (torch.Tensor): Predicted values from the old policy (at collection time).
-        returns (torch.Tensor): Target values (e.g., TD-lambda returns).
-        clip_coef (float): Clipping coefficient (epsilon).
+        predictions: The current predictions (e.g. new state values).
+        targets: The target values (e.g. returns).
+        old_predictions: The predictions from the previous iteration.
+        clip_coef: The clipping coefficient.
 
     Returns:
-        Tuple[torch.Tensor, dict]: The clipped value loss (raw) and logging info.
+        Tuple[torch.Tensor, dict]: The clipped MSE loss (raw) and logging info.
     """
     assert (
-        new_values.shape == old_values.shape == returns.shape
-    ), f"Shape mismatch: new {new_values.shape}, old {old_values.shape}, returns {returns.shape}"
+        predictions.shape == old_predictions.shape == targets.shape
+    ), f"Shape mismatch: pred {predictions.shape}, old {old_predictions.shape}, targets {targets.shape}"
 
     # Unclipped MSE
-    v_loss_unclipped = F.mse_loss(new_values, returns, reduction="none")
+    v_loss_unclipped = F.mse_loss(predictions, targets, reduction="none")
 
     # Clipped MSE: clip the predicted value to be within [old - clip, old + clip]
-    v_clipped = old_values + torch.clamp(new_values - old_values, -clip_coef, clip_coef)
-    v_loss_clipped = F.mse_loss(v_clipped, returns, reduction="none")
+    v_clipped = old_predictions + torch.clamp(
+        predictions - old_predictions, -clip_coef, clip_coef
+    )
+    v_loss_clipped = F.mse_loss(v_clipped, targets, reduction="none")
 
-    # PPO value loss is the max of clipped and unclipped losses
-    # (pessemistic estimate)
+    # The value loss is the max of clipped and unclipped losses (pessimistic estimate)
     v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
     loss = 0.5 * v_loss_max
 

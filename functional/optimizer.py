@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
+from typing import Callable
+from torch.optim.optimizer import Optimizer
 
 
 def apply_gradients(
-    optimizer: optim.Optimizer,
+    optimizer: Optimizer,
     loss: torch.Tensor,
     model: nn.Module = None,
     clip_grad_norm: float = None,
@@ -12,12 +13,12 @@ def apply_gradients(
     """
     Applies the gradients to the model.
     Args:
-        optimizer (optim.Optimizer): The optimizer.
+        optimizer (Optimizer): The optimizer.
         loss (torch.Tensor): The loss.
         model (nn.Module, optional): The model. Defaults to None.
         clip_grad_norm (float, optional): The gradient clipping norm. Defaults to None.
     Returns:
-        optim.Optimizer: The updated optimizer.
+        Optimizer: The updated optimizer.
     """
     optimizer.zero_grad(set_to_none=True)
     loss.backward()

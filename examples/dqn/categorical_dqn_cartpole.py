@@ -48,7 +48,7 @@ from functional.optimizer import apply_gradients
 from functional.network import hard_update_target_network, layer_init
 from functional.visualization import log_distributional_metrics
 
-from functional.targets import categorical_td_target
+from functional.td import compute_categorical_q_td_target
 
 # Constants
 BATCH_SIZE = 128
@@ -203,8 +203,11 @@ for step in range(MAX_STEPS):
             model,
             batch,
             target_model,
+            lambda obs, preds: argmax_selector(
+                preds, extractor_fn=partial(expected_value, support=SUPPORT.to(device))
+            )[0],
             partial(
-                categorical_td_target,
+                compute_categorical_q_td_target,
                 gamma=batch["gamma"],
                 support=SUPPORT.to(device),
                 v_min=V_MIN,
@@ -212,7 +215,6 @@ for step in range(MAX_STEPS):
                 atom_size=ATOM_SIZE,
             ),
             loss_fn=cross_entropy_loss,
-            extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
         )
         loss = loss.mean()
 

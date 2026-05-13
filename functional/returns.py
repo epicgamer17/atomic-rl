@@ -89,36 +89,28 @@ def compute_n_step_returns(
     """
     assert rewards.ndim == 2, f"Expected 2D rewards [B, T], got {rewards.shape}"
     assert (
-        rewards.shape
-        == terminated.shape
-        == truncated.shape
-        == values.shape
-        == next_values.shape
+        rewards.shape == terminated.shape == truncated.shape == next_values.shape
     ), "Shape mismatch in n-step returns inputs"
     assert n >= 1, f"n-step must be at least 1, got {n}"
 
+    T = rewards.size(1)
     done = (terminated.bool() | truncated.bool()).float()
 
     # Base case: 1-step returns (Pure Bellman math)
-    # G_t^{(1)} = r_t + gamma * (1 - term) * V(s_{t+1})
+    # G_t^{(1)} = r_t + gamma * (1 - terminated_t) * V(s_{t+1})
     returns = rewards + gamma * (1.0 - terminated.float()) * next_values.detach()
 
-    # Iteratively compute n-step returns by shifting and discounting
+    # Recursive calculation: G_t^{(i)} = r_t + gamma * (1 - done_t) * G_{t+1}^{(i-1)}
     for i in range(1, n):
-        # Shift left: G_{t+1}^{(i)}
-        next_returns = torch.zeros_like(returns)
-        next_returns[:, :-1] = returns[:, 1:]
-
-        # Valid update mask (we can't update the last i steps fully)
-        valid_mask = torch.zeros_like(returns)
-        valid_mask[:, :-i] = 1.0
-
-        updated_returns = rewards + gamma * next_returns
-
-        # Only update if the transition was not 'done' at time t
-        # and if we have enough future steps to perform the i-th update.
-        should_update = valid_mask.bool() & ~done.bool()
-        returns = torch.where(should_update, updated_returns, returns)
+        if T > i:
+            # Only update steps where the episode hasn't ended.
+            # If done[:, t] is True, G_t already contains the terminal/truncated return.
+            mask = (1.0 - done[:, :-i]).bool()
+            returns[:, :-i] = torch.where(
+                mask,
+                rewards[:, :-i] + gamma * returns[:, 1 : T - i + 1],
+                returns[:, :-i],
+            )
 
     return returns
 

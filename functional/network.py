@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from functional.utils import exponential_moving_average
+from functional.utils import ema_update
 
 
 def layer_init(
@@ -39,7 +39,7 @@ def soft_update_target_network(
     """
     with torch.no_grad():
         for target_param, param in zip(target_model.parameters(), model.parameters()):
-            target_param.copy_(exponential_moving_average(target_param, param, tau))
+            target_param.copy_(ema_update(target_param, param, tau))
 
 
 # NOTE: This is a stateful function which is not ideal for the functional paradigm but follows standard pytorch and ml conventions.

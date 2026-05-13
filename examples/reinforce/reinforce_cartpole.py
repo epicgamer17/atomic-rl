@@ -24,7 +24,7 @@ from functional.action_selection import categorical_sampling_selector
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
-from functional.utils import exponential_moving_average, standardize_tensor, scale_tensor_by_std
+from functional.utils import ema_update, standardize_tensor, scale_tensor_by_std
 from functional.network import layer_init
 
 # Constants
@@ -80,7 +80,8 @@ for episode in range(MAX_EPISODES):
     # NOTE: Since pure REINFORCE relys on MC returns, there is not a clean way to preallocate a buffer or use a circular buffer like we can do for PPO so we just use lists
     rewards = []
     log_probs = []
-    terminated = []
+    terminateds = []
+    truncateds = []
     while not (terminated or truncated):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
         logits = actor(obs_tensor)
@@ -93,7 +94,8 @@ for episode in range(MAX_EPISODES):
         # 3. Add to "online" buffers
         rewards.append(reward)
         log_probs.append(log_prob)
-        terminated.append(terminated)
+        terminateds.append(terminated)
+        truncateds.append(truncated)
 
         # Update state for next tick
         obs = next_obs
@@ -117,11 +119,11 @@ for episode in range(MAX_EPISODES):
     returns = compute_mc_returns(
         rewards=torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
         terminated=torch.tensor(
-            terminated, dtype=torch.float32, device=device
+            terminateds, dtype=torch.float32, device=device
         ).unsqueeze(0),
-        truncated=torch.tensor(truncated, dtype=torch.float32, device=device).unsqueeze(
-            0
-        ),
+        truncated=torch.tensor(
+            truncateds, dtype=torch.float32, device=device
+        ).unsqueeze(0),
         gamma=GAMMA,
     ).squeeze(0)
 
@@ -131,7 +133,7 @@ for episode in range(MAX_EPISODES):
     # advantages = standardize_tensor(raw_advantages)
 
     # METHOD B: EMA baseline (Standard for REINFORCE)
-    global_ema_baseline = exponential_moving_average(
+    global_ema_baseline = ema_update(
         torch.tensor(global_ema_baseline, device=device), returns.mean(), alpha=0.01
     ).item()
     raw_advantages = returns - global_ema_baseline

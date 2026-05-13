@@ -26,7 +26,7 @@ from functional.replay_buffer import (
     PERBufferState,
 )
 from functional.losses import compute_q_td_loss, cross_entropy_loss
-from functional.targets import categorical_td_target
+from functional.td import compute_categorical_q_td_target
 from functional.action_selection import (
     double_selector,
     categorical_extractor,
@@ -253,9 +253,12 @@ def actor_worker(
                 _, info_dict = compute_q_td_loss(
                     local_model,
                     collated,
-                    local_model,
+                    local_target_model,
+                    lambda obs, preds: argmax_selector(
+                        local_model(obs),
+                        extractor_fn=partial(categorical_extractor, support=support),
+                    )[0],
                     partial(target_fn, gamma=collated["gamma"]),
-                    eval_model=local_target_model,
                     loss_fn=loss_fn,
                 )
             collated["priority"] = info_dict["priorities"].unsqueeze(-1)
@@ -310,9 +313,12 @@ def learner_worker(
         loss, info = compute_q_td_loss(
             local_model,
             batch,
-            local_model,
+            target_model,
+            lambda obs, preds: argmax_selector(
+                local_model(obs),
+                extractor_fn=partial(categorical_extractor, support=local_model.support),
+            )[0],
             partial(target_fn, gamma=batch["gamma"]),
-            eval_model=target_model,
             loss_fn=loss_fn,
         )
 
@@ -375,7 +381,7 @@ def main():
         extractor_fn=partial(categorical_extractor, support=support),
     )
     my_target_fn = partial(
-        categorical_td_target,
+        compute_categorical_q_td_target,
         support=support,
         v_min=V_MIN,
         v_max=V_MAX,

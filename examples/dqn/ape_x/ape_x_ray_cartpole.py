@@ -57,7 +57,7 @@ from functional.replay_buffer import (
     make_n_step_accumulator,
 )
 from functional.losses import compute_q_td_loss, mse_loss, huber_loss
-from functional.targets import scalar_td_target
+from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
     get_ape_x_epsilon,
@@ -274,9 +274,9 @@ class ActorActor:
                     _, info_dict = compute_q_td_loss(
                         self.model,
                         collated,
-                        self.model,
+                        self.target_model,
+                        lambda obs, preds: argmax_selector(self.model(obs))[0],
                         partial(self.target_fn, gamma=collated["gamma"]),
-                        eval_model=self.target_model,
                         loss_fn=self.loss_fn,
                     )
 
@@ -357,9 +357,9 @@ class LearnerActor:
         loss, info = compute_q_td_loss(
             self.model,
             batch,
-            self.model,
+            self.target_model,
+            lambda obs, preds: argmax_selector(self.model(obs))[0],
             partial(self.target_fn, gamma=batch["gamma"]),
-            eval_model=self.target_model,
             loss_fn=self.loss_fn,
         )
 
@@ -400,7 +400,7 @@ def main():
     # 2. Define the Algorithm Components (Transparent and Reusable)
     my_model_creator = lambda: DuelingDQN(obs_shape, num_actions)
     my_selector_fn = argmax_selector
-    my_target_fn = scalar_td_target
+    my_target_fn = compute_q_td_target
     my_loss_fn = huber_loss
 
     # 3. Initialize Buffer

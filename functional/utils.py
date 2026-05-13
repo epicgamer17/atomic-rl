@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple, List, Callable
 from tensordict import TensorDict
 
 
@@ -18,24 +18,19 @@ def _allocate_tensordict(
 # NOTE: DONT LET THIS FILE BUILD UP AND HAVE A LOT FUNCTIONS, THAT IS A SIGN OF BAD ORGANIZATION.
 
 
-def exponential_moving_average(
-    old_ema: torch.Tensor, new_value: torch.Tensor, alpha: float
-):
+def ema_update(
+    old_ema: torch.Tensor,
+    new_value: torch.Tensor,
+    alpha: float,
+) -> torch.Tensor:
     """
-    Calculates the exponential moving average (EMA) of a value.
-
-    Args:
-        old_ema (torch.Tensor): The previous EMA value.
-        new_value (torch.Tensor): The new value to incorporate into the EMA.
-        alpha (float): The EMA smoothing factor (between 0 and 1).
-
-    Returns:
-        torch.Tensor: The updated EMA value.
+    Calculates the exponential moving average (EMA).
+    Formula: (1 - alpha) * old_ema + alpha * new_value
     """
     assert (
         old_ema.shape == new_value.shape
     ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
-    return (1 - alpha) * old_ema + alpha * new_value
+    return (1.0 - alpha) * old_ema + alpha * new_value
 
 
 # TODO: messy, hard to read, and doesnt work reliably or at least not tested reliably on both gym vector envs and pufferlib's vector envs.

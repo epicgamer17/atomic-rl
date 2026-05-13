@@ -1,7 +1,7 @@
 import pytest
 import torch
 from functional.utils import (
-    exponential_moving_average,
+    ema_update,
     standardize_tensor,
     scale_tensor_by_std,
 )
@@ -9,7 +9,7 @@ from functional.utils import (
 pytestmark = pytest.mark.unit
 
 
-def test_exponential_moving_average():
+def test_ema_update():
     old = torch.tensor([1.0, 2.0])
     new = torch.tensor([3.0, 4.0])
     alpha = 0.1
@@ -18,7 +18,7 @@ def test_exponential_moving_average():
     # (1-0.1)*2.0 + 0.1*4.0 = 1.8 + 0.4 = 2.2
     expected = torch.tensor([1.2, 2.2])
 
-    res = exponential_moving_average(old, new, alpha)
+    res = ema_update(old, new, alpha)
     torch.testing.assert_close(res, expected)
 
 
@@ -71,9 +71,9 @@ def test_scale_tensor_by_std():
 
 def test_utils_assertions():
     """Test that utility functions raise assertions on invalid input shapes."""
-    # exponential_moving_average
+    # ema_update
     with pytest.raises(AssertionError, match="EMA shape mismatch"):
-        exponential_moving_average(torch.randn(2), torch.randn(3), alpha=0.1)
+        ema_update(torch.randn(2), torch.randn(3), alpha=0.1)
 
 
 def test_extract_vector_env_final_obs():

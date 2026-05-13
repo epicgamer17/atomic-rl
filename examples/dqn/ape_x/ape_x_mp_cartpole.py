@@ -29,7 +29,7 @@ from functional.replay_buffer import (
     PERBufferState,
 )
 from functional.losses import compute_q_td_loss, huber_loss
-from functional.targets import scalar_td_target
+from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
     get_ape_x_epsilon,
@@ -243,9 +243,9 @@ def actor_worker(
                 _, info_dict = compute_q_td_loss(
                     local_model,
                     collated,
-                    local_model,
+                    local_target_model,
+                    lambda obs, preds: argmax_selector(local_model(obs))[0],
                     partial(target_fn, gamma=collated["gamma"]),
-                    eval_model=local_target_model,
                     loss_fn=loss_fn,
                 )
             collated["priority"] = info_dict["priorities"]
@@ -305,9 +305,9 @@ def learner_worker(
         loss, info = compute_q_td_loss(
             local_model,
             batch,
-            local_model,
+            target_model,
+            lambda obs, preds: argmax_selector(local_model(obs))[0],
             partial(target_fn, gamma=batch["gamma"]),
-            eval_model=target_model,
             loss_fn=loss_fn,
         )
 
@@ -361,7 +361,7 @@ def main():
         model_creator_fn, obs_shape=obs_shape, num_actions=num_actions
     )
     my_selector_fn = argmax_selector
-    my_target_fn = scalar_td_target
+    my_target_fn = compute_q_td_target
     my_loss_fn = huber_loss
 
     # Shared model for weight syncing

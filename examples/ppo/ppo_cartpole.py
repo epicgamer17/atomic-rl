@@ -44,7 +44,7 @@ from functional.losses import (
     clipped_surrogate_loss,
     entropy_loss,
     probability_ratio,
-    clipped_value_loss,
+    clipped_mse_loss,
     mse_loss,
 )
 from torch.optim.lr_scheduler import LinearLR
@@ -344,10 +344,10 @@ for iteration in range(MAX_ITERATIONS):
             pg_loss = pg_loss.mean()
 
             # 2. Value Loss
-            critic_loss, _ = clipped_value_loss(
-                new_values=new_values,
-                old_values=mb["values"],
-                returns=mb["returns"],
+            critic_loss, _ = clipped_mse_loss(
+                predictions=new_values,
+                old_predictions=mb["values"],
+                targets=mb["returns"],
                 clip_coef=CLIP_COEF,
             )
             critic_loss = critic_loss.mean()
@@ -357,7 +357,7 @@ for iteration in range(MAX_ITERATIONS):
             ent_loss = ent_loss.mean()
 
             # Total Loss
-            loss = pg_loss + CRITIC_COEFF * critic_loss - ENTROPY_COEFF * ent_loss
+            loss = pg_loss + CRITIC_COEFF * critic_loss + ENTROPY_COEFF * ent_loss
 
             # Apply Updates
             optimizer = apply_gradients(
