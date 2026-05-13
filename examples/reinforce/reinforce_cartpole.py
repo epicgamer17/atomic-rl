@@ -94,7 +94,7 @@ for episode in range(MAX_EPISODES):
 
         # 3. Add to "online" buffers
         rewards.append(reward)
-        log_probs.append(info_dict["log_prob"])
+        log_probs.append(info_dict["log_prob"].squeeze())
         terminateds.append(terminated)
         truncateds.append(truncated)
 
@@ -145,7 +145,7 @@ for episode in range(MAX_EPISODES):
     # Others: learn a baseline with a neural network (advantage) (not done here)
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,  # NOTE: calculate this outside
-        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
+        log_probs=torch.stack(log_probs),
     )
 
     loss = loss.mean()

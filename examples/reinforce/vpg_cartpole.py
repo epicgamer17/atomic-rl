@@ -99,7 +99,7 @@ for episode in range(MAX_EPISODES):
     rewards = []
     log_probs = []
     values = []
-    terminated = []
+    terminateds = []
     while not (terminated or truncated):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
         logits = actor(obs_tensor)
@@ -115,7 +115,7 @@ for episode in range(MAX_EPISODES):
         rewards.append(reward)
         log_probs.append(info_dict["log_prob"])
         values.append(value)
-        terminated.append(terminated)
+        terminateds.append(terminated)
 
         # Update state for next tick
         obs = next_obs
@@ -139,7 +139,7 @@ for episode in range(MAX_EPISODES):
     returns = compute_mc_returns(
         rewards=torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
         terminated=torch.tensor(
-            terminated, dtype=torch.float32, device=device
+            terminateds, dtype=torch.float32, device=device
         ).unsqueeze(0),
         truncated=torch.tensor(truncated, dtype=torch.float32, device=device).unsqueeze(
             0
