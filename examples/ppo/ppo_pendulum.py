@@ -18,6 +18,7 @@ Key Implementation Details:
     objective as per Schulman et al. (2017).
 """
 
+# TODO: not working, i know it worked before, i think when i was using pufferlib, but strangely pufferlib stopped cartpole from working well.
 # TODO: attempt a cleanup if possible
 import torch
 import torch.nn as nn
@@ -56,7 +57,7 @@ from tensordict import TensorDict
 # Constants
 LEARNING_RATE = 3e-4
 MAX_ITERATIONS = 500  # Sufficient for Pendulum
-GAMMA = 0.9  # Pendulum often benefits from a slightly lower discount factor
+GAMMA = 0.9
 GAE_LAMBDA = 0.95
 ENTROPY_COEFF = 0.0
 CRITIC_COEFF = 0.5

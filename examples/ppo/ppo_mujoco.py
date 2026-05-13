@@ -100,6 +100,7 @@ class ActorCritic(nn.Module):
 
 
 # --- 1. Initialization ---
+# TODO: strangely normalizing inside make env vs wrapping the vector env effects performance even with only 1 env in the vector env. Fix.
 def make_env(env_id, seed, idx):
     def thunk():
         env = gym.make(env_id)
