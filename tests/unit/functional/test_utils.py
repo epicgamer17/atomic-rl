@@ -4,6 +4,7 @@ from functional.utils import (
     ema_update,
     standardize_tensor,
     scale_tensor_by_std,
+    gnt_init_wrapper,
 )
 
 pytestmark = pytest.mark.unit
@@ -175,3 +176,28 @@ def test_add_gumbel_noise():
     from functional.utils import add_gumbel_noise
 
     add_gumbel_noise()
+
+
+def test_gnt_init_wrapper():
+    import torch.nn as nn
+
+    # Mock init_fn that sets weights to 1.0
+    def mock_init(tensor):
+        nn.init.constant_(tensor, 1.0)
+
+    wrapped = gnt_init_wrapper(mock_init)
+
+    # 1. Weight matrix (2D)
+    weight = torch.zeros((2, 2))
+    wrapped(weight)
+    assert torch.all(weight == 1.0)
+
+    # 2. Bias vector (1D)
+    bias = torch.ones(2)
+    wrapped(bias)
+    assert torch.all(bias == 0.0)
+
+    # 3. Higher dimensional weight (e.g., Conv2D)
+    conv_weight = torch.zeros((2, 2, 3, 3))
+    wrapped(conv_weight)
+    assert torch.all(conv_weight == 1.0)

@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import numpy as np
 from typing import Tuple, List, Callable
 from tensordict import TensorDict
@@ -19,9 +20,7 @@ def _allocate_tensordict(
 
 
 def ema_update(
-    old_ema: torch.Tensor,
-    new_value: torch.Tensor,
-    alpha: float,
+    old_ema: torch.Tensor, new_value: torch.Tensor, alpha: float, inplace: bool = False
 ) -> torch.Tensor:
     """
     Calculates the exponential moving average (EMA).
@@ -30,6 +29,12 @@ def ema_update(
     assert (
         old_ema.shape == new_value.shape
     ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+
+    if inplace:
+        # Use optimized in-place kernels: old = old * (1-a) + new * a
+        # This is rearranged for .add_ usage: old = old - a*old + a*new => old += a*(new - old)
+        return old_ema.lerp_(new_value, alpha)
+
     return (1.0 - alpha) * old_ema + alpha * new_value
 
 
@@ -107,6 +112,32 @@ def scale_tensor_by_std(tensor: torch.Tensor, eps: float = 1e-8) -> torch.Tensor
         return torch.zeros_like(tensor)
 
     return tensor / (tensor.std() + eps)
+
+
+def gnt_init_wrapper(
+    init_fn: Callable[[torch.Tensor], None],
+) -> Callable[[torch.Tensor], None]:
+    """
+    Standardizes initialization for Generate and Test methods (CBP/SWR).
+
+    Wraps/Returns a new init fn to be used for GnT. If it's a weight matrix (2D+),
+    it uses the provided init_fn. If it's a bias vector (1D), it uses zeros.
+
+    Args:
+        init_fn: The base initialization function to use for weight matrices.
+
+    Returns:
+        Callable[[torch.Tensor], None]: A wrapped initialization function that
+            dispatches to init_fn for weights and zeros_ for biases.
+    """
+
+    def wrapped_init(tensor: torch.Tensor) -> None:
+        if tensor.dim() >= 2:
+            init_fn(tensor)
+        elif tensor.dim() == 1:
+            nn.init.zeros_(tensor)
+
+    return wrapped_init
 
 
 def add_dirichlet_noise(

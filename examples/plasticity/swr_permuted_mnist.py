@@ -28,15 +28,13 @@ from functional.visualization import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
+from functional.utils import gnt_init_wrapper
 
 
-# TODO: perhaps try to extract these out so they can be reused.
-def init_weights_kaiming(tensor: torch.Tensor):
-    """Resamples weights using PyTorch's default Kaiming Uniform initialization."""
-    if tensor.dim() == 1:
-        nn.init.zeros_(tensor)
-    else:
-        nn.init.kaiming_uniform_(tensor, a=math.sqrt(5))
+# Standardized initialization for SWR: Weights use Kaiming Uniform, Biases use Zero
+init_weights_kaiming = gnt_init_wrapper(
+    lambda t: nn.init.kaiming_uniform_(t, a=math.sqrt(5))
+)
 
 
 def run_permuted_mnist(use_swr: bool, num_tasks: int = 50):
