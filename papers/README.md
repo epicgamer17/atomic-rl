@@ -39,13 +39,14 @@ This directory maintains a mapping between the research papers in this folder an
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **AlphaZero** (Silver et al., 2017) | [alphazero.pdf](alphazero.pdf) | Partial | `papers/alphazero_pseudocode.py` | Pseudocode provided; full runnable implementation is pending. |
-| **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Partial | `functional/mcts.py` / `experiments/rainbowzero/` | Core MCTS logic is implemented. Agent experiments exist in `experiments/`. |
-| **EfficientZero** (Ye et al., 2021) | [efficient_zero.pdf](efficient_zero.pdf) | Partial | `experiments/rainbowzero/` | Self-supervised consistency losses and MCTS improvements. |
+| **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Partial | `functional/mcts.py` | Core MCTS logic is implemented. Agent experiments exist in `experiments/`. |
+| **EfficientZero** (Ye et al., 2021) | [efficient_zero.pdf](efficient_zero.pdf) | Planned |
 
 ### Missing / Future Work:
-- **Gumbel MuZero**: Planned for `functional/mcts.py` to allow policy improvement without high simulation counts.
-- **Stochastic MuZero**: Needed for handling environments with inherent randomness (like Catan).
-- **Sampled MuZero**: For handling large or continuous action spaces.
+- **Gumbel MuZero**: [gumbel_muzero.pdf](gumbel_muzero.pdf). Planned for `functional/mcts.py` to allow policy improvement without high simulation counts.
+- **Stochastic MuZero**: [stochastic_muzero.pdf](stochastic_muzero.pdf). Needed for handling environments with inherent randomness (like Catan).
+- **Sampled MuZero**: [sampled_muzero.pdf](sampled_muzero.pdf). For handling large or continuous action spaces.
+
 
 ---
 
@@ -56,10 +57,11 @@ This repo heavily focuses on the **Alberta Plan** (Sutton et al., 2022) and the 
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **Alberta Plan** (Sutton et al., 2022) | [AlbertaPlan.pdf](AlbertaPlan.pdf) / [Report](AlbertaPlanReport.pdf) | Building Blocks | `functional/plasticity.py` | Serves as the philosophical guide for the `functional/` module. |
-| **SWR** (Selective Weight Reinit) | [selective_weight_reinitialization.pdf](selective_weight_reinitialization.pdf) | Done | `functional/plasticity.py` | Utility-based reinitialization. |
-| **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [autostep.pdf](autostep.pdf) | Done | `functional/meta_optimization.py` | Meta-gradient learning rates. |
+| **SWR** (Selective Weight Reinit) | [selective_weight_reinit.pdf](selective_weight_reinit.pdf) | Done | `functional/plasticity.py` | Utility-based reinitialization. Reproduced in `examples/plasticity/swr_permuted_mnist.py`. |
+| **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [idbd_b.pdf](idbd_b.pdf) / [autostep.pdf](autostep.pdf) | Done | `functional/meta_optimization.py` | Meta-gradient learning rates. |
 | **AdaGain** (Jacobsen et al., 2019) | [adagain.pdf](adagain.pdf) | Notes Only | `functional/meta_optimization.py` | Currently exists as detailed architectural notes. |
-| **Continual Backprop** | [continualbackprop.pdf](continualbackprop.pdf) | Missing | `functional/plasticity.py` | Needs a cleaner, generic rewrite. |
+| **Continual Backprop** | [cbp_1.pdf](cbp_1.pdf) / [cbp_2.pdf](cbp_2.pdf) | Done | `functional/plasticity.py` | Implements the generate-and-test plasticity mechanism. Examples in `examples/plasticity/`. |
+
 
 ---
 

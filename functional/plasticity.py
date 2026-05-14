@@ -23,6 +23,8 @@ import torch.nn as nn
 from typing import Callable, Iterable
 from functional.utils import ema_update
 
+# TODO: allow for CBP or SWR + IDBD or Autostep. Make whatever this is expandable as i plan to add future versions of both.
+
 
 def compute_gradient_utility(weight: torch.Tensor, grad: torch.Tensor) -> torch.Tensor:
     """

@@ -1,77 +1,143 @@
 """
-Example: Online Permuted MNIST
-Based on: Dohare et al. (2024), Section 4.2
+Example: CBP vs Standard Adam on Online Permuted MNIST
 """
 
+# TODO: improve and make plots and stuff like SWR example
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from functional.plasticity import (
     init_cbp_state,
     apply_continual_backprop,
+    compute_dead_units_proportion,
+    compute_average_weight_magnitude,
+    compute_average_gradient_magnitude,
+)
+from functional.visualization import (
+    plot_plasticity_correlates,
+    plot_continual_learning_performance,
 )
 from functional.utils import gnt_init_wrapper
 from envs.streams.permuted_mnist import make_permuted_mnist_stream
 
-# 1. Hyperparameters (Paper Section 4.2)
-# Using 2000 units per layer as in the ImageNet/MNIST scaling experiments
-HIDDEN_SIZE = 2000
-ETA = 0.99
-RHO = 1e-4
-MATURITY = 1000
-LR = 0.001
+HIDDEN, RHO, ETA, MATURITY, LR = 2000, 1e-4, 0.99, 1000, 0.01
 
-# 2. Setup Architecture
-model = nn.Sequential(
-    nn.Linear(784, HIDDEN_SIZE),
-    nn.ReLU(),
-    nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
-    nn.ReLU(),
-    nn.Linear(HIDDEN_SIZE, 10),
-)
-optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+
+def make_mnist_net():
+    return nn.Sequential(
+        nn.Linear(784, HIDDEN),
+        nn.ReLU(),
+        nn.Linear(HIDDEN, HIDDEN),
+        nn.ReLU(),
+        nn.Linear(HIDDEN, 10),
+    )
+
+
+model_std = make_mnist_net()
+model_cbp = make_mnist_net()
+
+opt_std = torch.optim.Adam(model_std.parameters(), lr=LR)
+opt_cbp = torch.optim.Adam(model_cbp.parameters(), lr=LR)
 init_fn = gnt_init_wrapper(nn.init.kaiming_uniform_)
 
-# Track states for all hidden layers
-cbp_states = {model[0]: init_cbp_state(model[0]), model[2]: init_cbp_state(model[2])}
-layer_pairs = [(model[0], model[2]), (model[2], model[4])]
+cbp_states = {
+    model_cbp[0]: init_cbp_state(model_cbp[0]),
+    model_cbp[2]: init_cbp_state(model_cbp[2]),
+}
+layer_pairs = [(model_cbp[0], model_cbp[2]), (model_cbp[2], model_cbp[4])]
 
-mnist_stream = make_permuted_mnist_stream(batch_size=32)
+stream = make_permuted_mnist_stream(batch_size=64)
 
-# 3. Continual Learning Loop
-for task_id, loader in enumerate(mnist_stream):
-    print(f"\n--- Starting Task {task_id} (New Permutation) ---")
+metrics_std = {
+    "Accuracy": [],
+    "Dead Units": [],
+    "Weight Mag": [],
+    "Grad Mag": [],
+}
+metrics_cbp = {
+    "Accuracy": [],
+    "Dead Units": [],
+    "Weight Mag": [],
+    "Grad Mag": [],
+}
+
+for task_id, loader in enumerate(stream):
+    total_acc_std, total_acc_cbp, count = 0, 0, 0
 
     for batch_idx, (data, target) in enumerate(loader):
-        # Forward pass & Capture activations
-        h1 = model[0](data)
+        # Standard Update
+        h1_std = model_std[0](data)
+        a1_std = F.relu(h1_std)
+        h2_std = model_std[2](a1_std)
+        a2_std = F.relu(h2_std)
+        out_std = model_std[4](a2_std)
+
+        loss_std = F.cross_entropy(out_std, target)
+        opt_std.zero_grad()
+        loss_std.backward()
+        opt_std.step()
+
+        # CBP Update
+        h1 = model_cbp[0](data)
         a1 = F.relu(h1)
-        h2 = model[2](a1)
+        h2 = model_cbp[2](a1)
         a2 = F.relu(h2)
-        logits = model[4](a2)
+        out_cbp = model_cbp[4](a2)
 
-        loss = F.cross_entropy(logits, target)
+        loss_cbp = F.cross_entropy(out_cbp, target)
+        opt_cbp.zero_grad()
+        loss_cbp.backward()
+        opt_cbp.step()
 
-        # Optimization
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        # CBP Generate-and-Test Step
         apply_continual_backprop(
-            layer_pairs=layer_pairs,
-            activations=[a1, a2],
-            cbp_states=cbp_states,
-            optimizer=optimizer,
-            init_fn=init_fn,
-            eta=ETA,
-            maturity_threshold=MATURITY,
-            replacement_rate=RHO,
+            layer_pairs, [a1, a2], cbp_states, opt_cbp, init_fn, ETA, MATURITY, RHO
         )
 
-        if batch_idx % 500 == 0:
-            acc = (logits.argmax(dim=1) == target).float().mean()
-            print(f"Batch {batch_idx} | Loss: {loss.item():.4f} | Acc: {acc:.2%}")
+        total_acc_std += (out_std.argmax(1) == target).float().mean().item()
+        total_acc_cbp += (out_cbp.argmax(1) == target).float().mean().item()
+        count += 1
 
-    if task_id >= 10:
-        break  # Run for 10 permutations to see stability
+    # End of Task Metrics
+    metrics_std["Accuracy"].append(total_acc_std / count)
+    metrics_std["Dead Units"].append(compute_dead_units_proportion(a1_std))
+    metrics_std["Weight Mag"].append(
+        compute_average_weight_magnitude(list(model_std.parameters()))
+    )
+    metrics_std["Grad Mag"].append(
+        compute_average_gradient_magnitude(list(model_std.parameters()))
+    )
+
+    metrics_cbp["Accuracy"].append(total_acc_cbp / count)
+    metrics_cbp["Dead Units"].append(compute_dead_units_proportion(a1))
+    metrics_cbp["Weight Mag"].append(
+        compute_average_weight_magnitude(list(model_cbp.parameters()))
+    )
+    metrics_cbp["Grad Mag"].append(
+        compute_average_gradient_magnitude(list(model_cbp.parameters()))
+    )
+
+    print(
+        f"Task {task_id:2d} | Std Acc: {metrics_std['Accuracy'][-1]:.4f} (Dead: {metrics_std['Dead Units'][-1]:.2f}) | "
+        f"CBP Acc: {metrics_cbp['Accuracy'][-1]:.4f} (Dead: {metrics_cbp['Dead Units'][-1]:.2f})"
+    )
+    if task_id >= 20:
+        break
+
+# --- Plotting ---
+plot_continual_learning_performance(
+    results_dict={
+        "Standard Adam": metrics_std["Accuracy"],
+        "CBP": metrics_cbp["Accuracy"],
+    },
+    title="Permuted MNIST: Online Accuracy",
+    save_path="cbp_mnist_accuracy.png",
+)
+
+# Remove Accuracy for correlates plot
+acc_std = metrics_std.pop("Accuracy")
+acc_cbp = metrics_cbp.pop("Accuracy")
+
+plot_plasticity_correlates(
+    metrics_dict={"Standard Adam": metrics_std, "CBP": metrics_cbp},
+    save_path="cbp_mnist_correlates.png",
+)
