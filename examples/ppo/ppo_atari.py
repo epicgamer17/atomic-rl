@@ -32,7 +32,7 @@ from functional.rollout_buffer import (
     get_rollout_next_values,
     yield_shuffled_minibatches,
 )
-from functional.utils import standardize_tensor
+from functional.utils import standardize_tensor, set_seed
 from envs.wrappers import FireResetEnv
 from tensordict import TensorDict
 
@@ -53,9 +53,7 @@ NUM_ENVS = 8
 SEED = 42
 
 # Seeding
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+set_seed(SEED)
 
 
 class ActorCritic(nn.Module):

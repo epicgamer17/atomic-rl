@@ -41,6 +41,7 @@ from functional.action_selection import (
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
 from functional.network import hard_update_target_network, layer_init
+from functional.utils import set_seed
 
 # Constants
 BATCH_SIZE = 128
@@ -57,9 +58,7 @@ TARGET_NET_UPDATE_FREQ = 100
 SEED = 42
 
 # Seeding for reproducibility
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+set_seed(SEED)
 
 
 class DQN(nn.Module):

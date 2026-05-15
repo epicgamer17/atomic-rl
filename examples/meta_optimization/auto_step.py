@@ -24,12 +24,13 @@ from functional.meta_optimization import (
     compute_autostep_idbd_update,
 )
 from envs.streams.random_walk import make_random_walk_tracking_task
+from functional.utils import set_seed
 
 
 def evaluate_algorithm(
     algo: str, param: float, drift_var: float, num_steps=30_000, burn_in=20_000
 ):
-    torch.manual_seed(42)
+    set_seed(42)
     task_gen = make_random_walk_tracking_task(
         num_features=20, num_relevant=5, obs_noise_var=1.0, drift_var=drift_var
     )

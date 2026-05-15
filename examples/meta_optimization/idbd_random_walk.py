@@ -11,8 +11,6 @@ Task:
 - Seed reset at the beginning of each algorithm/parameter run.
 """
 
-# TODO: still dont feel confident about this experiment/code. my results match generally but not exactly.
-
 import torch
 import math
 import os
@@ -30,16 +28,7 @@ from functional.meta_optimization import (
 from envs.streams.random_walk import make_random_walk_tracking_task
 
 
-# TODO: make this a util function that can be reused?
-def set_seed(seed: int = 42):
-    """Sets the seed for reproducibility."""
-    torch.manual_seed(seed)
-    # Note: numpy and random are not used in the core loop, but good practice
-    import numpy as np
-    import random
-
-    np.random.seed(seed)
-    random.seed(seed)
+from functional.utils import set_seed
 
 
 def run_tracking_experiment(

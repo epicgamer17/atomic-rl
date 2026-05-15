@@ -1,8 +1,32 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from typing import Tuple, List, Callable
+import random
+from typing import Tuple, List, Callable, Optional
 from tensordict import TensorDict
+
+
+def set_seed(seed: int) -> None:
+    """
+    Sets random seeds for reproducibility across random, numpy, and torch.
+    
+    Args:
+        seed: The integer seed to use.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        # Ensure deterministic behavior for some ops if needed, 
+        # though this can slow down performance.
+        # torch.backends.cudnn.deterministic = True
+        # torch.backends.cudnn.benchmark = False
+
+    if torch.backends.mps.is_available():
+        torch.mps.manual_seed(seed)
 
 
 def _allocate_tensordict(

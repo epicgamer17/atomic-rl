@@ -46,7 +46,7 @@ from functional.rollout_buffer import (
     record_truncations,
     get_rollout_next_values,
 )
-from functional.utils import standardize_tensor
+from functional.utils import standardize_tensor, set_seed
 from tensordict import TensorDict
 
 # Constants
@@ -62,9 +62,7 @@ NUM_ENVS = 16
 SEED = 42
 
 # Seeding for reproducibility
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+set_seed(SEED)
 
 
 # NOTE: we use a fused backbone and separate heads in accordance with the A3C paper

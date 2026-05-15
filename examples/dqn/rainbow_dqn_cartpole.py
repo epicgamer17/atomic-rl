@@ -38,6 +38,7 @@ from functional.action_selection import (
 from functional.optimizer import apply_gradients
 from functional.network import hard_update_target_network
 from functional.visualization import log_distributional_metrics
+from functional.utils import set_seed
 from networks.noisy_linear import NoisyLinear
 
 # --- Constants ---
@@ -66,9 +67,7 @@ SUPPORT = torch.linspace(V_MIN, V_MAX, ATOM_SIZE)
 N_STEPS = 3
 
 # Seeding for reproducibility
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+set_seed(SEED)
 
 
 class RainbowNetwork(nn.Module):

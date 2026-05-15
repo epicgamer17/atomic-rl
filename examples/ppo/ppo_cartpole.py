@@ -58,7 +58,7 @@ from functional.rollout_buffer import (
     get_rollout_next_values,
     yield_shuffled_minibatches,
 )
-from functional.utils import standardize_tensor
+from functional.utils import standardize_tensor, set_seed
 from tensordict import TensorDict
 from envs.wrappers import VecNormalizeObservation
 
@@ -79,9 +79,7 @@ NUM_ENVS = 4
 SEED = 42
 
 # Seeding for reproducibility
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+set_seed(SEED)
 
 
 # NOTE: PPO can have a shared backbone between the actor and critic or seperate networks.

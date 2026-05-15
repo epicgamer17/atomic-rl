@@ -24,7 +24,7 @@ from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
-from functional.utils import ema_update, standardize_tensor, scale_tensor_by_std
+from functional.utils import ema_update, standardize_tensor, scale_tensor_by_std, set_seed
 from functional.network import layer_init
 
 # Constants
@@ -36,9 +36,7 @@ SEED = 42
 global_ema_baseline = 0.0  # if using ema for baseline
 
 # Seeding for reproducibility
-random.seed(SEED)
-np.random.seed(SEED)
-torch.manual_seed(SEED)
+set_seed(SEED)
 
 
 class Actor(nn.Module):

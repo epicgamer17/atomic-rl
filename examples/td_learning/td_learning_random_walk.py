@@ -12,13 +12,13 @@ It also has the benefit that it doesn't suffer from monte carlo methods high var
 
 "Finally, note that although this example involved learning an evaluation function, nothing about it was specific to evaluation functions. The methods can equally well be used to predict outcomes unrelated to the player's goals, such as the number of pieces left at the end of the game. If TD methods are more efficient than supervised-learning methods in learning evaluation functions, then they should also be more efficient in general prediction-learning problems." (TODO an example of TD-learning to predict stuff unrelated to the agent's goals, not just outcome)
 
-TD(lambda) connects 1-step TD(0) to Monte Carlo TD(1) via an eligibility trace. (TODO what does this mean?). The update rule is: delta_w = alpha * (P_{t+1} - P_t) * sum_{k=1}^t lambda^{t-k} nabla_w P_k
+TD(lambda) connects 1-step TD(0) to Monte Carlo TD(1) via an eligibility trace. The update rule is: delta_w = alpha * (P_{t+1} - P_t) * sum_{k=1}^t lambda^{t-k} nabla_w P_k
 Implemented via Eligibility Traces (Backward View).
 
 TODO: is this the foundation for stream RL or can stream RL practices work well without TD learning? eg stream RL with gradient descent or something?
 TODO: possible example or experiment of this on mining with Navarra? ie mine optimization or mine planning or simulation/prediction might work a little bit in a stream fashion. Is TD learning good for this? Is stream RL good for this? What are comparisons of Stream RL vs TD learning vs Traditional RL in general and on the mine simulation/optimization problem? What exactly is TD learning. I still need to wrap my head around it and where it falls in the scheme of things. Could you effectively say the TD learning works for any problem by essentially instead of predicting V(s) you try to predict the value of any feature? So could you use TD Learning for predicting mine throughput given current state and inputs as other features? Is the mine optimization or planning problem a nonstationairy continual learning problem or can it be modeled as a stationary episodic problem? What are the pros and cons of this?
 
-TODO: i think this is tabular what about a NN based implementation or example?
+NOTE: This is a simple almost tabular example of TD(lambda).
 """
 
 # TODO: dont inline the env/ or state-space logic into the functions/scripts, use a proper env or put it elsewhere so it can be reused.
