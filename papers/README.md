@@ -59,6 +59,25 @@ This directory maintains a mapping between the research papers in this folder an
 - **Sarsa**
 - **Soft Q Learning**
 - **DDPG**
+- **New Activations** GLU based and Squared ReLU, Dead ReLU fixes (is this meta learning related?)
+- **Prenorm Dilution Fixes** - Attention Residuals and Full Attention Residuals and Block Attention Residuals
+- **Attention is All You Need** Is this compatible with the Alberta Plan? (read for context of transformers)
+- **Decision Transformers** and any other ways to use transformers in RL. Ideally without having to pass in full state history (like only s_t not s_1:t).
+- **DenseNet** is this even good?
+- **DenseFormer** is this even good?
+- **DeepCrossAttention** is this even good?
+- **Dino-v3** JEPA related?
+- **V-JEPA**
+- **Hyper Connections** with doubly stochastic matrices (The DeepSeek version of Hyper Connections) (is this meta learning related?)
+- **POET**
+- **Enhanced POET** 
+- **CURL - Contrastive Unsupervised Representations for RL**
+- **Datasets for Data-Driven Reinforcement Learning** 
+- **Divide and Conquer Monte Carlo Tree Search for Goal Directed Planning**
+- **Plan2Explore** 
+- **Player of Games**
+
+
 
 
 
