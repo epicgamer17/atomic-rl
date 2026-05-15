@@ -53,6 +53,7 @@ from functional.rollout_buffer import (
 )
 from functional.utils import standardize_tensor
 from tensordict import TensorDict
+from envs.wrappers import VecNormalize
 
 # Constants
 LEARNING_RATE = 3e-4
@@ -124,12 +125,6 @@ def make_env(env_id, seed, idx):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         # Pendulum actions are in [-2, 2], ClipAction ensures they stay within bounds
         env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(
-            env, lambda obs: np.clip(obs, -10, 10).astype(np.float32)
-        )
-        env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -141,6 +136,14 @@ def make_env(env_id, seed, idx):
 # Initialize vectorized environments
 envs = gym.vector.SyncVectorEnv(
     [make_env("Pendulum-v1", SEED + i, i) for i in range(NUM_ENVS)]
+)
+envs = VecNormalize(
+    envs,
+    norm_obs=True,
+    norm_reward=True,
+    clip_obs=10.0,
+    clip_reward=10.0,
+    gamma=GAMMA,
 )
 
 
@@ -332,12 +335,6 @@ for iteration in range(MAX_ITERATIONS):
             # Log prob for continuous actions [B, num_actions] -> [B]
             new_log_probs = dist.log_prob(mb["actions"])
 
-            # Compute KL divergence
-            with torch.no_grad():
-                log_ratio = new_log_probs - mb["logprobs"]
-                approx_kl = ((torch.exp(log_ratio) - 1) - log_ratio).mean().item()
-            epoch_kls.append(approx_kl)
-
             # 1. Policy Loss (Clipped Surrogate)
             ratio = probability_ratio(
                 old_log_probs=mb["logprobs"],
@@ -377,9 +374,9 @@ for iteration in range(MAX_ITERATIONS):
 
             # Metrics tracking
             with torch.no_grad():
-                clipped = (ratio - 1.0).abs() > CLIP_COEF
-                clip_fractions.append(clipped.float().mean().item())
-                approx_kls.append(approx_kl)
+                epoch_kls.append(pg_info["policy/approx_kl"].item())
+                clip_fractions.append(pg_info["policy/clip_fraction"].item())
+                approx_kls.append(pg_info["policy/approx_kl"].item())
                 epoch_losses.append(loss.item())
 
         # Early stopping based on KL

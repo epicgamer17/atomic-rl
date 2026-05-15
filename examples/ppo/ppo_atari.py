@@ -314,12 +314,6 @@ for iteration in range(MAX_ITERATIONS):
             dist = torch.distributions.Categorical(logits=new_logits)
             new_log_probs = dist.log_prob(mb["actions"])
 
-            # Compute KL divergence
-            with torch.no_grad():
-                log_ratio = new_log_probs - mb["logprobs"]
-                approx_kl = ((torch.exp(log_ratio) - 1) - log_ratio).mean().item()
-            epoch_kls.append(approx_kl)
-
             # 1. Policy Loss (Clipped Surrogate)
             ratio = probability_ratio(
                 old_log_probs=mb["logprobs"],
@@ -359,9 +353,9 @@ for iteration in range(MAX_ITERATIONS):
 
             # Metrics tracking
             with torch.no_grad():
-                clipped = (ratio - 1.0).abs() > CLIP_COEF
-                clip_fractions.append(clipped.float().mean().item())
-                approx_kls.append(approx_kl)
+                epoch_kls.append(pg_info["policy/approx_kl"].item())
+                clip_fractions.append(pg_info["policy/clip_fraction"].item())
+                approx_kls.append(pg_info["policy/approx_kl"].item())
                 epoch_losses.append(loss.item())
 
         # Early stopping based on KL (if TARGET_KL is set)

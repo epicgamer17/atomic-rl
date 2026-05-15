@@ -180,6 +180,7 @@ def compute_is_weights(
     return is_weights
 
 
+# TODO: unify sample API and make sample_per use and RNG key
 def sample_per(
     buffer_state: PERBufferState, batch_size: int, beta: torch.Tensor
 ) -> Tuple[TensorDict, torch.Tensor, torch.Tensor]:
@@ -199,7 +200,10 @@ def sample_per(
 
     # Generate batch_size random values between 0 and total_priority
     segment_length = total_priority / batch_size
-    targets = (torch.rand(batch_size) + torch.arange(batch_size)) * segment_length
+    targets = (
+        torch.rand(batch_size, device=buffer_state.sum_tree.device)
+        + torch.arange(batch_size, device=buffer_state.sum_tree.device)
+    ) * segment_length
 
     # Vectorized Tree Traversal
     indices = torch.zeros(batch_size, dtype=torch.long)
@@ -225,6 +229,7 @@ def sample_per(
     data_indices = indices - (buffer_state.tree_capacity - 1)
 
     # Clamp to handle potential precision issues leading to out-of-bounds indices
+    # TODO/NOTE: If an out-of-bounds index is sampled, mathematically it implies a precision error; you should resample or fall back to the last valid tree traversal step rather than clamping.
     data_indices = torch.clamp(data_indices, 0, buffer_state.capacity - 1)
 
     # Importance Sampling (IS) Weights
@@ -255,7 +260,7 @@ def _update_tree(
     # Propagate up
     parent_indices = (tree_indices - 1) // 2
 
-    while parent_indices.numel() > 0 and parent_indices[0] >= 0:
+    while parent_indices.numel() > 0 and (parent_indices >= 0).all():
         left_children = parent_indices * 2 + 1
         right_children = parent_indices * 2 + 2
 
@@ -342,16 +347,17 @@ def with_per_tracking(write_strategy_fn: Callable) -> Callable:
     return per_add
 
 
+# TODO: this doesnt work with sequence accumulator (should it?). i think generally for sequences and sequence accumulators we use returns.py
 def make_n_step_accumulator(n_steps: int, gamma: float, num_envs: int = 1) -> Callable:
     """
     Creates a stateful function for N-step transition accumulation.
 
     # TODO: Performance Violation
-    # This implementation iterates over the batch dimension (`num_envs`) in Python 
-    # using a for-loop and uses Python `deque`s. This directly violates the rule 
+    # This implementation iterates over the batch dimension (`num_envs`) in Python
+    # using a for-loop and uses Python `deque`s. This directly violates the rule
     # "STRICTLY AVOID iterating over tensor dimensions in Python" and creates a massive
     # CPU overhead for highly vectorized environments (e.g., thousands of envs).
-    # Future enhancement: Rewrite this to use a fully vectorized PyTorch circular 
+    # Future enhancement: Rewrite this to use a fully vectorized PyTorch circular
     # buffer [num_envs, n_steps, ...] using cumprod and sum on GPU/CPU natively.
     """
     histories = [deque(maxlen=n_steps) for _ in range(num_envs)]
@@ -443,3 +449,96 @@ def make_n_step_accumulator(n_steps: int, gamma: float, num_envs: int = 1) -> Ca
             h.clear()
 
     return process_transition, reset
+
+
+# TODO: unrolling on sampling (ie not using a full chunk every time for muzero). must add padding. Value Target: 0, Reward Target: 0, Policy Target: Uniform distribution (or just mask the policy loss to 0 for absorbing steps).
+# TODO: sampling for DRQN no clipped chunks. (easiest when storing 1 by 1 transitions). There will be the problem of chunks that end early that will either have to be thrown out or not be usable. How to handle. How does R2D2 handle this?
+# TODO: make PER for R2D2 (method of calculating PER for a sequence of transitions), uses mean and max of per in sequence or something.
+# TODO: make PER for MuZero which differs from R2D2 (it is closer to DQN's PER, ie individual transitions). May be difficult when storing full chunks of data. Likely best approach is to store step priorities and use standard sum tree for seqeunces (ie do similar to R2D2 and then instead of uniform in the sequence its also prioritized)
+# TODO: R2D2 stores sequences of (s, a, r) (so will DRQN) (should we also store gamma with our system?)
+# TODO: MuZero stores sequences of (s, a, r, ?player, search_value, search_policy_target) (should we also store gamma with our system?). AlphaZero stores the same but does not need to unroll.
+def make_padded_chunk_accumulator(
+    chunk_size: int,
+    num_envs: int,
+    shapes: dict,
+    device: str = "cpu",
+    overlap: int = 0,  # Used for R2D2 burn-in
+) -> Callable[[TensorDict], TensorDict]:
+    """
+    Stateful accumulator that yields padded chunks.
+    If an env terminates early, the rest of the chunk is zero-padded.
+    Returns batches of variable size [num_ready_envs, chunk_size, ...].
+    Used for storing chunks of data in off-policy RL. For example storing episodes of board games for AlphaZero, overlapping chunks for R2D2, or discrete chunks for MuZero.
+    """
+    # Note the shape swap: [num_envs, chunk_size].
+    # This makes slicing individual ready environments much faster.
+    history = _allocate_tensordict(shapes, [num_envs, chunk_size], device)
+
+    # Track the current write index for each environment independently
+    current_steps = torch.zeros(num_envs, dtype=torch.long, device=device)
+    env_indices = torch.arange(num_envs, device=device)
+
+    def process_transition(transition: TensorDict) -> TensorDict:
+        nonlocal current_steps
+
+        # 1. Write transition into the history for each env at its specific step
+        history[env_indices, current_steps] = transition
+        current_steps += 1
+
+        # 2. Check which environments are ready to be flushed
+        dones = transition["terminated"].bool() | transition["truncated"].bool()
+        is_full = current_steps == chunk_size
+        ready_mask = dones | is_full
+
+        # If any environment finished an episode OR filled a chunk
+        if ready_mask.any():
+            ready_indices = ready_mask.nonzero(as_tuple=True)[0]
+
+            # Extract only the chunks that are ready.
+            # Shape: [num_ready, chunk_size, ...]
+            ready_chunks = history[ready_indices].clone()
+
+            # 3. Apply Zero-Padding
+            # If an env finished at step 5, steps 5-39 contain garbage from old episodes.
+            # We generate a mask to zero them out.
+            steps_taken = current_steps[ready_indices]
+            seq_indices = torch.arange(chunk_size, device=device).unsqueeze(0)
+
+            # valid_mask is True for real data, False for padding
+            valid_mask = seq_indices < steps_taken.unsqueeze(
+                1
+            )  # [num_ready, chunk_size]
+            valid_mask_float = valid_mask.float()
+
+            for key, tensor in ready_chunks.items():
+                # Dynamically broadcast the mask to match the tensor's shape (e.g. images)
+                mask = valid_mask_float
+                for _ in range(tensor.ndim - 2):
+                    mask = mask.unsqueeze(-1)
+                # Zero out the padded steps
+                ready_chunks[key] = tensor * mask
+
+            # Embed the valid mask so your loss function knows which steps to ignore
+            ready_chunks["valid"] = valid_mask
+
+            # 4. Handle State Reset & Overlap
+            current_steps[ready_mask] = 0
+
+            if overlap > 0:
+                # Overlap is ONLY applied to envs that reached chunk_size but DID NOT terminate
+                full_not_done = is_full & ~dones
+                full_indices = full_not_done.nonzero(as_tuple=True)[0]
+
+                if full_indices.numel() > 0:
+                    # Copy the last `overlap` steps to the beginning of the next chunk
+                    history[full_indices, :overlap] = history[
+                        full_indices, chunk_size - overlap :
+                    ].clone()
+                    current_steps[full_not_done] = overlap
+
+            return ready_chunks
+
+        # If no envs are ready, return an empty TensorDict
+        return TensorDict({}, batch_size=[0])
+
+    return process_transition

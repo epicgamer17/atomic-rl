@@ -29,6 +29,7 @@ from functional.losses import policy_gradient_loss, mse_loss
 from functional.utils import standardize_tensor
 from functional.visualization import compute_explained_variance
 from functional.network import layer_init
+from envs.wrappers import VecNormalize
 
 # Constants
 LEARNING_RATE = 3e-4
@@ -81,12 +82,16 @@ def make_single_env(env_id, seed):
     env = gym.make(env_id)
     env = gym.wrappers.RecordEpisodeStatistics(env)
     env = gym.wrappers.ClipAction(env)
-    env = gym.wrappers.NormalizeObservation(env)
-    env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10).astype(np.float32))
-    env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
-    env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
     # Wrap in dummy vector env to keep downstream code consistent (using .single_observation_space)
     env = gym.vector.SyncVectorEnv([lambda: env])
+    env = VecNormalize(
+        env,
+        norm_obs=True,
+        norm_reward=True,
+        clip_obs=10.0,
+        clip_reward=10.0,
+        gamma=GAMMA,
+    )
     env.action_space.seed(seed)
     env.observation_space.seed(seed)
     return env

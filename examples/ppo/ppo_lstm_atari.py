@@ -24,7 +24,7 @@ from functional.losses import (
 )
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
-from functional.network import layer_init
+from functional.network import layer_init, unroll_rnn
 from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step,
@@ -91,7 +91,9 @@ class ActorCriticLSTM(nn.Module):
         self.actor = layer_init(nn.Linear(128, num_actions), std=0.01)
         self.critic = layer_init(nn.Linear(128, 1), std=1.0)
 
-    def forward(self, x, lstm_state, dones):
+    def forward(
+        self, x: torch.Tensor, lstm_state: Tuple[torch.Tensor, torch.Tensor], dones: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         x shape: [sequence_length * batch_size, channels, h, w]
         lstm_state shape: ( [1, batch_size, 128], [1, batch_size, 128] )
@@ -103,26 +105,17 @@ class ActorCriticLSTM(nn.Module):
         # Recover Sequence and Batch dimensions
         batch_size = lstm_state[0].shape[1]
 
-        # [seq_len * batch, features] -> [seq_len, batch, features]
-        hidden = hidden.reshape((-1, batch_size, self.lstm.input_size))
-        dones = dones.reshape((-1, batch_size))
+        # [seq_len * batch, features] -> [batch, seq_len, features]
+        hidden = rearrange(hidden, "(t b) f -> b t f", b=batch_size)
+        dones = rearrange(dones, "(t b) -> b t", b=batch_size)
 
-        new_hidden_sequence = []
-
-        # Iteration over time is required to zero-out states exactly when an episode ends.
-        for t_step_hidden, t_step_done in zip(hidden, dones):
-            # t_step_hidden: [batch_size, input_size]
-            # mask: [batch_size, 1] -> 0.0 if done, 1.0 if not done
-            mask = (1.0 - t_step_done).unsqueeze(0).unsqueeze(-1)
-
-            # Apply mask to wipe state for environments that reset
-            lstm_state = (lstm_state[0] * mask, lstm_state[1] * mask)
-
-            h, lstm_state = self.lstm(t_step_hidden.unsqueeze(0), lstm_state)
-            new_hidden_sequence.append(h)
+        # Unroll LSTM with state resets on 'done' steps
+        new_hidden_sequence, lstm_state = unroll_rnn(
+            self.lstm, hidden, lstm_state, dones
+        )
 
         # Re-flatten back to [seq_len * batch, features]
-        new_hidden_sequence = torch.flatten(torch.cat(new_hidden_sequence), 0, 1)
+        new_hidden_sequence = rearrange(new_hidden_sequence, "b t f -> (t b) f")
 
         return (
             self.actor(new_hidden_sequence),
@@ -294,6 +287,9 @@ for iteration in range(MAX_ITERATIONS):
                 # Filter to only record environments that were truncated
                 trunc_mask = truncated[env_indices]
                 if trunc_mask.any():
+                    # TODO: We should correctly handle LSTM hidden states on bootstrapping truncated states.
+                    # Currently we only store the final observation, but the hidden state should also be preserved
+                    # or re-computed to get an accurate value estimate for the truncated state.
                     record_truncations(
                         buffer,
                         step,
@@ -329,7 +325,11 @@ for iteration in range(MAX_ITERATIONS):
         next_values = get_rollout_next_values(
             buffer,
             last_values,
-            get_value_fn=lambda obs: model(obs, next_lstm_state, next_done)[1],
+            # TODO: this is not correct, we should somehow get the value for the truncated states ideally using the lstm state for that truncated state and not an arbitrary one. DO THIS IN ALL LSTM EXAMPLES WITH BOOTSTRAPPING.
+            get_value_fn=lambda obs: model(obs, (
+                torch.zeros(model.lstm.num_layers, obs.shape[0], model.lstm.hidden_size, device=device),
+                torch.zeros(model.lstm.num_layers, obs.shape[0], model.lstm.hidden_size, device=device),
+            ), torch.zeros(obs.shape[0], device=device))[1],
             device=device,
         )
 
@@ -382,12 +382,6 @@ for iteration in range(MAX_ITERATIONS):
             dist = torch.distributions.Categorical(logits=new_logits)
             new_log_probs = dist.log_prob(mb["actions"])
 
-            # Compute KL divergence
-            with torch.no_grad():
-                log_ratio = new_log_probs - mb["logprobs"]
-                approx_kl = ((torch.exp(log_ratio) - 1) - log_ratio).mean().item()
-            epoch_kls.append(approx_kl)
-
             # 1. Policy Loss (Clipped Surrogate)
             ratio = probability_ratio(
                 old_log_probs=mb["logprobs"],
@@ -427,9 +421,9 @@ for iteration in range(MAX_ITERATIONS):
 
             # Metrics tracking
             with torch.no_grad():
-                clipped = (ratio - 1.0).abs() > CLIP_COEF
-                clip_fractions.append(clipped.float().mean().item())
-                approx_kls.append(approx_kl)
+                epoch_kls.append(pg_info["policy/approx_kl"].item())
+                clip_fractions.append(pg_info["policy/clip_fraction"].item())
+                approx_kls.append(pg_info["policy/approx_kl"].item())
                 epoch_losses.append(loss.item())
 
         # Early stopping based on KL (if TARGET_KL is set)

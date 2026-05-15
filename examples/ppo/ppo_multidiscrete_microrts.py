@@ -316,6 +316,9 @@ for iteration in range(MAX_ITERATIONS):
 
     # 3. Optimization Phase
     epoch_losses = []
+    clip_fractions = []
+    approx_kls = []
+
     for epoch in range(UPDATE_EPOCHS):
         epoch_kls = []
         for mb in yield_shuffled_minibatches(
@@ -352,18 +355,12 @@ for iteration in range(MAX_ITERATIONS):
             new_log_probs = torch.stack(new_log_probs_list, dim=-1).sum(dim=-1)
             total_entropy = torch.stack(entropy_list, dim=-1).sum(dim=-1)
 
-            # Compute KL divergence
-            with torch.no_grad():
-                log_ratio = new_log_probs - mb["logprobs"]
-                approx_kl = ((torch.exp(log_ratio) - 1) - log_ratio).mean().item()
-            epoch_kls.append(approx_kl)
-
             # 2. Policy Loss (Clipped Surrogate)
             ratio = probability_ratio(
                 old_log_probs=mb["logprobs"], new_log_probs=new_log_probs
             )
             mb_advantages = standardize_tensor(mb["advantages"])
-            pg_loss, _ = clipped_surrogate_loss(ratio, mb_advantages, CLIP_COEF)
+            pg_loss, pg_info = clipped_surrogate_loss(ratio, mb_advantages, CLIP_COEF)
 
             # 3. Value Loss
             critic_loss, _ = clipped_mse_loss(
@@ -384,7 +381,13 @@ for iteration in range(MAX_ITERATIONS):
             optimizer = apply_gradients(
                 optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
             )
-            epoch_losses.append(loss.item())
+
+            # Metrics tracking
+            with torch.no_grad():
+                epoch_kls.append(pg_info["policy/approx_kl"].item())
+                clip_fractions.append(pg_info["policy/clip_fraction"].item())
+                approx_kls.append(pg_info["policy/approx_kl"].item())
+                epoch_losses.append(loss.item())
 
         if TARGET_KL is not None and np.mean(epoch_kls) > 1.5 * TARGET_KL:
             break
@@ -403,6 +406,8 @@ for iteration in range(MAX_ITERATIONS):
                 "learning_rate": scheduler.get_last_lr()[0],
                 "loss/total": np.mean(epoch_losses),
                 "value/explained_variance": explained_var,
+                "ppo/clip_fraction": np.mean(clip_fractions),
+                "ppo/approx_kl": np.mean(approx_kls),
                 "global_step": global_step,
             }
         )

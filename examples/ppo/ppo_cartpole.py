@@ -60,6 +60,7 @@ from functional.rollout_buffer import (
 )
 from functional.utils import standardize_tensor
 from tensordict import TensorDict
+from envs.wrappers import VecNormalizeObservation
 
 # Constants
 LEARNING_RATE = 2.5e-4
@@ -113,14 +114,6 @@ def make_env(env_id, seed, idx):
     def thunk():
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
-        # Apply standard wrappers if needed here
-        # Standard continuous control wrappers
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(
-            env, lambda obs: np.clip(obs, -10, 10).astype(np.float32)
-        )
-        env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -135,9 +128,8 @@ envs = gym.vector.SyncVectorEnv(
 )
 
 # NOTE: PPO on Cartpole at least seems to be highly sensitive to this.
-# envs = NormalizeObservation(envs)
-# NOTE: Reward scaling/normalization is also highly beneficial for PPO stability.
-# envs = NormalizeReward(envs, gamma=GAMMA)
+# TODO: normalizing obs seems to break cartpole idk why
+# envs = VecNormalizeObservation(envs, clip_obs=10.0, gamma=GAMMA)
 
 obs_shape = envs.single_observation_space.shape
 num_actions = envs.single_action_space.n
@@ -321,12 +313,6 @@ for iteration in range(MAX_ITERATIONS):
             dist = torch.distributions.Categorical(logits=new_logits)
             new_log_probs = dist.log_prob(mb["actions"])
 
-            # approx_kl computed for logging and per-epoch early-stop decision
-            with torch.no_grad():
-                log_ratio = new_log_probs - mb["logprobs"]
-                approx_kl = ((torch.exp(log_ratio) - 1) - log_ratio).mean().item()
-            epoch_kls.append(approx_kl)
-
             # 1. Policy Loss (Clipped Surrogate)
             ratio = probability_ratio(
                 old_log_probs=mb["logprobs"],
@@ -367,10 +353,9 @@ for iteration in range(MAX_ITERATIONS):
 
             # Track Metrics
             with torch.no_grad():
-                # Clip Fraction
-                clipped = (ratio - 1.0).abs() > CLIP_COEF
-                clip_fractions.append(clipped.float().mean().item())
-                approx_kls.append(approx_kl)
+                epoch_kls.append(pg_info["policy/approx_kl"].item())
+                clip_fractions.append(pg_info["policy/clip_fraction"].item())
+                approx_kls.append(pg_info["policy/approx_kl"].item())
                 epoch_losses.append(loss.item())
 
         # KL early stop on the per-epoch mean (CleanRL-style): break the

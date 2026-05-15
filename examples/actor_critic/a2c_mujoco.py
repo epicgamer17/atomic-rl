@@ -38,6 +38,7 @@ from functional.rollout_buffer import (
 )
 from functional.utils import standardize_tensor
 from tensordict import TensorDict
+from envs.wrappers import VecNormalize
 
 # Constants
 LEARNING_RATE = 3e-4
@@ -98,10 +99,6 @@ def make_env(env_id, seed, idx):
         env = gym.make(env_id)
         env = gym.wrappers.RecordEpisodeStatistics(env)
         env = gym.wrappers.ClipAction(env)
-        env = gym.wrappers.NormalizeObservation(env)
-        env = gym.wrappers.TransformObservation(env, lambda obs: np.clip(obs, -10, 10).astype(np.float32))
-        env = gym.wrappers.NormalizeReward(env, gamma=GAMMA)
-        env = gym.wrappers.TransformReward(env, lambda reward: np.clip(reward, -10, 10))
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
         return env
@@ -113,6 +110,14 @@ def make_env(env_id, seed, idx):
 # TODO: switch to either procgen, envpool, isaac gym, brax, or pufferlib to decrease training time (same number iterations but faster)
 envs = gym.vector.SyncVectorEnv(
     [make_env("HalfCheetah-v4", SEED + i, i) for i in range(NUM_ENVS)]
+)
+envs = VecNormalize(
+    envs,
+    norm_obs=True,
+    norm_reward=True,
+    clip_obs=10.0,
+    clip_reward=10.0,
+    gamma=GAMMA,
 )
 
 

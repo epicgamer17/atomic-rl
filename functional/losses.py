@@ -133,9 +133,9 @@ def entropy_loss(
     Calculate the entropy loss for an action distribution.
     Returns the NEGATIVE mean entropy, so that minimizing this "loss" maximizes entropy.
 
-    Rule Enforcement (Explicit over Implicit): 
-    This function expects the distribution's `event_shape` to be configured correctly. 
-    If you have a multi-dimensional action space and want joint entropy, you MUST wrap 
+    Rule Enforcement (Explicit over Implicit):
+    This function expects the distribution's `event_shape` to be configured correctly.
+    If you have a multi-dimensional action space and want joint entropy, you MUST wrap
     your base distribution in `torch.distributions.Independent` before passing it here.
     We strictly avoid guessing whether to sum over extra dimensions.
 
@@ -147,8 +147,8 @@ def entropy_loss(
     """
     # 1. dist.entropy() automatically handles the underlying math based on event_shape
     entropy = dist.entropy()
-    
-    # Fail Fast: If the user didn't use `Independent`, entropy will incorrectly retain 
+
+    # Fail Fast: If the user didn't use `Independent`, entropy will incorrectly retain
     # the action dimension as a batch dimension. We check against the expected batch dim.
     # Note: We assume scalar entropy per transition here.
     assert entropy.ndim == 1, (
@@ -288,7 +288,6 @@ def compute_q_td_loss(
     return loss, info
 
 
-# TODO: wondering if this is necessary or can simply be inlined. For now its okay.
 def with_per_weights(base_loss_fn: Callable, is_weights: torch.Tensor) -> Callable:
     """
     Higher-order function that wraps a standard loss function to apply
@@ -331,6 +330,37 @@ def with_per_weights(base_loss_fn: Callable, is_weights: torch.Tensor) -> Callab
     return per_loss_fn
 
 
+def with_sequence_mask(base_loss_fn: Callable, mask: torch.Tensor) -> Callable:
+    """
+    Higher-order function that masks out invalid sequence transitions before calculating the mean loss.
+
+    Args:
+        base_loss_fn (Callable): Function to calculate loss. Must return a tuple of (raw_losses, info_dict).
+        mask (torch.Tensor): Mask indicating valid transitions. In other words masking out the loss for observations or predictions past terminal or truncated states or that are for another episode (an artifact of our how our buffer handles sequences)
+
+    Returns:
+        Callable: The loss function with sequence mask applied.
+    """
+
+    def masked_loss_fn(
+        predictions: torch.Tensor, targets: torch.Tensor
+    ) -> Tuple[torch.Tensor, dict]:
+        # predictions and targets are [B * T]
+        raw_losses, info_dict = base_loss_fn(predictions, targets)
+
+        flat_mask = mask.view(-1).float()
+        masked_losses = raw_losses * flat_mask
+
+        # Mean over only valid transitions to avoid diluting the gradient
+        valid_count = flat_mask.sum().clamp(min=1.0)
+        mean_loss = masked_losses.sum() / valid_count
+
+        info_dict["loss/masked_mean"] = mean_loss.detach()
+        return masked_losses, info_dict
+
+    return masked_loss_fn
+
+
 # TODO: is this good? should this take in torch.Distribution objects instead?
 def probability_ratio(
     old_log_probs: torch.Tensor,
@@ -354,8 +384,6 @@ def probability_ratio(
         old_log_probs.shape == new_log_probs.shape
     ), f"Shape mismatch: {old_log_probs.shape} vs {new_log_probs.shape}"
     return torch.exp(new_log_probs - old_log_probs.detach())
-
-
 
 
 def clipped_surrogate_loss(

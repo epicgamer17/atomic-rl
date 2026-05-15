@@ -2,6 +2,101 @@
 
 This directory maintains a mapping between the research papers in this folder and their corresponding implementations within the repository.
 
+### Missing / Future Work:
+- **Distributional Rainbow (IQN/QR-DQN)**: While C51 is implemented, modern distributional methods like Implicit Quantile Networks (IQN) or Quantile Regression DQN (QR-DQN) are currently missing.
+- **DRQN**: Recurrent DQN. (similar to R2D2?) 
+- **R2D2** 
+- **NGU**
+- **IMPALA**
+- **TRPO** (Schulman et al., 2015): Folder exists in `examples/trpo/` but is currently empty.
+- **SAC** (Haarnoja et al., 2018): Folder exists in `examples/sac/` but is currently empty.
+- **Batch MCTS**: [batch_mcts.pdf](batch_mcts.pdf). Vectorized MCTS for efficient batched inference. Different than vectorized envs, about searching mutliple branches at once for one state. 
+- **Gumbel MuZero**: [gumbel_muzero.pdf](gumbel_muzero.pdf). Planned for `functional/mcts.py` to allow policy improvement without high simulation counts.
+- **Stochastic MuZero**: [stochastic_muzero.pdf](stochastic_muzero.pdf). Needed for handling environments with inherent randomness (like Catan).
+- **Sampled MuZero**: [sampled_muzero.pdf](sampled_muzero.pdf). For handling large or continuous action spaces.
+- **EfficientZero**: [efficient_zero.pdf](efficient_zero.pdf). Sample efficient offline MuZero variant. Possible improvements on MuZero.
+- **Efficient Zero V2**: [efficient_zero_v2.pdf](efficient_zero_v2.pdf). V2 of EfficientZero. 
+- **MuZero Unplugged**: [muzero_unplugged.pdf](muzero_unplugged.pdf). Offline MuZero.
+- **Sampled MuZero ** [sampled_muzero.pdf](sampled_muzero.pdf). MuZero for Continuous and complex action spaces.
+- **AdaGain**: [adagain.pdf](adagain.pdf). An improvement on AutoStep (I think).
+- **MetaOptimize**: [metaoptimize.pdf](metaoptimize.pdf).
+- **ReDO**
+- **The Primacy Bias in Deep RL**: Full periodic resets of weights, same replay buffer. May be worth recreating to see if CBP and SWR are better or worse. In some ways more of a good read than something to implement. (Maybe)
+- **Horde** 
+- **Developing a Predictive Approach to Knowledge** (important read)
+- **Fast Gradient-Descent Methods for Temporal-Difference Learning with Linear Function Approximation** also see GTD/GTD2/TDC papers
+- **True Online TD(lambda)** 
+- **Tuning Free Step Size Adaptation**: introduces TIDBD (do i need this?)
+- **NFSP** this largely goes against Alberta Plan as it requires an approximation of an INFINITE replay buffer. (Maybe)
+- **JEPA** (Maybe)
+- **GNN** 
+- **ResNet**
+- **Transformers** 
+- **Vision Transformer** 
+- **UniZero** 
+- **OptionZero** 
+- **Dyna**
+- **World Models** 
+- **Dreamer V1**
+- **Dreamer V2** 
+- **Dreamer V3** 
+- **Dreamer V4** 
+- **Flow Zero** (Maybe, read more)
+- **Stochastic Gumbel MuZero**
+- **OptionCritic**
+- **GW-PCZero**  (Maybe read more)
+- **ReZero** (Maybe read more)
+- **Reinforcement Learning with Unsupervised Auxiliary Tasks**
+- **deep learning fast and slow** (important read, maybe not implementation though)
+- **AlphaStar** 
+- **fractal MCTS**
+- **Dynamics-Aware Unsupervised Discovery of Skills**
+- **ROSMO** (Maybe)
+- **ReBel** (Maybe)
+- **CFR** (Maybe)
+- **Learning World Graphs to Accelerate Hierarchical Reinforcement Learning** (Maybe)
+- **I2A PAPER (Imagination-Augmented Agents for Deep Reinforcement Learning)** 
+- **MAPPO** Multi Agent PPO 
+- **Sarsa**
+- **Soft Q Learning**
+- **DDPG**
+
+
+
+### Missing Features (TODO Find Papers):
+For Agent 57, we are missing:
+1. LSTM 
+2. GRU (end of R2D2) 
+3. Memory Networks 
+4. Neural Episodic Control 
+5. Transformers
+6. Curiosity 
+7. Intrinsic Motivation 
+8. Density Models 
+9. Hashing 
+10. Random Network Distillation 
+11. CoEx (what is this?) 
+12. Reachability (end of Never Give Up) 
+13. PBT 
+14. Bandits 
+15. Meta Gradients 
+16. Adaptive Bandits (end of Agent 57)
+17. Change Rainbow to predict Q values given s and a as input instead of value over all a given s (better for search maybe? not sure?)
+
+- Successor Representations/Successor Features 
+- Options 
+- Changing network feature optimization (meta task)
+- Learned Search
+- DeepStack
+- POMCP
+- IS-MCTS 
+- ABR
+- Growing networks 
+- MORE ON OPTIONS!
+- V-Trace
+- UPGO
+- Hindsight Experience Replay (Against Alberta Plan)
+
 ## DQN & Extensions
 
 | Paper | PDF | Implementation | Location | Notes |
@@ -13,10 +108,7 @@ This directory maintains a mapping between the research papers in this folder an
 | **Categorical DQN (C51)** (Bellemare et al., 2017) | [categorical_dqn.pdf](categorical_dqn.pdf) | Done | `examples/dqn/categorical_dqn_cartpole.py` | Implements distributional RL by predicting a discrete value distribution. |
 | **Noisy DQN** (Fortunato et al., 2017) | [noisy_dqn.pdf](noisy_dqn.pdf) | Done | `examples/dqn/noisy_dqn_cartpole.py` | Replaces epsilon-greedy with learnable noise in Linear layers. |
 | **Rainbow** (Hessel et al., 2017) | [rainbow_dqn.pdf](rainbow_dqn.pdf) | Done | `examples/dqn/rainbow_dqn_cartpole.py` | Combines all the above extensions into a single agent. |
-| **Revisiting Rainbow** (Obando-Ceron et al., 2020) | [revisiting_rainbow.pdf](revisiting_rainbow.pdf) | Partial | `examples/dqn/` | Smaller-scale Rainbow experiments. |
-
-### Missing / Future Work:
-- **Distributional Rainbow (IQN/QR-DQN)**: While C51 is implemented, modern distributional methods like Implicit Quantile Networks (IQN) or Quantile Regression DQN (QR-DQN) are currently missing.
+| **Revisiting Rainbow** (Obando-Ceron et al., 2020) | [revisiting_rainbow.pdf](revisiting_rainbow.pdf) | Mostly a subset of Rainbow DQN | `examples/rainbow_dqn_cartpole/` | Smaller-scale Rainbow experiments. |
 
 ---
 
@@ -28,10 +120,6 @@ This directory maintains a mapping between the research papers in this folder an
 | **A3C / A2C** (Mnih et al., 2016) | [a3c.pdf](a3c.pdf) | Done (A2C) | `examples/actor_critic/a2c_cartpole.py` | Synchronous version (A2C) implemented for stability on modern GPUs. |
 | **PPO** (Schulman et al., 2017) | [ppo.pdf](ppo.pdf) | Done | `examples/ppo/` | Comprehensive implementations for Atari, MuJoCo, and LSTM variants. |
 
-### Missing / Future Work:
-- **TRPO** (Schulman et al., 2015): Folder exists in `examples/trpo/` but is currently empty.
-- **SAC** (Haarnoja et al., 2018): Folder exists in `examples/sac/` but is currently empty.
-
 ---
 
 ## MuZero / AlphaZero
@@ -40,13 +128,6 @@ This directory maintains a mapping between the research papers in this folder an
 | :--- | :--- | :--- | :--- | :--- |
 | **AlphaZero** (Silver et al., 2017) | [alphazero.pdf](alphazero.pdf) | Partial | `papers/alphazero_pseudocode.py` | Pseudocode provided; full runnable implementation is pending. |
 | **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Partial | `functional/mcts.py` | Core MCTS logic is implemented. Agent experiments exist in `experiments/`. |
-| **EfficientZero** (Ye et al., 2021) | [efficient_zero.pdf](efficient_zero.pdf) | Planned |
-
-### Missing / Future Work:
-- **Gumbel MuZero**: [gumbel_muzero.pdf](gumbel_muzero.pdf). Planned for `functional/mcts.py` to allow policy improvement without high simulation counts.
-- **Stochastic MuZero**: [stochastic_muzero.pdf](stochastic_muzero.pdf). Needed for handling environments with inherent randomness (like Catan).
-- **Sampled MuZero**: [sampled_muzero.pdf](sampled_muzero.pdf). For handling large or continuous action spaces.
-
 
 ---
 
@@ -59,8 +140,8 @@ This repo heavily focuses on the **Alberta Plan** (Sutton et al., 2022) and the 
 | **Alberta Plan** (Sutton et al., 2022) | [AlbertaPlan.pdf](AlbertaPlan.pdf) / [Report](AlbertaPlanReport.pdf) | Building Blocks | `functional/plasticity.py` | Serves as the philosophical guide for the `functional/` module. |
 | **SWR** (Selective Weight Reinit) | [selective_weight_reinit.pdf](selective_weight_reinit.pdf) | Done | `functional/plasticity.py` | Utility-based reinitialization. Reproduced in `examples/plasticity/swr_permuted_mnist.py`. |
 | **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [idbd_b.pdf](idbd_b.pdf) / [autostep.pdf](autostep.pdf) | Done | `functional/meta_optimization.py` | Meta-gradient learning rates. |
-| **AdaGain** (Jacobsen et al., 2019) | [adagain.pdf](adagain.pdf) | Notes Only | `functional/meta_optimization.py` | Currently exists as detailed architectural notes. |
-| **Continual Backprop** | [cbp_1.pdf](cbp_1.pdf) / [cbp_2.pdf](cbp_2.pdf) | Done | `functional/plasticity.py` | Implements the generate-and-test plasticity mechanism. Examples in `examples/plasticity/`. |
+| **Continual Backprop** | [cbp_1.pdf](cbp_1.pdf) / [cbp_2.pdf](cbp_2.pdf) / https://github.com/shibhansh/loss-of-plasticity/| Done | `functional/plasticity.py` | Implements the generate-and-test plasticity mechanism. Examples in `examples/plasticity/`. |
+
 
 
 ---
@@ -75,14 +156,20 @@ This repo heavily focuses on the **Alberta Plan** (Sutton et al., 2022) and the 
 
 ---
 
-## Fundamentals
-
-Core mathematical foundations used across multiple papers:
+## Other Important Papers (to be organized)
 
 | Topic | PDF | Paper Ref | Location |
-| :--- | :--- | :--- | :--- | :--- |
+| :--- | :--- | :--- | :--- |
 | **N-Step Returns** | [td_learning.pdf](td_learning.pdf) | Sutton (1988) | `functional/returns.py` |
 | **GAE** | (No PDF) | Schulman et al. (2016) | `functional/returns.py` |
 | **Temporal Credit Assignment** | (No PDF) | Various | `functional/returns.py` |
 | **Loss Functions** | (No PDF) | Various | `functional/losses.py` |
 | **Replay Buffers** | (No PDF) | Various | `functional/replay_buffer.py` |
+| **TD learning** | [td_learning.pdf](td_learning.pdf) | Sutton (1988) | `functional/returns.py` |
+
+
+
+### PRUNED (Not planned but were before)
+- **MAML** - I think its episodic so not very applicable to Alberta Plan. Trying to make my Meta Learning many Alberta Plan based 
+- **ANIL** - I think its episodic so not very applicable to Alberta Plan. Trying to make my Meta Learning many Alberta Plan based 
+- **GoExplore** - Requires saving simulator states and teleporting back to them to explore. Again against Alberta Plan and my general philosophy.

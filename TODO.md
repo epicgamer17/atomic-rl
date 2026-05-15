@@ -64,3 +64,7 @@ Percent of Dead Units
 Weight Magnitude
 Effective rank of representation layers
 
+Experiments with Any RL agent with and without IDBD or variants and with or without CBP or SWR and with both. like an ablation of those. 
+More generally examples that combine multiple ideas and methods from the Alberta Plan that I have made so far. Both on their own, on the stream problems, and on traditional RL problems (combined/enhancing the standard agents or frameworks). ie DQN with IDBD and SWR? or PPO with CBP and Autostep, or Stream DQN. Continue to explore and add as I add more Alberta Plan research and findings. 
+
+Move data for permuted mnist out of examples folder and into a more general data folder.

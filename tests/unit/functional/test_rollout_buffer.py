@@ -104,6 +104,51 @@ def test_get_rollout_next_values():
     torch.testing.assert_close(next_vals_patched, expected_patched)
 
 
+def test_get_rollout_next_values_requires_final_obs_for_truncation():
+    steps = 3
+    num_envs = 2
+    shapes = {"values": (), "truncated": ()}
+    buffer = init_rollout_buffer(steps, num_envs, shapes)
+    buffer.data["values"] = torch.tensor([[1.0, 2.0, 3.0], [1.1, 2.1, 3.1]])
+    buffer.data["truncated"] = torch.zeros(num_envs, steps)
+    buffer.data["truncated"][1, 2] = 1.0
+
+    def get_value_fn(obs):
+        return obs.sum(dim=-1, keepdim=True)
+
+    with pytest.raises(RuntimeError, match="Missing final observations"):
+        get_rollout_next_values(
+            buffer,
+            torch.tensor([4.0, 4.1]),
+            get_value_fn,
+            "cpu",
+        )
+
+
+def test_get_rollout_next_values_can_disable_truncation_final_obs_requirement():
+    steps = 3
+    num_envs = 2
+    shapes = {"values": (), "truncated": ()}
+    buffer = init_rollout_buffer(steps, num_envs, shapes)
+    buffer.data["values"] = torch.tensor([[1.0, 2.0, 3.0], [1.1, 2.1, 3.1]])
+    buffer.data["truncated"] = torch.zeros(num_envs, steps)
+    buffer.data["truncated"][1, 2] = 1.0
+
+    def get_value_fn(obs):
+        return obs.sum(dim=-1, keepdim=True)
+
+    next_values = get_rollout_next_values(
+        buffer,
+        torch.tensor([4.0, 4.1]),
+        get_value_fn,
+        "cpu",
+        require_final_obs_for_truncation=False,
+    )
+
+    expected = torch.tensor([[2.0, 3.0, 4.0], [2.1, 3.1, 4.1]])
+    torch.testing.assert_close(next_values, expected)
+
+
 def test_flatten_rollout_buffer():
     steps = 3
     num_envs = 2

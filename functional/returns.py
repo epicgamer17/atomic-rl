@@ -45,6 +45,12 @@ def compute_mc_returns(
             "Found trajectory in batch where terminated is always False (never terminal). "
             "MC returns for these trajectories may be biased."
         )
+    is_truncated_but_not_terminated = (truncated.bool() & ~terminated.bool()).any(dim=1)
+    if is_truncated_but_not_terminated.any():
+        warnings.warn(
+            "Found trajectory in batch where truncated is True but not terminated."
+            "MC returns for these trajectories may be biased."
+        )
 
     returns = torch.zeros_like(rewards)
     R = torch.zeros_like(rewards[:, 0])  # [B]

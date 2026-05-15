@@ -71,6 +71,27 @@ def get_rollout_next_values(
     B, T = buffer.data.batch_size
     values = buffer.data["values"]
 
+    if "truncated" in buffer.data.keys():
+        truncated_steps = buffer.data["truncated"].bool().nonzero(as_tuple=False)
+        if truncated_steps.numel() > 0:
+            expected_records = {
+                (int(step.item()), int(env_idx.item()))
+                for env_idx, step in truncated_steps
+            }
+            actual_records = {
+                (int(step), int(env_idx))
+                for step, env_idx, _ in buffer.truncation_records
+            }
+            missing_records = expected_records - actual_records
+            if missing_records:
+                missing_preview = sorted(missing_records)[:5]
+                raise RuntimeError(
+                    "Missing final observations for truncated rollout steps. "
+                    "Cannot safely bootstrap truncated states because vector env "
+                    "autoreset may expose reset observations instead. "
+                    f"Missing (step, env_idx) records: {missing_preview}"
+                )
+
     if last_values.ndim == 1:
         last_values = last_values.unsqueeze(1)
 
@@ -158,9 +179,8 @@ def yield_sequential_minibatches(
         mb_env_inds = env_indices[start:end]
 
         # 1. Select the initial LSTM states for these specific environments
-        # Hidden/Cell states are typically [layers, envs, hidden_dim]
-        mb_initial_h = initial_lstm_states[0][:, mb_env_inds].detach()
-        mb_initial_c = initial_lstm_states[1][:, mb_env_inds].detach()
+        # All states are typically [layers, envs, hidden_dim]
+        mb_initial_states = tuple(s[:, mb_env_inds].detach() for s in initial_lstm_states)
 
         # 2. Slice the buffer data for these environments across ALL steps
         # buffer_data is [envs, steps, ...] -> slice to [envs_per_batch, steps, ...]
@@ -176,4 +196,4 @@ def yield_sequential_minibatches(
             batch_size=[steps * envs_per_batch],
         )
 
-        yield mb_flat, (mb_initial_h, mb_initial_c)
+        yield mb_flat, mb_initial_states

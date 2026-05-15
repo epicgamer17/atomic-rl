@@ -1,7 +1,12 @@
 import pytest
 import torch
 from einops import rearrange
-from functional.returns import compute_mc_returns, compute_n_step_returns, compute_gae, compute_td_lambda_returns
+from functional.returns import (
+    compute_mc_returns,
+    compute_n_step_returns,
+    compute_gae,
+    compute_td_lambda_returns,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -114,7 +119,6 @@ def test_compute_n_step_returns_basic():
     # Construct next_values [V(s_1), ..., V(s_T)]
     next_values = torch.cat([values[:, 1:], last_values], dim=1)
 
-
     returns_n1 = compute_n_step_returns(
         rewards, terminated, truncated, values, next_values, gamma, n=1
     )
@@ -153,7 +157,6 @@ def test_compute_n_step_returns_with_terminals():
     # Construct next_values [V(s_1), ..., V(s_T)]
     next_values = torch.cat([values[:, 1:], last_values], dim=1)
 
-
     returns = compute_n_step_returns(
         rewards, terminated, truncated, values, next_values, gamma, n=2
     )
@@ -177,7 +180,6 @@ def test_compute_n_step_returns_truncation():
     expected = torch.tensor([[19.0, 1.0]])
     # Construct next_values [V(s_1), ..., V(s_T)]
     next_values = torch.cat([values[:, 1:], last_values], dim=1)
-
 
     returns = compute_n_step_returns(
         rewards, terminated, truncated, values, next_values, gamma, n=n
@@ -424,7 +426,6 @@ def test_gae_assertions():
             gamma=0.99,
             gae_lambda=0.95,
         )
-
 
     # Dimensionality mismatch
     with pytest.raises(AssertionError, match="Expected 2D rewards"):
