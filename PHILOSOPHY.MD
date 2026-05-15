@@ -1,4 +1,4 @@
-Explicit over Implicit (with Orchestration): It is better to avoid "magic" objects that hide hidden state mutations. However, using stateless, high-level orchestration functions (like compute_q_td_loss) to group operations and keep the main algorithmic loop clean and readable is highly encouraged.
+Explicit over Implicit (with Orchestration): It is better to avoid "magic" objects that hide hidden state mutations. However, using stateless, high-level orchestration functions to group operations and keep the main algorithmic loop clean and readable is highly encouraged.
 
 Fail Fast: Use assertions and type hints in the functional layer to ensure that shape mismatches or device errors are caught at the point of origin rather than deep in a gradient calculation.
 
@@ -20,14 +20,14 @@ Functions should try to handle edge cases, and they should be tested.
 Functions should be efficient and performant.
 Functions should be reusable across algorithms and papers. For example, gaussian action selection should be usable in ppo, a2c, td3, sac, etc. It shouldn't be hardcoded for a particular algorithm.
 Functions should attempt to have consistent signatures/interfaces so that "similar"/related functions can be swapped in and out easily. For example, mc returns should be easily swappable with n step returns for VPG. Ie they should return the same output format and stuff, and they should take the same inputs (as much as possible).
-Avoid combinatorial explosion of options. If multiple options/architectures exist for a function try to solve via composability (as done for example in compute_q_td_loss())
+Avoid combinatorial explosion of options. If multiple options/architectures exist for a function try to solve via composability or handle it in a case by case basis in the orchestration code.
 Solutions/decisions should be expandable. When designing a function don't design it only for the algorithm it is currently being created for. Instead, design it such that it could be easily extended/adapted to other algorithms.
 Functions should be designed in a way that tries to minimize the amount of code a person has to write to get the desired functionality, while maintaining readability and semantic understandability.
 Functions should be designed such that a person can understand the function by just reading its signature and docstring. 
 Functions should try their best to avoid using `*args` and `**kwargs`, they should instead use proper type hints and named arguments.
 Functions should be designed in a way that is easy to test. 
 Functions should be designed in a way that is easy to debug. 
-Functions should be designed in a way that minimizes the need for boiler plate functions in the orchestration code (not including functools.partial etc.). For example, if for categorical DQN we had to make a categorical_greedy_selector which used the expected value and argmax to meet the signature required by the compute_q_td_loss function, we should instead try to design the functions such that this boilerplate is avoided.
+Functions should be designed in a way that minimizes the need for boiler plate functions in the orchestration code (not including functools.partial etc.). For example, if for categorical DQN we had to make a categorical_greedy_selector which used the expected value and argmax to meet the signature required by a generic functional loss function (that could be used for any q function), we should instead try to design the functions such that this boilerplate is avoided. This may require more creative solutions but it is worth it to avoid this boilerplate.
 Functions have semantic meaning, although GAE can represent MC returns and N step returns, we have seperate functions for those to improve readability. Try to keep functions to a single responsibility, which improves readability and reusability.
 Minimize code that does multiple things. If a function is doing more than one thing, try to split it into multiple functions.
 Minimze dead code and useless functions. Without good reason (semantic or efficiency) we should not have two functions that perform the exact same mathematical operation.

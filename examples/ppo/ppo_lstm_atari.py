@@ -98,7 +98,10 @@ class ActorCriticLSTM(nn.Module):
         self.critic = layer_init(nn.Linear(128, 1), std=1.0)
 
     def forward(
-        self, x: torch.Tensor, lstm_state: Tuple[torch.Tensor, torch.Tensor], dones: torch.Tensor
+        self,
+        x: torch.Tensor,
+        lstm_state: Tuple[torch.Tensor, torch.Tensor],
+        dones: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         x shape: [sequence_length * batch_size, channels, h, w]
@@ -325,10 +328,24 @@ for iteration in range(MAX_ITERATIONS):
             buffer,
             last_values,
             # TODO: this is not correct, we should somehow get the value for the truncated states ideally using the lstm state for that truncated state and not an arbitrary one. DO THIS IN ALL LSTM EXAMPLES WITH BOOTSTRAPPING.
-            get_value_fn=lambda obs: model(obs, (
-                torch.zeros(model.lstm.num_layers, obs.shape[0], model.lstm.hidden_size, device=device),
-                torch.zeros(model.lstm.num_layers, obs.shape[0], model.lstm.hidden_size, device=device),
-            ), torch.zeros(obs.shape[0], device=device))[1],
+            get_value_fn=lambda obs: model(
+                obs,
+                (
+                    torch.zeros(
+                        model.lstm.num_layers,
+                        obs.shape[0],
+                        model.lstm.hidden_size,
+                        device=device,
+                    ),
+                    torch.zeros(
+                        model.lstm.num_layers,
+                        obs.shape[0],
+                        model.lstm.hidden_size,
+                        device=device,
+                    ),
+                ),
+                torch.zeros(obs.shape[0], device=device),
+            )[1],
             device=device,
         )
 

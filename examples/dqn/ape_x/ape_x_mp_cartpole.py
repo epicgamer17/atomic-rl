@@ -28,10 +28,11 @@ from functional.replay_buffer import (
     make_n_step_accumulator,
     PERBufferState,
 )
-from functional.losses import compute_q_td_loss, huber_loss
+from functional.losses import huber_loss
 from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
+    gather_q_values,
 )
 from functional.schedules import get_ape_x_epsilon
 from functional.optimizer import apply_gradients
@@ -210,6 +211,7 @@ def actor_worker(
         # Step
         next_obs, reward, terminated, truncated, info = env.step(action_np)
 
+        # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
         n_step_transitions = n_step_proc(
             obs, action, reward, next_obs, terminated, truncated
         )
@@ -242,14 +244,21 @@ def actor_worker(
                 batch_size=[len(local_batch)],
             )
             with torch.no_grad():
-                _, info_dict = compute_q_td_loss(
-                    local_model,
-                    collated,
-                    local_target_model,
-                    lambda obs, preds: argmax_selector(local_model(obs))[0],
-                    partial(target_fn, gamma=collated["gamma"]),
-                    loss_fn=loss_fn,
+                q_values = local_model(collated["obs"])
+                next_q_values_online = local_model(collated["next_obs"])
+                next_q_values_target = local_target_model(collated["next_obs"])
+
+                next_actions, _ = argmax_selector(next_q_values_online)
+
+                td_target = compute_q_td_target(
+                    next_q_values_target,
+                    next_actions.squeeze(-1),
+                    collated["reward"],
+                    collated["terminated"],
+                    collated["gamma"],
                 )
+                pred_sa = gather_q_values(q_values, collated["action"])
+                _, info_dict = loss_fn(pred_sa, td_target)
             collated["priority"] = info_dict["priorities"]
             buffer.add_transitions(collated)
             local_batch = []
@@ -303,17 +312,38 @@ def learner_worker(
         indices = indices.to(device)
         is_weights = is_weights.to(device)
 
-        # Loss
-        loss, info = compute_q_td_loss(
-            local_model,
-            batch,
-            target_model,
-            lambda obs, preds: argmax_selector(local_model(obs))[0],
-            partial(target_fn),
-            loss_fn=loss_fn,
-        )
+        # 1. Forward Passes (Online and Target)
+        q_values = local_model(batch["obs"])
+        with torch.no_grad():
+            next_q_values_online = local_model(batch["next_obs"])
+            next_q_values_target = target_model(batch["next_obs"])
 
-        weighted_loss = (loss * is_weights).mean()
+            # 2. Next Action Selection (Double DQN: Online model selects)
+            next_actions, _ = argmax_selector(next_q_values_online)
+
+            # 3. Target Calculation
+            td_target = compute_q_td_target(
+                next_q_values_target,
+                next_actions.squeeze(-1),
+                batch["reward"],
+                batch["terminated"],
+                batch["gamma"],
+            )
+
+        # 4. Prediction Extraction
+        pred_sa = gather_q_values(q_values, batch["action"])
+
+        # 5. Loss Calculation
+        raw_loss, info = loss_fn(pred_sa, td_target)
+        weighted_loss = (raw_loss * is_weights).mean()
+
+        # Augment info for logging
+        info.update(
+            {
+                "q_values/mean": pred_sa.mean().detach(),
+                "td_targets/mean": td_target.mean().detach(),
+            }
+        )
         optimizer = apply_gradients(
             optimizer,
             weighted_loss,

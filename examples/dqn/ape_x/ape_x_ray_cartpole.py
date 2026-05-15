@@ -56,10 +56,11 @@ from functional.replay_buffer import (
     circular_write_strategy,
     make_n_step_accumulator,
 )
-from functional.losses import compute_q_td_loss, mse_loss, huber_loss
+from functional.losses import mse_loss, huber_loss
 from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
+    gather_q_values,
 )
 from functional.schedules import get_ape_x_epsilon
 from functional.optimizer import apply_gradients
@@ -226,6 +227,7 @@ class ActorActor:
             next_obs, reward, terminated, truncated, info = self.env.step(action_np)
 
             # 4. Compute N-step transitions
+            # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
             n_step_transitions = self.n_step_proc(
                 self.obs,
                 action,
@@ -270,17 +272,23 @@ class ActorActor:
                     },
                     batch_size=[len(self.local_batch)],
                 )
-                # TODO: calling compute_q_td_loss leads to an extra forward pass to calculate priorities.
                 # Compute Initial Priorities in one batched forward pass
                 with torch.no_grad():
-                    _, info_dict = compute_q_td_loss(
-                        self.model,
-                        collated,
-                        self.target_model,
-                        lambda obs, preds: argmax_selector(self.model(obs))[0],
-                        partial(self.target_fn, gamma=collated["gamma"]),
-                        loss_fn=self.loss_fn,
+                    q_values = self.model(collated["obs"])
+                    next_q_values_online = self.model(collated["next_obs"])
+                    next_q_values_target = self.target_model(collated["next_obs"])
+
+                    next_actions, _ = argmax_selector(next_q_values_online)
+
+                    td_target = compute_q_td_target(
+                        next_q_values_target,
+                        next_actions.squeeze(-1),
+                        collated["reward"],
+                        collated["terminated"],
+                        collated["gamma"],
                     )
+                    pred_sa = gather_q_values(q_values, collated["action"])
+                    _, info_dict = self.loss_fn(pred_sa, td_target)
 
                 collated["priority"] = info_dict["priorities"]
 
@@ -355,17 +363,38 @@ class LearnerActor:
         indices = indices.to(self.device)
         is_weights = is_weights.to(self.device)
 
-        # Calculate Loss using injected functions
-        loss, info = compute_q_td_loss(
-            self.model,
-            batch,
-            self.target_model,
-            lambda obs, preds: argmax_selector(self.model(obs))[0],
-            partial(self.target_fn),
-            loss_fn=self.loss_fn,
-        )
+        # 1. Forward Passes (Online and Target)
+        q_values = self.model(batch["obs"])
+        with torch.no_grad():
+            next_q_values_online = self.model(batch["next_obs"])
+            next_q_values_target = self.target_model(batch["next_obs"])
 
-        weighted_loss = (loss * is_weights).mean()
+            # 2. Next Action Selection (Double DQN: Online model selects)
+            next_actions, _ = argmax_selector(next_q_values_online)
+
+            # 3. Target Calculation
+            td_target = compute_q_td_target(
+                next_q_values_target,
+                next_actions.squeeze(-1),
+                batch["reward"],
+                batch["terminated"],
+                batch["gamma"],
+            )
+
+        # 4. Prediction Extraction
+        pred_sa = gather_q_values(q_values, batch["action"])
+
+        # 5. Loss Calculation
+        raw_loss, info = self.loss_fn(pred_sa, td_target)
+        weighted_loss = (raw_loss * is_weights).mean()
+
+        # Augment info for logging
+        info.update(
+            {
+                "q_values/mean": pred_sa.mean().detach(),
+                "td_targets/mean": td_target.mean().detach(),
+            }
+        )
         self.optimizer = apply_gradients(
             self.optimizer,
             weighted_loss,

@@ -37,10 +37,11 @@ from functional.replay_buffer import (
     circular_write_strategy,
     uniform_sample,
 )
-from functional.losses import compute_q_td_loss, cross_entropy_loss
+from functional.losses import cross_entropy_loss
 from functional.action_selection import (
     argmax_selector,
     expected_value,
+    gather_q_values,
     with_epsilon_greedy,
 )
 from functional.schedules import get_linear_schedule
@@ -166,6 +167,7 @@ for step in range(MAX_STEPS):
     next_obs, reward, terminated, truncated, info = env.step(action_np)
 
     # 3. Add to Buffer
+    # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
     transition = {
         "obs": torch.as_tensor(obs, dtype=torch.float32),
         "action": action.squeeze(0).detach().to(torch.long),
@@ -198,23 +200,34 @@ for step in range(MAX_STEPS):
         # Sample
         batch = uniform_sample(buffer_state, rng_key, BATCH_SIZE)
 
-        # Calculate Loss & Gradients
-        loss, info_dict = compute_q_td_loss(
-            model,
-            batch,
-            target_model,
-            lambda obs, preds: argmax_selector(
-                preds, extractor_fn=partial(expected_value, support=SUPPORT.to(device))
-            )[0],
-            partial(
-                compute_categorical_q_td_target,
+        # 1. Forward Passes (Online and Target)
+        logits = model(batch["obs"])
+        with torch.no_grad():
+            next_logits = target_model(batch["next_obs"])
+
+            # 2. Next Action Selection (Composed inline natively)
+            # C51 uses the expected value of the distribution for action selection
+            next_expected_qs = expected_value(next_logits, support=SUPPORT.to(device))
+            next_actions, _ = argmax_selector(next_expected_qs)
+
+            # 3. Target Calculation (Pure Primitive)
+            td_target = compute_categorical_q_td_target(
+                next_logits,
+                next_actions.squeeze(-1),
+                batch["reward"],
+                batch["terminated"],
+                batch["gamma"],
                 support=SUPPORT.to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,
-            ),
-            loss_fn=cross_entropy_loss,
-        )
+            )
+
+        # 4. Prediction Extraction (Current actions)
+        pred_sa_logits = gather_q_values(logits, batch["action"])
+
+        # 5. Loss Calculation (Pure Primitive)
+        loss, info_dict = cross_entropy_loss(pred_sa_logits, td_target)
         loss = loss.mean()
 
         # Apply Updates

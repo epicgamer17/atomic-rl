@@ -231,7 +231,9 @@ for iteration in range(MAX_ITERATIONS):
                 {
                     "observations": obs_tensor,
                     "actions": action,
-                    "logprobs": info_dict["log_prob"].sum(dim=-1, keepdim=True).detach(),
+                    "logprobs": info_dict["log_prob"]
+                    .sum(dim=-1, keepdim=True)
+                    .detach(),
                     "rewards": to_tensor(reward, device=device),
                     "terminated": to_tensor(terminated, device=device),
                     "truncated": to_tensor(truncated, device=device),

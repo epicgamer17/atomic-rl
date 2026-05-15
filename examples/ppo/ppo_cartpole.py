@@ -205,6 +205,7 @@ for iteration in range(MAX_ITERATIONS):
             global_step += NUM_ENVS
 
             # 3. Add to "online" buffers
+            # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
             transition = TensorDict(
                 {
                     "observations": obs_tensor,

@@ -349,6 +349,7 @@ def train_ppo(use_lstm: bool = False):
                 if use_lstm:
                     transition_data["dones"] = next_done
 
+                # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
                 transition = TensorDict(transition_data, batch_size=[NUM_ENVS])
                 store_rollout_step(buffer=buffer, step=step, transition=transition)
 

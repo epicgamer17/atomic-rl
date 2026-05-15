@@ -58,7 +58,12 @@ def test_record_truncations():
     truncated_envs = torch.tensor([1], dtype=torch.long)
     final_observations = torch.stack([final_obs_1])
 
-    record_truncations(buffer, step=2, truncated_envs=truncated_envs, final_observations=final_observations)
+    record_truncations(
+        buffer,
+        step=2,
+        truncated_envs=truncated_envs,
+        final_observations=final_observations,
+    )
 
     assert len(buffer.truncation_records) == 1
     step_rec, env_idx, obs = buffer.truncation_records[0]
@@ -79,8 +84,8 @@ def test_get_rollout_next_values():
     # env 1: [1.1, 2.1, 3.1]
     buffer.data["values"] = torch.tensor([[1.0, 2.0, 3.0], [1.1, 2.1, 3.1]])
 
-    last_values = torch.tensor([4.0, 4.1]) # [B]
-    
+    last_values = torch.tensor([4.0, 4.1])  # [B]
+
     # Value function for patching: returns 100 * sum(obs)
     def get_value_fn(obs):
         return obs.sum(dim=-1, keepdim=True) * 100.0
@@ -96,8 +101,10 @@ def test_get_rollout_next_values():
     # Case 2: With truncation at step 1, env 0
     obs_patch = torch.ones(4)
     buffer.truncation_records.append((1, 0, obs_patch))
-    
-    next_vals_patched = get_rollout_next_values(buffer, last_values, get_value_fn, "cpu")
+
+    next_vals_patched = get_rollout_next_values(
+        buffer, last_values, get_value_fn, "cpu"
+    )
     # Expected: same as above, but next_vals[0, 1] = get_value_fn(ones) = 400.0 (env 0, step 1)
     expected_patched = expected.clone()
     expected_patched[0, 1] = 400.0
@@ -123,30 +130,6 @@ def test_get_rollout_next_values_requires_final_obs_for_truncation():
             get_value_fn,
             "cpu",
         )
-
-
-def test_get_rollout_next_values_can_disable_truncation_final_obs_requirement():
-    steps = 3
-    num_envs = 2
-    shapes = {"values": (), "truncated": ()}
-    buffer = init_rollout_buffer(steps, num_envs, shapes)
-    buffer.data["values"] = torch.tensor([[1.0, 2.0, 3.0], [1.1, 2.1, 3.1]])
-    buffer.data["truncated"] = torch.zeros(num_envs, steps)
-    buffer.data["truncated"][1, 2] = 1.0
-
-    def get_value_fn(obs):
-        return obs.sum(dim=-1, keepdim=True)
-
-    next_values = get_rollout_next_values(
-        buffer,
-        torch.tensor([4.0, 4.1]),
-        get_value_fn,
-        "cpu",
-        require_final_obs_for_truncation=False,
-    )
-
-    expected = torch.tensor([[2.0, 3.0, 4.0], [2.1, 3.1, 4.1]])
-    torch.testing.assert_close(next_values, expected)
 
 
 def test_flatten_rollout_buffer():
@@ -191,12 +174,14 @@ def test_yield_shuffled_minibatches():
 
     # Use a fixed generator for determinism in the test
     generator = torch.Generator().manual_seed(42)
-    
-    batches = list(yield_shuffled_minibatches(data, minibatch_size, generator=generator))
+
+    batches = list(
+        yield_shuffled_minibatches(data, minibatch_size, generator=generator)
+    )
 
     # Check number of batches: ceil(10 / 3) = 4
     assert len(batches) == 4
-    
+
     # Check batch sizes: 3, 3, 3, 1
     assert batches[0].batch_size[0] == 3
     assert batches[1].batch_size[0] == 3

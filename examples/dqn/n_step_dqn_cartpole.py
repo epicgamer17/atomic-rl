@@ -24,11 +24,17 @@ from functional.replay_buffer import (
     uniform_sample,
     make_n_step_accumulator,
 )
-from functional.losses import compute_q_td_loss, mse_loss
+from functional.losses import mse_loss
 from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
+    gather_q_values,
     with_epsilon_greedy,
+)
+from functional.utils import (
+    set_seed,
+    to_tensor,
+    to_numpy_action,
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
@@ -127,7 +133,7 @@ for step in range(MAX_STEPS):
 
     # 2. Act (Pure function)
     with torch.inference_mode():
-        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
+        obs_tensor = to_tensor(obs[None, ...], device=device)
 
         predictions = model(obs_tensor)
         action, info = action_selector(
@@ -137,19 +143,20 @@ for step in range(MAX_STEPS):
             generator=rng_key,
         )
         rng_key = info["generator"]
-        action_np = action.item()
+        action_np = to_numpy_action(action)
 
     # 2. Step Env
     next_obs, reward, terminated, truncated, info = env.step(action_np)
 
     # 3. Add to Buffer
+    # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
     n_step_transitions = accumulate_n_step(
-        torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0),
+        to_tensor(obs).unsqueeze(0),
         action,
-        torch.tensor([reward], dtype=torch.float32),
-        torch.as_tensor(next_obs, dtype=torch.float32).unsqueeze(0),
-        torch.tensor([terminated], dtype=torch.float32),
-        torch.tensor([truncated], dtype=torch.float32),
+        to_tensor([reward]),
+        to_tensor(next_obs).unsqueeze(0),
+        to_tensor([terminated]),
+        to_tensor([truncated]),
     )
 
     # TODO: this is a bit yuckier than the list but also more efficient. maybe update.
@@ -176,15 +183,28 @@ for step in range(MAX_STEPS):
         # Sample
         batch = uniform_sample(buffer_state, rng_key, BATCH_SIZE)
 
-        # Calculate Loss & Gradients
-        loss, info_dict = compute_q_td_loss(
-            model,
-            batch,
-            target_model,
-            lambda obs, preds: argmax_selector(preds)[0],
-            partial(compute_q_td_target),
-            loss_fn=mse_loss,
-        )
+        # 1. Forward Passes (Online and Target)
+        q_values = model(batch["obs"])
+        with torch.no_grad():
+            next_q_values = target_model(batch["next_obs"])
+
+            # 2. Next Action Selection (Pure Primitive)
+            next_actions, _ = argmax_selector(next_q_values)
+
+            # 3. Target Calculation (Pure Primitive)
+            td_target = compute_q_td_target(
+                next_q_values,
+                next_actions.squeeze(-1),
+                batch["reward"],
+                batch["terminated"],
+                batch["gamma"],
+            )
+
+        # 4. Prediction Extraction (Current actions)
+        pred_sa = gather_q_values(q_values, batch["action"])
+
+        # 5. Loss Calculation (Pure Primitive)
+        loss, info_dict = mse_loss(pred_sa, td_target)
         loss = loss.mean()
 
         # Apply Updates

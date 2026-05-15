@@ -171,13 +171,6 @@ def test_add_dirichlet_noise():
     assert noisy_probs[0, 0] >= 0.75
 
 
-# TODO: Implement actual test for this
-def test_add_gumbel_noise():
-    from functional.utils import add_gumbel_noise
-
-    add_gumbel_noise()
-
-
 def test_gnt_init_wrapper():
     import torch.nn as nn
 

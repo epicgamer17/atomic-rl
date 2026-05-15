@@ -71,3 +71,5 @@ Move data for permuted mnist out of examples folder and into a more general data
 
 IMPROVE MESSY LSTM CODE
 IMPROVE MESSY EXAMPLES.
+
+Consider bringing orchestration code back for TD losses like Q learning losses.

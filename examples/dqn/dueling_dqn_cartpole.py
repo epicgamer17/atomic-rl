@@ -28,10 +28,11 @@ from functional.replay_buffer import (
     circular_write_strategy,
     uniform_sample,
 )
-from functional.losses import compute_q_td_loss, mse_loss
+from functional.losses import mse_loss
 from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,
+    gather_q_values,
     with_epsilon_greedy,
 )
 from functional.schedules import get_linear_schedule
@@ -152,6 +153,7 @@ for step in range(MAX_STEPS):
     next_obs, reward, terminated, truncated, info = env.step(action_np)
 
     # 3. Add to Buffer
+    # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
     transition = {
         "obs": torch.as_tensor(obs, dtype=torch.float32),
         "action": action.squeeze(0).detach().to(torch.long),
@@ -184,15 +186,28 @@ for step in range(MAX_STEPS):
         # Sample
         batch = uniform_sample(buffer_state, rng_key, BATCH_SIZE)
 
-        # Calculate Loss & Gradients
-        loss, info_dict = compute_q_td_loss(
-            model,
-            batch,
-            target_model,
-            lambda obs, preds: argmax_selector(preds)[0],
-            partial(compute_q_td_target),
-            loss_fn=mse_loss,
-        )
+        # 1. Forward Passes (Online and Target)
+        q_values = model(batch["obs"])
+        with torch.no_grad():
+            next_q_values = target_model(batch["next_obs"])
+
+            # 2. Next Action Selection (Pure Primitive)
+            next_actions, _ = argmax_selector(next_q_values)
+
+            # 3. Target Calculation (Pure Primitive)
+            td_target = compute_q_td_target(
+                next_q_values,
+                next_actions.squeeze(-1),
+                batch["reward"],
+                batch["terminated"],
+                batch["gamma"],
+            )
+
+        # 4. Prediction Extraction (Current actions)
+        pred_sa = gather_q_values(q_values, batch["action"])
+
+        # 5. Loss Calculation (Pure Primitive)
+        loss, info_dict = mse_loss(pred_sa, td_target)
         loss = loss.mean()
 
         # Apply Updates

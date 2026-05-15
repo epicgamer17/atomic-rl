@@ -2,13 +2,14 @@ import torch
 import torch.nn.functional as F
 from einops import rearrange
 
-# TODO: I think truncation right now works for single env trajectories without auto resetting, but would fail for vectorized envs with auto resetting. as the next_q_values would be on the resetted state instead of the one from the info. verify this, and if it is an issue, unify the vectorization logic in our buffer to work with offline buffers as well somehow.
 
+# TODO: I think truncation right now works for single env trajectories without auto resetting, but would fail for vectorized envs with auto resetting. as the next_q_values would be on the resetted state instead of the one from the info. verify this, and if it is an issue, unify the vectorization logic in our buffer to work with offline buffers as well somehow.
+# TODO: should PPO and A2C etc use this for their value head? what do they currently do/use?
 def compute_v_td_target(
     next_values: torch.Tensor,  # [B]
-    rewards: torch.Tensor,      # [B]
-    terminated: torch.Tensor,   # [B]
-    gamma: torch.Tensor,        # [B] or scalar
+    rewards: torch.Tensor,  # [B]
+    terminated: torch.Tensor,  # [B]
+    gamma: torch.Tensor,  # [B] or scalar
 ) -> torch.Tensor:
     """
     Calculates the 1-step Temporal Difference target for state values V(s).
@@ -34,6 +35,7 @@ def compute_v_td_target(
     return rewards + gamma * next_values.detach() * (1 - terminated.float())
 
 
+# TODO: probably remove this function.
 def compute_td_error(
     values: torch.Tensor,  # [B]
     next_values: torch.Tensor,  # [B]
@@ -50,11 +52,11 @@ def compute_td_error(
 
 
 def compute_q_td_target(
-    next_q_values: torch.Tensor, # [B, A]
+    next_q_values: torch.Tensor,  # [B, A]
     next_actions: torch.Tensor,  # [B]
-    rewards: torch.Tensor,       # [B]
-    terminated: torch.Tensor,    # [B]
-    gamma: torch.Tensor,         # [B]
+    rewards: torch.Tensor,  # [B]
+    terminated: torch.Tensor,  # [B]
+    gamma: torch.Tensor,  # [B]
 ) -> torch.Tensor:
     """
     Calculates the TD target for scalar Q-values.
@@ -76,10 +78,10 @@ def compute_q_td_target(
     assert (
         next_actions.ndim == 1
     ), f"Expected [B] next_actions, got {next_actions.shape}"
-    
+
     # 1. Extract the Q-value of the selected next action -> This IS V(s')
     next_values = torch.gather(next_q_values, 1, next_actions.unsqueeze(-1)).squeeze(-1)
-    
+
     # 2. Compute standard V-target
     return compute_v_td_target(next_values, rewards, terminated, gamma)
 
@@ -87,10 +89,10 @@ def compute_q_td_target(
 def compute_categorical_q_td_target(
     next_logits: torch.Tensor,  # [B, A, Atoms]
     next_actions: torch.Tensor,  # [B]
-    rewards: torch.Tensor,       # [B]
-    terminated: torch.Tensor,    # [B]
-    gamma: torch.Tensor,         # [B]
-    support: torch.Tensor,       # [Atoms]
+    rewards: torch.Tensor,  # [B]
+    terminated: torch.Tensor,  # [B]
+    gamma: torch.Tensor,  # [B]
+    support: torch.Tensor,  # [Atoms]
     v_min: float,
     v_max: float,
     atom_size: int,

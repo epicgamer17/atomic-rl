@@ -29,16 +29,21 @@ from functional.replay_buffer import (
     make_n_step_accumulator,
 )
 from functional.schedules import get_linear_schedule
-from functional.losses import compute_q_td_loss, with_per_weights, cross_entropy_loss
+from functional.losses import with_per_weights, cross_entropy_loss
 from functional.td import compute_categorical_q_td_target
 from functional.action_selection import (
     argmax_selector,
     expected_value,
+    gather_q_values,
 )
 from functional.optimizer import apply_gradients
 from functional.network import hard_update_target_network
 from functional.visualization import log_distributional_metrics
-from functional.utils import set_seed
+from functional.utils import (
+    set_seed,
+    to_tensor,
+    to_numpy_action,
+)
 from networks.noisy_linear import NoisyLinear
 
 # --- Constants ---
@@ -192,7 +197,7 @@ for step in range(MAX_STEPS):
 
     # 1. Act (Noisy Nets handle exploration, no epsilon needed)
     with torch.inference_mode():
-        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
+        obs_tensor = to_tensor(obs[None, ...], device=device)
 
         # Resample noise for the actor
         model.reset_noise()
@@ -202,20 +207,21 @@ for step in range(MAX_STEPS):
             predictions,
             extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
         )
-        action_np = action.item()
+        action_np = to_numpy_action(action)
 
     # 2. Step Env
     next_obs, reward, terminated, truncated, info = env.step(action_np)
 
     # 3. N-Step Accumulation and Buffer Addition
+    # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
     # The accumulator now returns a list of 0, 1, or N transitions.
     n_step_transitions = accumulate_n_step(
-        torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0),
+        to_tensor(obs).unsqueeze(0),
         action,
-        torch.tensor([reward], dtype=torch.float32),
-        torch.as_tensor(next_obs, dtype=torch.float32).unsqueeze(0),
-        torch.tensor([terminated], dtype=torch.float32),
-        torch.tensor([truncated], dtype=torch.float32),
+        to_tensor([reward]),
+        to_tensor(next_obs).unsqueeze(0),
+        to_tensor([terminated]),
+        to_tensor([truncated]),
     )
 
     # If the accumulator yielded any transitions, write them as a single batch
@@ -253,26 +259,39 @@ for step in range(MAX_STEPS):
         model.reset_noise()
         target_model.reset_noise()
 
-        # Calculate Loss & Gradients
-        per_loss_fn = with_per_weights(cross_entropy_loss, is_weights)
+        # 1. Forward Passes (Online and Target)
+        logits = model(batch["obs"])
+        with torch.no_grad():
+            # Double DQN: Online model selects action
+            next_logits_online = model(batch["next_obs"])
+            # Target model evaluates the chosen action
+            next_logits_target = target_model(batch["next_obs"])
 
-        loss, info_dict = compute_q_td_loss(
-            model,
-            batch,
-            target_model,
-            lambda obs, preds: argmax_selector(
-                model(obs),
-                extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
-            )[0],
-            partial(
-                compute_categorical_q_td_target,
-                                support=SUPPORT.to(device),
+            # 2. Next Action Selection (Composed inline natively)
+            next_expected_qs = expected_value(
+                next_logits_online, support=SUPPORT.to(device)
+            )
+            next_actions, _ = argmax_selector(next_expected_qs)
+
+            # 3. Target Calculation (Categorical TD target)
+            td_target = compute_categorical_q_td_target(
+                next_logits_target,
+                next_actions.squeeze(-1),
+                batch["reward"],
+                batch["terminated"],
+                batch["gamma"],
+                support=SUPPORT.to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,
-            ),
-            loss_fn=per_loss_fn,
-        )
+            )
+
+        # 4. Prediction Extraction (Current actions)
+        pred_sa_logits = gather_q_values(logits, batch["action"])
+
+        # 5. Loss Calculation (PER weighted Cross Entropy)
+        per_loss_fn = with_per_weights(cross_entropy_loss, is_weights)
+        loss, info_dict = per_loss_fn(pred_sa_logits, td_target)
 
         # Apply Gradients
         optimizer = apply_gradients(optimizer, loss)

@@ -17,7 +17,7 @@ from functional.replay_buffer import (
     uniform_sample,
     make_padded_chunk_accumulator,
 )
-from functional.losses import compute_q_td_loss, mse_loss, with_sequence_mask
+from functional.losses import mse_loss, with_sequence_mask
 from functional.td import compute_q_td_target
 from functional.action_selection import (
     argmax_selector,

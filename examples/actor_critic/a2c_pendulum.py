@@ -185,7 +185,9 @@ for iteration in range(MAX_ITERATIONS):
                 {
                     "observations": obs_tensor,
                     "actions": action_tensor,
-                    "logprobs": info_dict["log_prob"].sum(dim=-1, keepdim=True).detach(),
+                    "logprobs": info_dict["log_prob"]
+                    .sum(dim=-1, keepdim=True)
+                    .detach(),
                     "rewards": to_tensor(reward, device=device),
                     "terminated": to_tensor(terminated, device=device),
                     "truncated": to_tensor(truncated, device=device),
@@ -208,8 +210,12 @@ for iteration in range(MAX_ITERATIONS):
                     record_truncations(
                         buffer,
                         step,
-                        torch.as_tensor(env_indices[trunc_mask], dtype=torch.long, device=device),
-                        torch.as_tensor(final_obs[trunc_mask], dtype=torch.float32, device=device),
+                        torch.as_tensor(
+                            env_indices[trunc_mask], dtype=torch.long, device=device
+                        ),
+                        torch.as_tensor(
+                            final_obs[trunc_mask], dtype=torch.float32, device=device
+                        ),
                     )
 
             if "final_info" in info:

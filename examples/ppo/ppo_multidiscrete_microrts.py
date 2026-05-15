@@ -221,7 +221,11 @@ for iteration in range(MAX_ITERATIONS):
                 log_probs_list.append(info_dict_sub["log_prob"].squeeze(-1))
 
             action = torch.stack(actions_list, dim=-1)
-            info_dict = {"log_prob": torch.stack(log_probs_list, dim=-1).sum(dim=-1, keepdim=True)}
+            info_dict = {
+                "log_prob": torch.stack(log_probs_list, dim=-1).sum(
+                    dim=-1, keepdim=True
+                )
+            }
             # Step env expects numpy array (batch_size, len(nvec))
             action_np = to_numpy_action(action)
 
@@ -229,6 +233,7 @@ for iteration in range(MAX_ITERATIONS):
             global_step += NUM_ENVS
 
             # Store in rollout buffer
+            # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
             transition = TensorDict(
                 {
                     "observations": obs_tensor,

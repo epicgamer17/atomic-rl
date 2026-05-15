@@ -30,7 +30,7 @@ def log_distributional_metrics(
     Generate readable line charts and log expected Q-values for distributional RL.
 
     Args:
-        info_dict (dict): The info dictionary from compute_q_td_loss.
+        info_dict (dict): The info dictionary from the loss function.
         support (torch.Tensor): The atom support tensor.
         step (int): The current training step.
         log_chart (bool): Whether to generate the heavy W&B line chart.

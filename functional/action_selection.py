@@ -44,6 +44,7 @@ def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Te
     return values
 
 
+# TODO: remove the use of extractor_fn from the function, inline that in the orchestration loops.
 def argmax_selector(
     predictions: torch.Tensor,
     extractor_fn: Optional[Callable] = None,
@@ -190,3 +191,35 @@ def compute_masked_entropy(
         torch.tensor(0.0, device=logits.device, dtype=logits.dtype),
     )
     return -p_log_p.sum(dim=-1)
+
+
+# TODO: do we need this? or at least can we make it more generic? this feels very DQN specific.
+def gather_q_values(q_values: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    """
+    Gathers the Q-values for the given actions.
+
+    Rule Enforcement (Explicit over Implicit):
+    Expects Q-values to be [B, A] or [B, A, Atoms] and actions to be [B] or [B, 1].
+    Will return [B] or [B, Atoms].
+
+    Args:
+        q_values: The predicted Q-values from the model.
+        actions: The action indices.
+
+    Returns:
+        The Q-values for the selected actions.
+    """
+    assert q_values.ndim in [2, 3], f"Expected 2D or 3D q_values, got {q_values.shape}"
+    if actions.ndim == 2:
+        actions = actions.squeeze(-1)
+    assert actions.ndim == 1, f"Expected 1D actions [B], got {actions.shape}"
+
+    # Use gather for robustness across 2D and 3D
+    if q_values.ndim == 2:
+        # [B, A] -> [B, 1] -> [B]
+        return q_values.gather(1, actions.unsqueeze(-1).long()).squeeze(-1)
+    else:
+        # [B, A, Atoms] -> [B, 1, Atoms] -> [B, Atoms]
+        atoms = q_values.shape[-1]
+        actions_expanded = actions.view(-1, 1, 1).expand(-1, -1, atoms).long()
+        return q_values.gather(1, actions_expanded).squeeze(1)
