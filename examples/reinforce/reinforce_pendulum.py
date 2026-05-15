@@ -24,6 +24,9 @@ from functional.utils import (
     ema_update,
     standardize_tensor,
     scale_tensor_by_std,
+    set_seed,
+    to_tensor,
+    to_numpy_action,
 )
 from functional.network import layer_init
 
@@ -96,7 +99,7 @@ for episode in range(MAX_EPISODES):
     truncateds = []
 
     while not (terminated or truncated):
-        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
+        obs_tensor = to_tensor(obs[None, ...], device=device)
         mu, std = actor(obs_tensor)
 
         # Sample action using Gaussian selector
@@ -104,7 +107,7 @@ for episode in range(MAX_EPISODES):
         action_tensor, info_dict = sample_distribution(dist, explore=True)
 
         # Pendulum expects a numpy array for actions
-        action = action_tensor.detach().cpu().numpy().flatten()
+        action = to_numpy_action(action_tensor)
         # Clip action to env bounds just in case, though mu is already scaled
         action = np.clip(action, -MAX_ACTION, MAX_ACTION)
 
@@ -135,13 +138,11 @@ for episode in range(MAX_EPISODES):
     # --- 3. The Update Loop ---
     # 1. Compute Returns (Algorithm Agnostic)
     returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(terminateds, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(truncateds, dtype=torch.float32, device=device).unsqueeze(0),
-        GAMMA,
-    ).squeeze(
-        0
-    )  # TODO: replace with rearrange
+        rewards=torch.tensor([rewards], dtype=torch.float32, device=device),
+        terminated=torch.tensor([terminateds], dtype=torch.float32, device=device),
+        truncated=torch.tensor([truncateds], dtype=torch.float32, device=device),
+        gamma=GAMMA,
+    )[0]
 
     # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
     # Use EMA baseline for variance reduction

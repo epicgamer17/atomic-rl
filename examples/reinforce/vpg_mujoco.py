@@ -26,7 +26,11 @@ from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss, mse_loss
-from functional.utils import standardize_tensor
+from functional.utils import (
+    standardize_tensor,
+    to_tensor,
+    to_numpy_action,
+)
 from functional.visualization import compute_explained_variance
 from functional.network import layer_init
 from envs.wrappers import VecNormalize
@@ -133,13 +137,13 @@ for episode in range(MAX_EPISODES):
     truncateds = []
 
     while not (terminated or truncated):
-        obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+        obs_tensor = to_tensor(obs, device=device)
         mu, std = actor(obs_tensor)
         value = critic(obs_tensor)
 
         dist = torch.distributions.Normal(mu, std)
         action_tensor, info_dict = sample_distribution(dist, explore=True)
-        action_np = action_tensor.detach().cpu().numpy()
+        action_np = to_numpy_action(action_tensor)
 
         # 2. Step Env
         next_obs, reward, terminated, truncated, info = env.step(action_np)
@@ -172,11 +176,11 @@ for episode in range(MAX_EPISODES):
     # --- 3. The Update Loop ---
     # 1. Compute Returns
     returns = compute_mc_returns(
-        torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(terminateds, dtype=torch.float32, device=device).unsqueeze(0),
-        torch.tensor(truncateds, dtype=torch.float32, device=device).unsqueeze(0),
-        GAMMA,
-    ).squeeze(0)
+        rewards=torch.tensor([rewards], dtype=torch.float32, device=device),
+        terminated=torch.tensor([terminateds], dtype=torch.float32, device=device),
+        truncated=torch.tensor([truncateds], dtype=torch.float32, device=device),
+        gamma=GAMMA,
+    )[0]
 
     values_tensor = rearrange(torch.stack(values), "t 1 1 -> t")
 

@@ -20,7 +20,7 @@ from functional.action_selection import (
     compute_masked_entropy,
 )
 from functional.optimizer import apply_gradients
-from functional.returns import compute_gae, compute_td_lambda_returns
+from functional.returns import compute_gae
 from functional.losses import (
     clipped_surrogate_loss,
     probability_ratio,
@@ -38,7 +38,13 @@ from functional.rollout_buffer import (
     get_rollout_next_values,
     yield_shuffled_minibatches,
 )
-from functional.utils import standardize_tensor
+from functional.utils import (
+    ema_update,
+    standardize_tensor,
+    set_seed,
+    to_tensor,
+    to_numpy_action,
+)
 
 # Constants
 LEARNING_RATE = 2.5e-4
@@ -149,11 +155,11 @@ obs, info = envs.reset(seed=SEED)
 shapes = {
     "observations": obs_shape,
     "actions": (len(nvec),),  # One action per discrete sub-space
-    "logprobs": (),
+    "logprobs": (1,),
     "rewards": (),
     "terminated": (),
     "truncated": (),
-    "values": (),
+    "values": (1,),
     "logits": (sum(nvec),),  # Logits is the flat sum of all sub-spaces
     "action_masks": (sum(nvec),),  # Store the flat mask
 }
@@ -187,14 +193,12 @@ for iteration in range(MAX_ITERATIONS):
     # 1. Data Collection Phase
     with torch.inference_mode():
         for step in range(STEPS_PER_ENV):
-            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+            obs_tensor = to_tensor(obs, device=device)
             logits, value = model(obs_tensor)
 
             # Get the action mask from MicroRTS environments
             try:
-                action_mask = torch.as_tensor(
-                    envs.call("get_action_mask"), dtype=torch.float32, device=device
-                )
+                action_mask = to_tensor(envs.call("get_action_mask"), device=device)
             except Exception:
                 # Mock mask for demonstration if get_action_mask fails
                 action_mask = torch.ones(
@@ -217,9 +221,9 @@ for iteration in range(MAX_ITERATIONS):
                 log_probs_list.append(info_dict_sub["log_prob"].squeeze(-1))
 
             action = torch.stack(actions_list, dim=-1)
-            info_dict = {"log_prob": torch.stack(log_probs_list, dim=-1).sum(dim=-1)}
+            info_dict = {"log_prob": torch.stack(log_probs_list, dim=-1).sum(dim=-1, keepdim=True)}
             # Step env expects numpy array (batch_size, len(nvec))
-            action_np = action.cpu().numpy().astype(np.int32)
+            action_np = to_numpy_action(action)
 
             next_obs, reward, terminated, truncated, info = envs.step(action_np)
             global_step += NUM_ENVS
@@ -230,16 +234,10 @@ for iteration in range(MAX_ITERATIONS):
                     "observations": obs_tensor,
                     "actions": action,  # [Batch, len(nvec)]
                     "logprobs": info_dict["log_prob"].detach(),  # [Batch]
-                    "rewards": torch.as_tensor(
-                        reward, dtype=torch.float32, device=device
-                    ),
-                    "terminated": torch.as_tensor(
-                        terminated, dtype=torch.float32, device=device
-                    ),
-                    "truncated": torch.as_tensor(
-                        truncated, dtype=torch.float32, device=device
-                    ),
-                    "values": value.squeeze(-1).detach(),
+                    "rewards": to_tensor(reward, device=device),
+                    "terminated": to_tensor(terminated, device=device),
+                    "truncated": to_tensor(truncated, device=device),
+                    "values": value.detach(),
                     "logits": logits.detach(),
                     "action_masks": action_mask.detach(),
                 },
@@ -278,10 +276,9 @@ for iteration in range(MAX_ITERATIONS):
                         )
             obs = next_obs
 
-        # Compute last values for GAE
-        last_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+        # Compute last values for the re-evaluation pass
+        last_obs_tensor = to_tensor(obs, device=device)
         _, last_values = model(last_obs_tensor)
-        last_values = last_values.squeeze(-1)
 
         next_values = get_rollout_next_values(
             buffer, last_values, get_value_fn=lambda obs: model(obs)[1], device=device
@@ -292,25 +289,18 @@ for iteration in range(MAX_ITERATIONS):
         rewards=buffer.data["rewards"],
         terminated=buffer.data["terminated"],
         truncated=buffer.data["truncated"],
-        values=buffer.data["values"],
-        next_values=next_values,
+        values=buffer.data["values"].squeeze(-1),
+        next_values=next_values.squeeze(-1),
         gamma=GAMMA,
         gae_lambda=GAE_LAMBDA,
     )
-    returns = compute_td_lambda_returns(
-        rewards=buffer.data["rewards"],
-        terminated=buffer.data["terminated"],
-        truncated=buffer.data["truncated"],
-        values=buffer.data["values"],
-        next_values=next_values,
-        gamma=GAMMA,
-        lam=GAE_LAMBDA,
-    )
+    # Explicit mathematical derivation (Explicit over implicit, no redundant compute)
+    returns = advantages.unsqueeze(-1) + buffer.data["values"]
 
     # Flatten buffer for training
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "b t -> (b t)")
-    flat_returns = rearrange(returns, "b t -> (b t)")
+    flat_advantages = rearrange(advantages, "b t -> (b t) 1")
+    flat_returns = rearrange(returns, "b t 1 -> (b t) 1")
     flat_data["advantages"] = flat_advantages
     flat_data["returns"] = flat_returns
 
@@ -325,7 +315,6 @@ for iteration in range(MAX_ITERATIONS):
             flat_data, MINIBATCH_SIZE, generator=rng_key
         ):
             new_logits, new_values = model(mb["observations"])
-            new_values = new_values.squeeze(-1)
 
             # 1. Apply the mask functionally to the raw logits BEFORE splitting
             masked_logits = apply_action_mask(new_logits, mb["action_masks"])

@@ -13,7 +13,7 @@ from tensordict import TensorDict
 
 from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
-from functional.returns import compute_gae, compute_td_lambda_returns
+from functional.returns import compute_gae
 from functional.losses import (
     clipped_surrogate_loss,
     entropy_loss,
@@ -32,7 +32,12 @@ from functional.rollout_buffer import (
     yield_shuffled_minibatches,
     yield_sequential_minibatches,
 )
-from functional.utils import standardize_tensor, extract_vector_env_final_obs
+from functional.utils import (
+    standardize_tensor,
+    to_tensor,
+    to_numpy_action,
+    extract_vector_env_final_obs,
+)
 from envs.wrappers import FlickeringObservation, NormalizeObservation, VecNormalize
 
 # TODO: is this working PPO + LSTM fails to learn MDP cartpole (it performs worse than vanilla PPO)
@@ -236,12 +241,12 @@ def train_ppo(use_lstm: bool = False):
 
     shapes = {
         "observations": obs_shape,
-        "actions": (),
-        "logprobs": (),
+        "actions": (1,),
+        "logprobs": (1,),
         "rewards": (),
         "terminated": (),
         "truncated": (),
-        "values": (),
+        "values": (1,),
         "logits": (num_actions,),
     }
     # TODO: clean this up in all lstm buffers, we have terminated truncated and dones.
@@ -316,7 +321,7 @@ def train_ppo(use_lstm: bool = False):
 
         with torch.inference_mode():
             for step in range(STEPS_PER_ENV):
-                obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+                obs_tensor = to_tensor(obs, device=device)
                 if use_lstm:
                     logits, value, next_lstm_state = model(
                         obs_tensor, next_lstm_state, next_done
@@ -326,25 +331,19 @@ def train_ppo(use_lstm: bool = False):
 
                 dist = torch.distributions.Categorical(logits=logits)
                 action, info_dict = sample_distribution(dist, explore=True)
-                action_np = action.cpu().numpy().flatten().astype(np.int32)
+                action_np = to_numpy_action(action)
 
                 next_obs, reward, terminated, truncated, info = envs.step(action_np)
                 global_step += NUM_ENVS
 
                 transition_data = {
                     "observations": obs_tensor,
-                    "actions": action.squeeze(-1),
-                    "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
-                    "rewards": torch.as_tensor(
-                        reward, dtype=torch.float32, device=device
-                    ),
-                    "terminated": torch.as_tensor(
-                        terminated, dtype=torch.float32, device=device
-                    ),
-                    "truncated": torch.as_tensor(
-                        truncated, dtype=torch.float32, device=device
-                    ),
-                    "values": value.squeeze(-1).detach(),
+                    "actions": action,
+                    "logprobs": info_dict["log_prob"].detach(),
+                    "rewards": to_tensor(reward, device=device),
+                    "terminated": to_tensor(terminated, device=device),
+                    "truncated": to_tensor(truncated, device=device),
+                    "values": value.detach(),
                     "logits": logits.detach(),
                 }
                 if use_lstm:
@@ -430,7 +429,6 @@ def train_ppo(use_lstm: bool = False):
             else:
                 _, last_values = model(last_obs_tensor)
                 get_value_fn = lambda o: model(o)[1]
-            last_values = last_values.squeeze(-1)
 
             next_values = get_rollout_next_values(
                 buffer, last_values, get_value_fn=get_value_fn, device=device
@@ -440,22 +438,15 @@ def train_ppo(use_lstm: bool = False):
             rewards=buffer.data["rewards"],
             terminated=buffer.data["terminated"],
             truncated=buffer.data["truncated"],
-            values=buffer.data["values"],
-            next_values=next_values,
+            values=buffer.data["values"].squeeze(-1),
+            next_values=next_values.squeeze(-1),
             gamma=GAMMA,
             gae_lambda=GAE_LAMBDA,
         )
-        returns = compute_td_lambda_returns(
-            rewards=buffer.data["rewards"],
-            terminated=buffer.data["terminated"],
-            truncated=buffer.data["truncated"],
-            values=buffer.data["values"],
-            next_values=next_values,
-            gamma=GAMMA,
-            lam=GAE_LAMBDA,
-        )
+        # Explicit mathematical derivation (Explicit over implicit, no redundant compute)
+        returns = advantages.unsqueeze(-1) + buffer.data["values"]
 
-        buffer.data["advantages"] = advantages
+        buffer.data["advantages"] = advantages.unsqueeze(-1)
         buffer.data["returns"] = returns
 
         epoch_losses = []
@@ -474,8 +465,8 @@ def train_ppo(use_lstm: bool = False):
                 )
             else:
                 flat_data = flatten_rollout_buffer(buffer)
-                flat_data["advantages"] = rearrange(advantages, "b t -> (b t)")
-                flat_data["returns"] = rearrange(returns, "b t -> (b t)")
+                flat_data["advantages"] = rearrange(advantages, "b t -> (b t) 1")
+                flat_data["returns"] = rearrange(returns, "b t -> (b t) 1")
                 minibatch_generator = (
                     (mb, None)
                     for mb in yield_shuffled_minibatches(
@@ -490,7 +481,6 @@ def train_ppo(use_lstm: bool = False):
                     )
                 else:
                     new_logits, new_values = model(mb["observations"])
-                new_values = new_values.squeeze(-1)
 
                 dist = torch.distributions.Categorical(logits=new_logits)
                 new_log_probs = dist.log_prob(mb["actions"])

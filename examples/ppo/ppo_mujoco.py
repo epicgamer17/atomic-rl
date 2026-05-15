@@ -14,7 +14,7 @@ from einops import rearrange
 
 from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
-from functional.returns import compute_gae, compute_td_lambda_returns
+from functional.returns import compute_gae
 from functional.losses import (
     clipped_surrogate_loss,
     entropy_loss,
@@ -33,7 +33,13 @@ from functional.rollout_buffer import (
     get_rollout_next_values,
     yield_shuffled_minibatches,
 )
-from functional.utils import standardize_tensor, set_seed
+from functional.utils import (
+    ema_update,
+    standardize_tensor,
+    set_seed,
+    to_tensor,
+    to_numpy_action,
+)
 from tensordict import TensorDict
 from envs.wrappers import VecNormalize
 
@@ -144,11 +150,11 @@ obs, info = envs.reset(seed=SEED)
 shapes = {
     "observations": obs_shape,
     "actions": (num_actions,),
-    "logprobs": (),
+    "logprobs": (1,),
     "rewards": (),
     "terminated": (),
     "truncated": (),
-    "values": (),
+    "values": (1,),
     "means": (num_actions,),
     "stds": (num_actions,),
 }
@@ -187,7 +193,7 @@ for iteration in range(MAX_ITERATIONS):
     # 1. Data Collection Phase
     with torch.inference_mode():
         for step in range(STEPS_PER_ENV):
-            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+            obs_tensor = to_tensor(obs, device=device)
             action_mean, action_std, value = model(obs_tensor)
 
             # Use sample_distribution for continuous actions
@@ -195,7 +201,7 @@ for iteration in range(MAX_ITERATIONS):
             action, info_dict = sample_distribution(dist, explore=True)
 
             # Step Env expects numpy arrays for actions
-            action_np = action.cpu().numpy().astype(np.float32)
+            action_np = to_numpy_action(action)
 
             # Step Env
             next_obs, reward, terminated, truncated, info = envs.step(action_np)
@@ -206,17 +212,11 @@ for iteration in range(MAX_ITERATIONS):
                 {
                     "observations": obs_tensor,
                     "actions": action,
-                    "logprobs": info_dict["log_prob"].sum(dim=-1).detach(),
-                    "rewards": torch.as_tensor(
-                        reward, dtype=torch.float32, device=device
-                    ),
-                    "terminated": torch.as_tensor(
-                        terminated, dtype=torch.float32, device=device
-                    ),
-                    "truncated": torch.as_tensor(
-                        truncated, dtype=torch.float32, device=device
-                    ),
-                    "values": value.squeeze(-1).detach(),
+                    "logprobs": info_dict["log_prob"].sum(dim=-1, keepdim=True).detach(),
+                    "rewards": to_tensor(reward, device=device),
+                    "terminated": to_tensor(terminated, device=device),
+                    "truncated": to_tensor(truncated, device=device),
+                    "values": value.detach(),
                     "means": action_mean.detach(),
                     "stds": action_std.detach(),
                 },
@@ -259,7 +259,6 @@ for iteration in range(MAX_ITERATIONS):
         # Compute last values for GAE
         last_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
         _, _, last_values = model(last_obs_tensor)
-        last_values = last_values.squeeze(-1)
 
         next_values = get_rollout_next_values(
             buffer, last_values, get_value_fn=lambda obs: model(obs)[2], device=device
@@ -270,26 +269,19 @@ for iteration in range(MAX_ITERATIONS):
         rewards=buffer.data["rewards"],
         terminated=buffer.data["terminated"],
         truncated=buffer.data["truncated"],
-        values=buffer.data["values"],
-        next_values=next_values,
+        values=buffer.data["values"].squeeze(-1),
+        next_values=next_values.squeeze(-1),
         gamma=GAMMA,
         gae_lambda=GAE_LAMBDA,
     )
 
-    returns = compute_td_lambda_returns(
-        rewards=buffer.data["rewards"],
-        terminated=buffer.data["terminated"],
-        truncated=buffer.data["truncated"],
-        values=buffer.data["values"],
-        next_values=next_values,
-        gamma=GAMMA,
-        lam=GAE_LAMBDA,
-    )
+    # Explicit mathematical derivation (Explicit over implicit, no redundant compute)
+    returns = advantages.unsqueeze(-1) + buffer.data["values"]
 
     # Flatten buffer for training
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "b t -> (b t)")
-    flat_returns = rearrange(returns, "b t -> (b t)")
+    flat_advantages = rearrange(advantages, "b t -> (b t) 1")
+    flat_returns = rearrange(returns, "b t 1 -> (b t) 1")
 
     flat_data["advantages"] = flat_advantages
     flat_data["returns"] = flat_returns
@@ -306,7 +298,6 @@ for iteration in range(MAX_ITERATIONS):
         ):
             # Re-evaluate model on minibatch
             new_means, new_stds, new_values = model(mb["observations"])
-            new_values = new_values.squeeze(-1)
 
             # Re-create normal distribution for new log probabilities
             dist = torch.distributions.Normal(new_means, new_stds)

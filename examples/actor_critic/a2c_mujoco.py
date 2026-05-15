@@ -36,7 +36,11 @@ from functional.rollout_buffer import (
     record_truncations,
     get_rollout_next_values,
 )
-from functional.utils import standardize_tensor
+from functional.utils import (
+    standardize_tensor,
+    to_tensor,
+    to_numpy_action,
+)
 from tensordict import TensorDict
 from envs.wrappers import VecNormalize
 
@@ -138,11 +142,11 @@ obs, info = envs.reset(seed=SEED)
 shapes = {
     "observations": obs_shape,
     "actions": (num_actions,),
-    "logprobs": (),
+    "logprobs": (1,),
     "rewards": (),
     "terminated": (),
     "truncated": (),
-    "values": (),
+    "values": (1,),
     "mu": (num_actions,),
     "std": (num_actions,),
 }
@@ -173,12 +177,12 @@ for iteration in range(MAX_ITERATIONS):
     # Vectorized collection with inference_mode
     with torch.inference_mode():
         for step in range(STEPS_PER_ENV):
-            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
-            mu, std, value = model(obs_tensor)
+            obs_tensor = to_tensor(obs, device=device)
+            action_mean, action_std, value = model(obs_tensor)
 
-            dist = torch.distributions.Normal(mu, std)
-            action_tensor, info_dict = sample_distribution(dist, explore=True)
-            action_np = action_tensor.cpu().numpy()
+            dist = torch.distributions.Normal(action_mean, action_std)
+            action, info_dict = sample_distribution(dist, explore=True)
+            action_np = to_numpy_action(action)
 
             # 2. Step Env
             next_obs, reward, terminated, truncated, info = envs.step(action_np)
@@ -188,20 +192,14 @@ for iteration in range(MAX_ITERATIONS):
             transition = TensorDict(
                 {
                     "observations": obs_tensor,
-                    "actions": action_tensor,
-                    "logprobs": info_dict["log_prob"].sum(dim=-1).detach(),
-                    "rewards": torch.as_tensor(
-                        reward, dtype=torch.float32, device=device
-                    ),
-                    "terminated": torch.as_tensor(
-                        terminated, dtype=torch.float32, device=device
-                    ),
-                    "truncated": torch.as_tensor(
-                        truncated, dtype=torch.float32, device=device
-                    ),
-                    "values": value.squeeze(-1).detach(),
-                    "mu": mu.detach(),
-                    "std": std.detach(),
+                    "actions": action,
+                    "logprobs": info_dict["log_prob"].sum(dim=-1, keepdim=True).detach(),
+                    "rewards": to_tensor(reward, device=device),
+                    "terminated": to_tensor(terminated, device=device),
+                    "truncated": to_tensor(truncated, device=device),
+                    "values": value.detach(),
+                    "means": action_mean.detach(),
+                    "stds": action_std.detach(),
                 },
                 batch_size=[NUM_ENVS],
             )
@@ -252,25 +250,24 @@ for iteration in range(MAX_ITERATIONS):
         rewards=buffer.data["rewards"],
         terminated=buffer.data["terminated"],
         truncated=buffer.data["truncated"],
-        values=buffer.data["values"],
-        next_values=next_values,
+        values=buffer.data["values"].squeeze(-1),
+        next_values=next_values.squeeze(-1),
         gamma=GAMMA,
         n=N_STEP,
     )
 
     # Calculate Advantages
-    baseline = buffer.data["values"].detach()
+    baseline = buffer.data["values"].detach().squeeze(-1)
     advantages = returns - baseline
     advantages = standardize_tensor(advantages)
 
     # Flatten buffer for loss calculations
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "b t -> (b t)")
-    flat_returns = rearrange(returns, "b t -> (b t)")
+    flat_advantages = rearrange(advantages, "b t -> (b t) 1")
+    flat_returns = rearrange(returns, "b t -> (b t) 1")
 
     # --- Re-evaluation Pass ---
     new_mu, new_std, new_values = model(flat_data["observations"])
-    new_values = new_values.squeeze(-1)
 
     # Re-calculate log probabilities
     dist = torch.distributions.Normal(new_mu, new_std)

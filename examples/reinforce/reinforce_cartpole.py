@@ -24,7 +24,14 @@ from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
 from functional.returns import compute_mc_returns
 from functional.losses import policy_gradient_loss
-from functional.utils import ema_update, standardize_tensor, scale_tensor_by_std, set_seed
+from functional.utils import (
+    ema_update,
+    standardize_tensor,
+    scale_tensor_by_std,
+    set_seed,
+    to_tensor,
+    to_numpy_action,
+)
 from functional.network import layer_init
 
 # Constants
@@ -81,14 +88,14 @@ for episode in range(MAX_EPISODES):
     terminateds = []
     truncateds = []
     while not (terminated or truncated):
-        obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
+        obs_tensor = to_tensor(obs[None, ...], device=device)
         logits = actor(obs_tensor)
         dist = torch.distributions.Categorical(logits=logits)
         action, info_dict = sample_distribution(dist, explore=True)
-        action = action.item()
+        action_np = to_numpy_action(action)
 
         # 2. Step Env
-        next_obs, reward, terminated, truncated, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action_np)
 
         # 3. Add to "online" buffers
         rewards.append(reward)
@@ -116,15 +123,11 @@ for episode in range(MAX_EPISODES):
 
     # 1. Compute Returns (Algorithm Agnostic)
     returns = compute_mc_returns(
-        rewards=torch.tensor(rewards, dtype=torch.float32, device=device).unsqueeze(0),
-        terminated=torch.tensor(
-            terminateds, dtype=torch.float32, device=device
-        ).unsqueeze(0),
-        truncated=torch.tensor(
-            truncateds, dtype=torch.float32, device=device
-        ).unsqueeze(0),
+        rewards=torch.tensor([rewards], dtype=torch.float32, device=device),
+        terminated=torch.tensor([terminateds], dtype=torch.float32, device=device),
+        truncated=torch.tensor([truncateds], dtype=torch.float32, device=device),
         gamma=GAMMA,
-    ).squeeze(0)
+    )[0]
 
     # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
     # METHOD A: Mean baseline

@@ -46,7 +46,12 @@ from functional.rollout_buffer import (
     record_truncations,
     get_rollout_next_values,
 )
-from functional.utils import standardize_tensor, set_seed
+from functional.utils import (
+    standardize_tensor,
+    to_tensor,
+    to_numpy_action,
+    set_seed,
+)
 from tensordict import TensorDict
 
 # Constants
@@ -118,12 +123,12 @@ obs, info = envs.reset(seed=SEED)
 # Pre-allocate rollout buffers using the new functional system
 shapes = {
     "observations": obs_shape,
-    "actions": (),
-    "logprobs": (),
+    "actions": (1,),
+    "logprobs": (1,),
     "rewards": (),
     "terminated": (),
     "truncated": (),
-    "values": (),
+    "values": (1,),
     "logits": (num_actions,),
 }
 buffer = init_rollout_buffer(
@@ -148,11 +153,11 @@ for iteration in range(MAX_ITERATIONS):
     # NOTE: here we use torch.inference_mode() and do a re-eval pass to compute necessary data, but the re-eval could be integrated into the data collection loop and use python lists similar to VPG. We chose the re-eval pass instead in order to demonstrate the buffer system, and have a parallel to PPO's re-eval pass.
     with torch.inference_mode():
         for step in range(STEPS_PER_ENV):
-            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+            obs_tensor = to_tensor(obs, device=device)
             logits, value = model(obs_tensor)
             dist = torch.distributions.Categorical(logits=logits)
             action, info_dict = sample_distribution(dist, explore=True)
-            action_np = action.cpu().numpy().flatten().astype(np.int32)
+            action_np = to_numpy_action(action)
 
             # 2. Step Env
             next_obs, reward, terminated, truncated, info = envs.step(action_np)
@@ -162,18 +167,12 @@ for iteration in range(MAX_ITERATIONS):
             transition = TensorDict(
                 {
                     "observations": obs_tensor,
-                    "actions": action.squeeze(-1),
-                    "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
-                    "rewards": torch.as_tensor(
-                        reward, dtype=torch.float32, device=device
-                    ),
-                    "terminated": torch.as_tensor(
-                        terminated, dtype=torch.float32, device=device
-                    ),
-                    "truncated": torch.as_tensor(
-                        truncated, dtype=torch.float32, device=device
-                    ),
-                    "values": value.squeeze(-1).detach(),
+                    "actions": action,
+                    "logprobs": info_dict["log_prob"].detach(),
+                    "rewards": to_tensor(reward, device=device),
+                    "terminated": to_tensor(terminated, device=device),
+                    "truncated": to_tensor(truncated, device=device),
+                    "values": value.detach(),
                     "logits": logits.detach(),
                 },
                 batch_size=[NUM_ENVS],
@@ -191,8 +190,12 @@ for iteration in range(MAX_ITERATIONS):
                     record_truncations(
                         buffer,
                         step,
-                        torch.as_tensor(env_indices[trunc_mask], dtype=torch.long, device=device),
-                        torch.as_tensor(final_obs[trunc_mask], dtype=torch.float32, device=device),
+                        torch.as_tensor(
+                            env_indices[trunc_mask], dtype=torch.long, device=device
+                        ),
+                        torch.as_tensor(
+                            final_obs[trunc_mask], dtype=torch.float32, device=device
+                        ),
                     )
             # Update state for next tick
 
@@ -219,18 +222,19 @@ for iteration in range(MAX_ITERATIONS):
         )
 
     # --- 3. The Update Loop ---
+    # TODO: could we change what return and advantage functions expect so we dont need to squeeze here?
     returns = compute_n_step_returns(
         rewards=buffer.data["rewards"],
         terminated=buffer.data["terminated"],
         truncated=buffer.data["truncated"],
-        values=buffer.data["values"],
-        next_values=next_values,
+        values=buffer.data["values"].squeeze(-1),
+        next_values=next_values.squeeze(-1),
         gamma=GAMMA,
         n=N_STEP,
     )
 
     # 2. Define Baseline & Calculate Raw Advantage (Explicit Math)
-    baseline = buffer.data["values"].detach()
+    baseline = buffer.data["values"].detach().squeeze(-1)
     advantages = returns - baseline
 
     # 3. Optional Scaling
@@ -238,12 +242,11 @@ for iteration in range(MAX_ITERATIONS):
 
     # Flatten buffer for loss calculations
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "b t -> (b t)")
-    flat_returns = rearrange(returns, "b t -> (b t)")
+    flat_advantages = rearrange(advantages, "b t -> (b t) 1")
+    flat_returns = rearrange(returns, "b t -> (b t) 1")
 
     # --- Re-evaluation Pass ---
     new_logits, new_values = model(flat_data["observations"])
-    new_values = new_values.squeeze(-1)
 
     # Re-calculate log probabilities for the actions taken
     dist = torch.distributions.Categorical(logits=new_logits)

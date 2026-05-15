@@ -9,18 +9,18 @@ from tensordict import TensorDict
 def set_seed(seed: int) -> None:
     """
     Sets random seeds for reproducibility across random, numpy, and torch.
-    
+
     Args:
         seed: The integer seed to use.
     """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    
+
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-        # Ensure deterministic behavior for some ops if needed, 
+        # Ensure deterministic behavior for some ops if needed,
         # though this can slow down performance.
         # torch.backends.cudnn.deterministic = True
         # torch.backends.cudnn.benchmark = False
@@ -194,6 +194,41 @@ def add_dirichlet_noise(
     return (1.0 - epsilon) * probs + epsilon * noise
 
 
-def add_gumbel_noise():
-    # TODO: implement this
-    pass
+def to_tensor(
+    numpy_array: np.ndarray, device: torch.device = torch.device("cpu")
+) -> torch.Tensor:
+    """
+    Converts a numpy array to a float32 PyTorch tensor on the specified device.
+
+    Args:
+        numpy_array: The numpy array to convert.
+        device: The target device.
+
+    Returns:
+        A PyTorch tensor.
+    """
+    return torch.as_tensor(numpy_array, dtype=torch.float32, device=device)
+
+
+# TODO: does this handle pendulum?
+def to_numpy_action(action_tensor: torch.Tensor) -> np.ndarray:
+    """
+    Converts a PyTorch action tensor to a numpy array for Gymnasium consumption.
+    Handles detaching, moving to CPU, and flattening for discrete spaces.
+
+    Args:
+        action_tensor: The action tensor from the model.
+
+    Returns:
+        A numpy array of actions.
+    """
+    res = action_tensor.detach().cpu().numpy()
+    # For discrete actions (LongTensor/IntTensor), we cast to int32
+    if action_tensor.dtype in [torch.long, torch.int]:
+        # Flatten if it's a single action per batch entry (e.g., [B, 1] -> [B])
+        # This is the standard for Gymnasium VectorEnv consumption of discrete actions.
+        if res.ndim > 1 and res.shape[-1] == 1:
+            return res.flatten().astype(np.int32)
+        return res.astype(np.int32)
+    # For continuous actions, we keep the original shape and dtype (float32)
+    return res

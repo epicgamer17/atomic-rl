@@ -216,12 +216,14 @@ class ActorActor:
                 greedy_actions, _ = argmax_selector(predictions)
 
                 if random.random() < self.epsilon:
-                    action = random.randint(0, self.num_actions - 1)
+                    action_np = random.randint(0, self.num_actions - 1)
+                    action = torch.tensor([action_np], dtype=torch.long)
                 else:
-                    action = greedy_actions.item()
+                    action_np = greedy_actions.item()
+                    action = greedy_actions.squeeze(0).detach().to(torch.long)
 
             # 3. Step Env
-            next_obs, reward, terminated, truncated, info = self.env.step(action)
+            next_obs, reward, terminated, truncated, info = self.env.step(action_np)
 
             # 4. Compute N-step transitions
             n_step_transitions = self.n_step_proc(
@@ -406,7 +408,7 @@ def main():
     # 3. Initialize Buffer
     buffer_shapes = {
         "obs": obs_shape,
-        "action": (),
+        "action": (1,),
         "reward": (),
         "terminated": (),
         "truncated": (),

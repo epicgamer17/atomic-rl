@@ -201,12 +201,14 @@ def actor_worker(
             greedy_actions, _ = argmax_selector(predictions)
             # TODO: Remove this and use epsilon-greedy selector function.
             if random.random() < epsilon:
-                action = random.randint(0, num_actions - 1)
+                action_np = random.randint(0, num_actions - 1)
+                action = torch.tensor([action_np], dtype=torch.long)
             else:
-                action = greedy_actions.item()
+                action_np = greedy_actions.item()
+                action = greedy_actions.squeeze(0).detach().to(torch.long)
 
         # Step
-        next_obs, reward, terminated, truncated, info = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action_np)
 
         n_step_transitions = n_step_proc(
             obs, action, reward, next_obs, terminated, truncated
@@ -371,7 +373,7 @@ def main():
     # Shared buffer
     buffer_shapes = {
         "obs": obs_shape,
-        "action": (),
+        "action": (1,),
         "reward": (),
         "terminated": (),
         "truncated": (),

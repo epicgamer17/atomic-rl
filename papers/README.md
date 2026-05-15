@@ -4,10 +4,9 @@ This directory maintains a mapping between the research papers in this folder an
 
 ### Missing / Future Work:
 - **Distributional Rainbow (IQN/QR-DQN)**: While C51 is implemented, modern distributional methods like Implicit Quantile Networks (IQN) or Quantile Regression DQN (QR-DQN) are currently missing.
-- **DRQN**: Recurrent DQN. (similar to R2D2?) 
-- **R2D2** 
-- **NGU**
-- **IMPALA**
+- **DRQN / R2D2**: Recurrent DQN and R2D2. Core building blocks (recurrent unrolling, burn-in) are available in `functional/network.py`.
+- **NGU / Agent 57**: Never Give Up and Agent 57.
+- **IMPALA**: High-throughput distributed AC.
 - **TRPO** (Schulman et al., 2015): Folder exists in `examples/trpo/` but is currently empty.
 - **SAC** (Haarnoja et al., 2018): Folder exists in `examples/sac/` but is currently empty.
 - **Batch MCTS**: [batch_mcts.pdf](batch_mcts.pdf). Vectorized MCTS for efficient batched inference. Different than vectorized envs, about searching mutliple branches at once for one state. 
@@ -65,11 +64,10 @@ This directory maintains a mapping between the research papers in this folder an
 
 ### Missing Features (TODO Find Papers):
 For Agent 57, we are missing:
-1. LSTM 
-2. GRU (end of R2D2) 
-3. Memory Networks 
-4. Neural Episodic Control 
-5. Transformers
+1. GRU (end of R2D2) 
+2. Memory Networks 
+3. Neural Episodic Control 
+4. Transformers
 6. Curiosity 
 7. Intrinsic Motivation 
 8. Density Models 
@@ -118,7 +116,8 @@ For Agent 57, we are missing:
 | :--- | :--- | :--- | :--- | :--- |
 | **REINFORCE** (Williams, 1992) | [reinforce.pdf](reinforce.pdf) | Done | `examples/reinforce/reinforce_cartpole.py` | Classic Monte Carlo policy gradient. |
 | **A3C / A2C** (Mnih et al., 2016) | [a3c.pdf](a3c.pdf) | Done (A2C) | `examples/actor_critic/a2c_cartpole.py` | Synchronous version (A2C) implemented for stability on modern GPUs. |
-| **PPO** (Schulman et al., 2017) | [ppo.pdf](ppo.pdf) | Done | `examples/ppo/` | Comprehensive implementations for Atari, MuJoCo, and LSTM variants. |
+| **PPO** (Schulman et al., 2017) | [ppo.pdf](ppo.pdf) | Done | `examples/ppo/` | Comprehensive implementations for Atari, MuJoCo, and MultiDiscrete. |
+| **Recurrent PPO** (PPO + LSTM) | [ppo.pdf](ppo.pdf) | Mostly Done | `examples/ppo/ppo_lstm_cartpole.py` | Implementation of PPO with recurrent cells and unrolling. Some details needed (e.g. handling truncation, and more verification/testing perhaps) |
 
 ---
 
@@ -127,7 +126,7 @@ For Agent 57, we are missing:
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **AlphaZero** (Silver et al., 2017) | [alphazero.pdf](alphazero.pdf) | Partial | `papers/alphazero_pseudocode.py` | Pseudocode provided; full runnable implementation is pending. |
-| **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Partial | `functional/mcts.py` | Core MCTS logic is implemented. Agent experiments exist in `experiments/`. |
+| **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Partial | `functional/mcts.py` | Core MCTS logic is implemented and vectorized. |
 
 ---
 
@@ -139,8 +138,9 @@ This repo heavily focuses on the **Alberta Plan** (Sutton et al., 2022) and the 
 | :--- | :--- | :--- | :--- | :--- |
 | **Alberta Plan** (Sutton et al., 2022) | [AlbertaPlan.pdf](AlbertaPlan.pdf) / [Report](AlbertaPlanReport.pdf) | Building Blocks | `functional/plasticity.py` | Serves as the philosophical guide for the `functional/` module. |
 | **SWR** (Selective Weight Reinit) | [selective_weight_reinit.pdf](selective_weight_reinit.pdf) | Done | `functional/plasticity.py` | Utility-based reinitialization. Reproduced in `examples/plasticity/swr_permuted_mnist.py`. |
-| **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [idbd_b.pdf](idbd_b.pdf) / [autostep.pdf](autostep.pdf) | Done | `functional/meta_optimization.py` | Meta-gradient learning rates. |
-| **Continual Backprop** | [cbp_1.pdf](cbp_1.pdf) / [cbp_2.pdf](cbp_2.pdf) / https://github.com/shibhansh/loss-of-plasticity/| Done | `functional/plasticity.py` | Implements the generate-and-test plasticity mechanism. Examples in `examples/plasticity/`. |
+| **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [autostep.pdf](autostep.pdf) | Done | `functional/meta_optimization.py` | Meta-gradient learning rates. Reproduced in `examples/meta_optimization/`. |
+| **K1 / K2 Algorithms** | [idbd_b.pdf](idbd_b.pdf) | Done | `functional/meta_optimization.py` | O(n) approximations of the Kalman Filter for adaptive step-sizes. |
+| **Continual Backprop** | [cbp_1.pdf](cbp_1.pdf) / [cbp_2.pdf](cbp_2.pdf) | Done | `functional/plasticity.py` | Implements the generate-and-test plasticity mechanism. Reproduced in `examples/plasticity/cbp_permuted_mnist.py`. |
 
 
 

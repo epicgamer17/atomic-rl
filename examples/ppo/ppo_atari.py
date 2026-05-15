@@ -13,7 +13,7 @@ from einops import rearrange
 
 from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
-from functional.returns import compute_gae, compute_td_lambda_returns
+from functional.returns import compute_gae
 from functional.losses import (
     clipped_surrogate_loss,
     entropy_loss,
@@ -32,7 +32,13 @@ from functional.rollout_buffer import (
     get_rollout_next_values,
     yield_shuffled_minibatches,
 )
-from functional.utils import standardize_tensor, set_seed
+from functional.utils import (
+    ema_update,
+    standardize_tensor,
+    set_seed,
+    to_tensor,
+    to_numpy_action,
+)
 from envs.wrappers import FireResetEnv
 from tensordict import TensorDict
 
@@ -142,12 +148,12 @@ obs, info = envs.reset(seed=SEED)
 # Pre-allocate rollout buffers
 shapes = {
     "observations": obs_shape,
-    "actions": (),
-    "logprobs": (),
+    "actions": (1,),
+    "logprobs": (1,),
     "rewards": (),
     "terminated": (),
     "truncated": (),
-    "values": (),
+    "values": (1,),
     "logits": (num_actions,),
 }
 buffer = init_rollout_buffer(
@@ -186,12 +192,12 @@ for iteration in range(MAX_ITERATIONS):
     with torch.inference_mode():
         for step in range(STEPS_PER_ENV):
             # Atari observations are [C, H, W] after wrappers
-            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
+            obs_tensor = to_tensor(obs, device=device)
             logits, value = model(obs_tensor)
 
             dist = torch.distributions.Categorical(logits=logits)
             action, info_dict = sample_distribution(dist, explore=True)
-            action_np = action.cpu().numpy().flatten().astype(np.int32)
+            action_np = to_numpy_action(action)
 
             # Step Env
             next_obs, reward, terminated, truncated, info = envs.step(action_np)
@@ -205,18 +211,12 @@ for iteration in range(MAX_ITERATIONS):
             transition = TensorDict(
                 {
                     "observations": obs_tensor,
-                    "actions": action.squeeze(-1),
-                    "logprobs": info_dict["log_prob"].squeeze(-1).detach(),
-                    "rewards": torch.as_tensor(
-                        clipped_reward, dtype=torch.float32, device=device
-                    ),
-                    "terminated": torch.as_tensor(
-                        terminated, dtype=torch.float32, device=device
-                    ),
-                    "truncated": torch.as_tensor(
-                        truncated, dtype=torch.float32, device=device
-                    ),
-                    "values": value.squeeze(-1).detach(),
+                    "actions": action,
+                    "logprobs": info_dict["log_prob"].detach(),
+                    "rewards": to_tensor(clipped_reward, device=device),
+                    "terminated": to_tensor(terminated, device=device),
+                    "truncated": to_tensor(truncated, device=device),
+                    "values": value.detach(),
                     "logits": logits.detach(),
                 },
                 batch_size=[NUM_ENVS],
@@ -258,7 +258,6 @@ for iteration in range(MAX_ITERATIONS):
         # Compute last values for GAE
         last_obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device)
         _, last_values = model(last_obs_tensor)
-        last_values = last_values.squeeze(-1)
 
         next_values = get_rollout_next_values(
             buffer, last_values, get_value_fn=lambda obs: model(obs)[1], device=device
@@ -269,26 +268,19 @@ for iteration in range(MAX_ITERATIONS):
         rewards=buffer.data["rewards"],
         terminated=buffer.data["terminated"],
         truncated=buffer.data["truncated"],
-        values=buffer.data["values"],
-        next_values=next_values,
+        values=buffer.data["values"].squeeze(-1),
+        next_values=next_values.squeeze(-1),
         gamma=GAMMA,
         gae_lambda=GAE_LAMBDA,
     )
 
-    returns = compute_td_lambda_returns(
-        rewards=buffer.data["rewards"],
-        terminated=buffer.data["terminated"],
-        truncated=buffer.data["truncated"],
-        values=buffer.data["values"],
-        next_values=next_values,
-        gamma=GAMMA,
-        lam=GAE_LAMBDA,
-    )
+    # Explicit mathematical derivation (Explicit over implicit, no redundant compute)
+    returns = advantages.unsqueeze(-1) + buffer.data["values"]
 
     # Flatten buffer for training
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "b t -> (b t)")
-    flat_returns = rearrange(returns, "b t -> (b t)")
+    flat_advantages = rearrange(advantages, "b t -> (b t) 1")
+    flat_returns = rearrange(returns, "b t 1 -> (b t) 1")
 
     # Add advantages and returns to flat_data for easier minibatch sampling
     flat_data["advantages"] = flat_advantages
@@ -306,7 +298,6 @@ for iteration in range(MAX_ITERATIONS):
         ):
             # Re-evaluate model on minibatch
             new_logits, new_values = model(mb["observations"])
-            new_values = new_values.squeeze(-1)
 
             # Categorical distribution for Atari
             dist = torch.distributions.Categorical(logits=new_logits)

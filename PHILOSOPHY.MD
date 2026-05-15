@@ -9,7 +9,7 @@ Spin straw into gold: Try to make the code as readable and understandable as pos
 *functional/*
 This layer contains "pure" mathematical functions. 
 These functions should be stateless, have no side effects, and strictly avoid guessing the shapes of incoming tensors wherever possible. Exceptions are permitted for standard ML conventions that inherently require state (e.g., in-place network updates or buffer history closures), provided they are clearly documented. 
-If a function expects a batch dimension, it must receive a batch dimension.
+If a function expects a batch dimension, it must receive a batch dimension. On top of this, shapes and expectations should aim to make it so reshaping is rarely needed and if it is, it should be explicit. 
 Ideally, functions are "pure", where the same inputs yield the same outputs, but this is not strictly enforced.
 Functions should try to be compilable with torch.compile()
 Functions should try to be composable and build upon each other.
@@ -22,6 +22,12 @@ Functions should be reusable across algorithms and papers. For example, gaussian
 Functions should attempt to have consistent signatures/interfaces so that "similar"/related functions can be swapped in and out easily. For example, mc returns should be easily swappable with n step returns for VPG. Ie they should return the same output format and stuff, and they should take the same inputs (as much as possible).
 Avoid combinatorial explosion of options. If multiple options/architectures exist for a function try to solve via composability (as done for example in compute_q_td_loss())
 Solutions/decisions should be expandable. When designing a function don't design it only for the algorithm it is currently being created for. Instead, design it such that it could be easily extended/adapted to other algorithms.
+Functions should be designed in a way that tries to minimize the amount of code a person has to write to get the desired functionality, while maintaining readability and semantic understandability.
+Functions should be designed such that a person can understand the function by just reading its signature and docstring. 
+Functions should try their best to avoid using `*args` and `**kwargs`, they should instead use proper type hints and named arguments.
+Functions should be designed in a way that is easy to test. 
+Functions should be designed in a way that is easy to debug. 
+Functions should be designed in a way that minimizes the need for boiler plate functions in the orchestration code (not including functools.partial etc.). For example, if for categorical DQN we had to make a categorical_greedy_selector which used the expected value and argmax to meet the signature required by the compute_q_td_loss function, we should instead try to design the functions such that this boilerplate is avoided.
 Functions have semantic meaning, although GAE can represent MC returns and N step returns, we have seperate functions for those to improve readability. Try to keep functions to a single responsibility, which improves readability and reusability.
 Minimize code that does multiple things. If a function is doing more than one thing, try to split it into multiple functions.
 Minimze dead code and useless functions. Without good reason (semantic or efficiency) we should not have two functions that perform the exact same mathematical operation.

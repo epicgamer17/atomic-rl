@@ -153,7 +153,7 @@ buffer_state = init_per_buffer(
     capacity=BUFFER_CAPACITY,
     shapes={
         "obs": obs_shape,
-        "action": (),
+        "action": (1,),
         "reward": (),
         "terminated": (),
         "truncated": (),
@@ -202,16 +202,16 @@ for step in range(MAX_STEPS):
             predictions,
             extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
         )
-        action = action.item()
+        action_np = action.item()
 
     # 2. Step Env
-    next_obs, reward, terminated, truncated, info = env.step(action)
+    next_obs, reward, terminated, truncated, info = env.step(action_np)
 
     # 3. N-Step Accumulation and Buffer Addition
     # The accumulator now returns a list of 0, 1, or N transitions.
     n_step_transitions = accumulate_n_step(
         torch.as_tensor(obs, dtype=torch.float32).unsqueeze(0),
-        torch.tensor([action]),
+        action,
         torch.tensor([reward], dtype=torch.float32),
         torch.as_tensor(next_obs, dtype=torch.float32).unsqueeze(0),
         torch.tensor([terminated], dtype=torch.float32),

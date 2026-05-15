@@ -108,7 +108,7 @@ buffer_state = init_buffer(
     capacity=BUFFER_CAPACITY,
     shapes={
         "obs": obs_shape,
-        "action": (),
+        "action": (1,),
         "reward": (),
         "terminated": (),
         "truncated": (),
@@ -160,15 +160,15 @@ for step in range(MAX_STEPS):
             generator=rng_key,
         )
         rng_key = info["generator"]
-        action = action.item()
+        action_np = action.item()
 
     # 2. Step Env
-    next_obs, reward, terminated, truncated, info = env.step(action)
+    next_obs, reward, terminated, truncated, info = env.step(action_np)
 
     # 3. Add to Buffer
     transition = {
         "obs": torch.as_tensor(obs, dtype=torch.float32),
-        "action": torch.tensor(action, dtype=torch.long),
+        "action": action.squeeze(0).detach().to(torch.long),
         "reward": torch.tensor(reward, dtype=torch.float32),
         "terminated": torch.tensor(terminated, dtype=torch.float32),
         "truncated": torch.tensor(truncated, dtype=torch.float32),
@@ -208,7 +208,7 @@ for step in range(MAX_STEPS):
             )[0],
             partial(
                 compute_categorical_q_td_target,
-                                support=SUPPORT.to(device),
+                support=SUPPORT.to(device),
                 v_min=V_MIN,
                 v_max=V_MAX,
                 atom_size=ATOM_SIZE,
