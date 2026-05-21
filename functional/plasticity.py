@@ -23,7 +23,9 @@ import torch.nn as nn
 from typing import Callable, Iterable
 from functional.utils import ema_update
 
-# TODO: allow for CBP or SWR + IDBD or Autostep. Make whatever this is expandable as i plan to add future versions of both.
+# TODO: some messy is instance checks. these are necessary for IDBD and linear value heads and stuff, but maybe there is a cleaner way to do this.
+
+# TODO: The functions now return masks, but examples have not been updated to use this interface yet, and at the moment pretend there are no masks. NOTE: it may be that for nn.Modules (ie standard deep learning) the function has an implicit effect, whereas for linear and other methods (alberta plan) the mask is used. im not sure if i love this and ideally it would be unified across both.
 
 
 def compute_gradient_utility(weight: torch.Tensor, grad: torch.Tensor) -> torch.Tensor:
@@ -115,7 +117,9 @@ def get_proportional_pruning_mask(
 
 
 def reset_optimizer_states_elementwise(
-    optimizer: torch.optim.Optimizer, param: nn.Parameter, mask: torch.BoolTensor
+    optimizer: torch.optim.Optimizer,
+    param: nn.Parameter | torch.Tensor,
+    mask: torch.BoolTensor,
 ) -> None:
     """
     Zeroes out the optimizer states (e.g., Adam momentum and variance) for specific
@@ -124,7 +128,7 @@ def reset_optimizer_states_elementwise(
 
     Args:
         optimizer (torch.optim.Optimizer): The optimizer maintaining state.
-        param (nn.Parameter): The parameter whose state needs resetting.
+        param (nn.Parameter | torch.Tensor): The parameter whose state needs resetting.
         mask (torch.BoolTensor): Boolean mask where True means reset the state.
     """
     if param not in optimizer.state:
@@ -151,7 +155,7 @@ def apply_selective_weight_reinitialization(
     k: float = 1e-4,
     utility_type: str = "gradient",
     prune_type: str = "threshold",
-) -> None:
+) -> dict[nn.Parameter, torch.BoolTensor]:
     """
     Orchestrates Selective Weight Reinitialization (SWR) for a given set of parameters.
     This modifies the parameters and the optimizer in-place.
@@ -171,8 +175,9 @@ def apply_selective_weight_reinitialization(
     Example:
         >>> from functional.utils import gnt_init_wrapper
         >>> init_fn = gnt_init_wrapper(nn.init.orthogonal_)
-        >>> apply_selective_weight_reinitialization(model.parameters(), optimizer, init_fn)
+        >>> masks_applied = apply_selective_weight_reinitialization(model.parameters(), optimizer, init_fn)
     """
+    masks_applied = {}
     for param in parameters:
         if not param.requires_grad:
             continue
@@ -204,6 +209,7 @@ def apply_selective_weight_reinitialization(
                 )
 
             if not mask.any():
+                masks_applied[param] = mask
                 continue
 
             # 3. Resample Reinitialization
@@ -214,76 +220,9 @@ def apply_selective_weight_reinitialization(
 
         # 4. Reset Optimizer Momentum (Must be out of the main no_grad context but acts in-place)
         reset_optimizer_states_elementwise(optimizer, param, mask)
+        masks_applied[param] = mask
 
-
-# METRICS TODO: find a good file to put these in
-def compute_dead_units_proportion(activations: torch.Tensor) -> float:
-    """
-    Computes the proportion of dead units in a layer.
-    A unit is considered 'dead' if it outputs exactly 0 for an entire batch of data.
-
-    Args:
-        activations (torch.Tensor): The output tensor of a ReLU layer of shape [Batch, Features].
-
-    Returns:
-        float: The percentage of dead units (0.0 to 1.0).
-    """
-    # Check if a unit is 0 across the entire batch dimension (dim=0)
-    dead_mask = (activations <= 0).all(dim=0)
-    return dead_mask.sum().item() / dead_mask.numel()
-
-
-def compute_average_weight_magnitude(parameters: Iterable[nn.Parameter]) -> float:
-    """Computes the mean absolute value of all weights in the given parameters."""
-    total_mag = 0.0
-    total_elements = 0
-    with torch.no_grad():
-        for param in parameters:
-            total_mag += torch.abs(param).sum().item()
-            total_elements += param.numel()
-    return total_mag / total_elements if total_elements > 0 else 0.0
-
-
-def compute_average_gradient_magnitude(parameters: Iterable[nn.Parameter]) -> float:
-    """Computes the mean absolute value of all gradients in the given parameters."""
-    total_mag = 0.0
-    total_elements = 0
-    with torch.no_grad():
-        for param in parameters:
-            if param.grad is not None:
-                total_mag += torch.abs(param.grad).sum().item()
-                total_elements += param.grad.numel()
-    return total_mag / total_elements if total_elements > 0 else 0.0
-
-
-def compute_stable_rank(activations: torch.Tensor) -> float:
-    """
-    Computes the stable rank of the representation matrix.
-    Stable Rank = (Frobenius Norm)^2 / (Spectral Norm)^2
-    It measures the effective dimensionality/expressivity of the features.
-
-    Args:
-        activations (torch.Tensor): Tensor of shape [Batch, Features].
-
-    Returns:
-        float: The stable rank.
-    """
-    # Center the activations
-    centered = activations - activations.mean(dim=0, keepdim=True)
-
-    # Compute singular values
-    # We use svdvals for numerical stability instead of full SVD
-    singular_values = torch.linalg.svdvals(centered)
-
-    squared_sv = singular_values**2
-
-    # Frobenius norm squared is the sum of squared singular values
-    # Spectral norm squared is the max squared singular value
-    max_sq_sv = squared_sv.max().item()
-    if max_sq_sv < 1e-8:
-        return 0.0
-
-    return squared_sv.sum().item() / max_sq_sv
+    return masks_applied
 
 
 def init_cbp_state(layer: nn.Linear) -> dict[str, torch.Tensor]:
@@ -352,7 +291,7 @@ def get_cbp_replacement_mask(
 
 
 def apply_continual_backprop(
-    layer_pairs: Iterable[tuple[nn.Linear, nn.Linear]],
+    layer_pairs: Iterable[tuple[nn.Linear, nn.Linear | torch.Tensor]],
     activations: Iterable[torch.Tensor],
     cbp_states: dict[nn.Linear, dict[str, torch.Tensor]],
     optimizer: torch.optim.Optimizer,  # Contains step size
@@ -362,7 +301,7 @@ def apply_continual_backprop(
     eta: float = 0.99,  # Decay rate
     maturity_threshold: int = 100,
     replacement_rate: float = 1e-4,
-) -> None:
+) -> dict[nn.Linear, torch.BoolTensor]:
     """
     Orchestrates Continual Backpropagation (CBP) for a set of feedforward linear layer pairs.
     This calculates contribution/adaptation utilities, updates running statistics, and selectively
@@ -396,6 +335,8 @@ def apply_continual_backprop(
     # Calculate alpha for use in EMA updates
     alpha = 1.0 - eta
 
+    replacement_masks = {}
+
     for (layer, next_layer), act in zip(layer_pairs, activations):
         state = cbp_states[layer]
         ages = state["ages"]
@@ -416,7 +357,10 @@ def apply_continual_backprop(
             act_diff = torch.abs(act - f_hat.unsqueeze(0)).mean(dim=0)
 
             # Sum of absolute outgoing and incoming weights
-            out_weight_sum = next_layer.weight.abs().sum(dim=0)
+            if isinstance(next_layer, torch.Tensor):
+                out_weight_sum = next_layer.abs().sum(dim=0)
+            else:
+                out_weight_sum = next_layer.weight.abs().sum(dim=0)
             in_weight_sum = layer.weight.abs().sum(dim=1).clamp(min=1e-8)
 
             # NOTE: We skip explicitly tracking Eq 4 (Contribution EMA) to save memory.
@@ -436,12 +380,13 @@ def apply_continual_backprop(
             mask = get_cbp_replacement_mask(u_hat, eligible_mask, replacement_rate)
 
             if not mask.any():
+                replacement_masks[layer] = mask
                 continue
 
             # Apply Replacement, Lines 5, 6, 7 of the pseudo code loop over layers
 
             # Transfer contribution to the bias of consumer (next_layer) (NOTE: not in pseudocode but mentioned in paper)
-            if next_layer.bias is not None:
+            if not isinstance(next_layer, torch.Tensor) and next_layer.bias is not None:
                 # Multiply outgoing weights by the bias-corrected average activation of the removed unit
                 contribution = (
                     next_layer.weight[:, mask] * f_hat[mask].unsqueeze(0)
@@ -463,7 +408,10 @@ def apply_continual_backprop(
 
             # 6. Reset output weights
             # Using mask.unsqueeze(0) expands the 1D feature mask across the next_out_features dimension (Columns)
-            next_layer.weight.masked_fill_(mask.unsqueeze(0), 0.0)
+            if isinstance(next_layer, torch.Tensor):
+                next_layer.masked_fill_(mask.unsqueeze(0), 0.0)
+            else:
+                next_layer.weight.masked_fill_(mask.unsqueeze(0), 0.0)
 
             # 7. Reset CBP state for replaced features
             ages.masked_fill_(mask, 0.0)
@@ -482,6 +430,17 @@ def apply_continual_backprop(
             reset_optimizer_states_elementwise(optimizer, layer.bias, mask)
 
         # Output weights (Resetting columns)
-        reset_optimizer_states_elementwise(
-            optimizer, next_layer.weight, mask.unsqueeze(0).expand_as(next_layer.weight)
-        )
+        if isinstance(next_layer, torch.Tensor):
+            reset_optimizer_states_elementwise(
+                optimizer, next_layer, mask.unsqueeze(0).expand_as(next_layer)
+            )
+        else:
+            reset_optimizer_states_elementwise(
+                optimizer,
+                next_layer.weight,
+                mask.unsqueeze(0).expand_as(next_layer.weight),
+            )
+
+        replacement_masks[layer] = mask
+
+    return replacement_masks

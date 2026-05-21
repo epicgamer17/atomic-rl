@@ -15,7 +15,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 
-from functional.meta_optimization import compute_idbd_update
+from functional.meta_optimization import compute_idbd_rates
 from functional.visualization import plot_learning_rate_traces
 from envs.streams.drifting_concept import make_drifting_concept_task
 
@@ -54,15 +54,15 @@ def main():
         error = target - pred
 
         # Compute IDBD (Adding batch dimension via unsqueeze)
-        weights, betas, h, alphas = compute_idbd_update(
-            weights.unsqueeze(0),
+        betas, h, alphas = compute_idbd_rates(
             betas.unsqueeze(0),
             h.unsqueeze(0),
             inputs.unsqueeze(0),
             error.view(1, 1),
             meta_lr=meta_lr,
         )
-        weights, betas, h = weights.squeeze(0), betas.squeeze(0), h.squeeze(0)
+        betas, h, alphas = betas.squeeze(0), h.squeeze(0), alphas.squeeze(0)
+        weights = weights + alphas * error * inputs
 
         if step % log_interval == 0:
             alphas_history[step // log_interval] = alphas.squeeze(0).numpy()

@@ -25,12 +25,14 @@ import matplotlib.pyplot as plt
 from envs.streams.permuted_mnist import make_permuted_mnist_stream
 from functional.plasticity import (
     apply_selective_weight_reinitialization,
+    init_cbp_state,
+    apply_continual_backprop,
+)
+from functional.metrics import (
     compute_dead_units_proportion,
     compute_average_weight_magnitude,
     compute_average_gradient_magnitude,
     compute_stable_rank,
-    init_cbp_state,
-    apply_continual_backprop,
 )
 from functional.visualization import (
     plot_plasticity_correlates,

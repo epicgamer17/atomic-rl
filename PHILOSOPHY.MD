@@ -23,6 +23,7 @@ Functions should attempt to have consistent signatures/interfaces so that "simil
 Avoid combinatorial explosion of options. If multiple options/architectures exist for a function try to solve via composability or handle it in a case by case basis in the orchestration code.
 Solutions/decisions should be expandable. When designing a function don't design it only for the algorithm it is currently being created for. Instead, design it such that it could be easily extended/adapted to other algorithms.
 Functions should be designed in a way that tries to minimize the amount of code a person has to write to get the desired functionality, while maintaining readability and semantic understandability.
+Where possible avoid greek letters, unless it is the absolute standard convention. 
 Functions should be designed such that a person can understand the function by just reading its signature and docstring. 
 Functions should try their best to avoid using `*args` and `**kwargs`, they should instead use proper type hints and named arguments.
 Functions should be designed in a way that is easy to test. 

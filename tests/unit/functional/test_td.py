@@ -23,9 +23,7 @@ def test_compute_q_td_target():
     # 1.0 + 0.9 * 4.0 * (1 - 1) = 1.0
     expected = torch.tensor([3.2, 1.0])
 
-    target = compute_q_td_target(
-        next_q, next_actions, rewards, terminated, gamma
-    )
+    target = compute_q_td_target(next_q, next_actions, rewards, terminated, gamma)
     torch.testing.assert_close(target, expected)
 
 
@@ -105,11 +103,12 @@ def test_compute_categorical_q_td_target_terminal():
 
 def test_compute_v_td_target():
     from functional.td import compute_v_td_target
+
     next_values = torch.tensor([3.0, 4.0])
     rewards = torch.tensor([0.5, 1.0])
     terminated = torch.tensor([0.0, 1.0])
     gamma = torch.tensor([0.9, 0.9])
-    
+
     # Target 0: 0.5 + 0.9 * 3.0 = 3.2
     # Target 1: 1.0 + 0.9 * 4.0 * 0 = 1.0
     expected = torch.tensor([3.2, 1.0])
@@ -117,38 +116,63 @@ def test_compute_v_td_target():
     torch.testing.assert_close(target, expected)
 
 
-def test_compute_td_error():
-    from functional.td import compute_td_error
-    values = torch.tensor([3.0, 2.0])
-    next_values = torch.tensor([3.0, 4.0])
-    rewards = torch.tensor([0.5, 1.0])
-    terminated = torch.tensor([0.0, 1.0])
-    gamma = torch.tensor([0.9, 0.9])
-    
-    # Target: [3.2, 1.0]
-    # TD Error: Target - values = [3.2 - 3.0, 1.0 - 2.0] = [0.2, -1.0]
-    expected = torch.tensor([0.2, -1.0])
-    error = compute_td_error(values, next_values, rewards, terminated, gamma)
-    torch.testing.assert_close(error, expected)
-
-
 def test_td_assertions():
-    from functional.td import compute_v_td_target, compute_q_td_target, compute_categorical_q_td_target
-    
+    from functional.td import (
+        compute_v_td_target,
+        compute_q_td_target,
+        compute_categorical_q_td_target,
+    )
+
     with pytest.raises(AssertionError, match="Expected 1D next_values"):
-        compute_v_td_target(torch.randn(2, 2), torch.randn(2), torch.randn(2), torch.randn(2))
-    
+        compute_v_td_target(
+            torch.randn(2, 2), torch.randn(2), torch.randn(2), torch.randn(2)
+        )
+
     with pytest.raises(AssertionError, match="Shape mismatch"):
-        compute_v_td_target(torch.randn(2), torch.randn(3), torch.randn(2), torch.randn(2))
-        
+        compute_v_td_target(
+            torch.randn(2), torch.randn(3), torch.randn(2), torch.randn(2)
+        )
+
     with pytest.raises(AssertionError, match="Expected 2D next_q_values"):
-        compute_q_td_target(torch.randn(2), torch.randn(2), torch.randn(2), torch.randn(2), torch.randn(2))
-        
+        compute_q_td_target(
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+        )
+
     with pytest.raises(AssertionError, match="Expected \[B\] next_actions"):
-        compute_q_td_target(torch.randn(2, 2), torch.randn(2, 2), torch.randn(2), torch.randn(2), torch.randn(2))
-        
+        compute_q_td_target(
+            torch.randn(2, 2),
+            torch.randn(2, 2),
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+        )
+
     with pytest.raises(AssertionError, match="Expected 3D next_logits"):
-        compute_categorical_q_td_target(torch.randn(2, 2), torch.randn(2), torch.randn(2), torch.randn(2), torch.randn(2), torch.randn(2), 0.0, 1.0, 2)
-        
+        compute_categorical_q_td_target(
+            torch.randn(2, 2),
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+            0.0,
+            1.0,
+            2,
+        )
+
     with pytest.raises(AssertionError, match="Expected \[B\] next_actions"):
-        compute_categorical_q_td_target(torch.randn(2, 2, 2), torch.randn(2, 2), torch.randn(2), torch.randn(2), torch.randn(2), torch.randn(2), 0.0, 1.0, 2)
+        compute_categorical_q_td_target(
+            torch.randn(2, 2, 2),
+            torch.randn(2, 2),
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+            torch.randn(2),
+            0.0,
+            1.0,
+            2,
+        )

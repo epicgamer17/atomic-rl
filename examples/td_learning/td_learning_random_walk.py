@@ -15,6 +15,10 @@ It also has the benefit that it doesn't suffer from monte carlo methods high var
 TD(lambda) connects 1-step TD(0) to Monte Carlo TD(1) via an eligibility trace. The update rule is: delta_w = alpha * (P_{t+1} - P_t) * sum_{k=1}^t lambda^{t-k} nabla_w P_k
 Implemented via Eligibility Traces (Backward View).
 
+In this form TD learning can only be used with Linear function approximation or the tabular case. Additionally, it must be online. Furthermore, in this example and in the paper TD learning was only used for state values. It was later expanded to learn Q values, again in a strictly online and linear function approximation way. And finally DQN expanded it to the offline non-linear case.
+
+Other TD papers expand TD learning to be more suitable for deep learning/approximate settings as well.
+
 TODO: is this the foundation for stream RL or can stream RL practices work well without TD learning? eg stream RL with gradient descent or something?
 TODO: possible example or experiment of this on mining with Navarra? ie mine optimization or mine planning or simulation/prediction might work a little bit in a stream fashion. Is TD learning good for this? Is stream RL good for this? What are comparisons of Stream RL vs TD learning vs Traditional RL in general and on the mine simulation/optimization problem? What exactly is TD learning. I still need to wrap my head around it and where it falls in the scheme of things. Could you effectively say the TD learning works for any problem by essentially instead of predicting V(s) you try to predict the value of any feature? So could you use TD Learning for predicting mine throughput given current state and inputs as other features? Is the mine optimization or planning problem a nonstationairy continual learning problem or can it be modeled as a stationary episodic problem? What are the pros and cons of this?
 
@@ -29,7 +33,8 @@ import matplotlib.pyplot as plt
 import random
 from typing import List, Tuple
 
-from functional.td import compute_td_error
+from envs.mdp.random_walk import RandomWalkEnv
+from functional.td import semi_gradient_td_update
 from functional.traces import update_accumulating_traces
 
 # --- CONSTANTS ---
@@ -66,35 +71,19 @@ def generate_training_sets(
     Each set contains a list of episodes.
     Each episode is a list of (phi_t, reward, phi_next, terminated) transitions.
     """
+    env = RandomWalkEnv(num_states=NUM_NON_TERMINAL_STATES, start_state=START_STATE)
     training_sets = []
     for _ in range(num_sets):
         episodes = []
         for _ in range(episodes_per_set):
             episode = []
-            state = START_STATE
+            phi_t = env.reset()
             while True:
-                phi_t = torch.zeros(NUM_NON_TERMINAL_STATES)
-                phi_t[state] = 1.0
-
-                next_state = state + (1 if torch.rand(1).item() > 0.5 else -1)
-
-                terminated = False
-                reward = 0.0
-                phi_next = torch.zeros(NUM_NON_TERMINAL_STATES)
-
-                if next_state == NUM_NON_TERMINAL_STATES:  # Right terminal
-                    reward = 1.0
-                    terminated = True
-                elif next_state == -1:  # Left terminal
-                    reward = 0.0
-                    terminated = True
-                else:
-                    phi_next[next_state] = 1.0
-
+                phi_next, reward, terminated = env.step()
                 episode.append((phi_t, reward, phi_next, terminated))
                 if terminated:
                     break
-                state = next_state
+                phi_t = phi_next
             episodes.append(episode)
         training_sets.append(episodes)
     return training_sets
@@ -114,40 +103,16 @@ def random_walk_episode(
     Returns:
         Updated weights after one episode.
     """
-    state = START_STATE
+    env = RandomWalkEnv(num_states=NUM_NON_TERMINAL_STATES, start_state=START_STATE)
+    phi_t = env.reset()
     traces = torch.zeros_like(weights)
 
     with torch.inference_mode():
         while True:
-            # Create one-hot feature vector phi_t
-            # [num_states]
-            phi_t = torch.zeros(NUM_NON_TERMINAL_STATES)
-            phi_t[state] = 1.0
+            # 1. Take a step in the environment
+            phi_next, reward, terminated = env.step()
 
-            # Predict V(s_t) = w^T * phi_t
-            v_t = torch.dot(weights, phi_t)
-
-            # Transition: Left or Right with equal probability
-            next_state = state + (1 if torch.rand(1).item() > 0.5 else -1)
-
-            # Terminal checks and reward
-            terminated = False
-            reward = 0.0
-            if next_state == NUM_NON_TERMINAL_STATES:  # Right terminal (Win)
-                reward = 1.0
-                terminated = True
-                v_next = torch.tensor(0.0)
-            elif next_state == -1:  # Left terminal (Lose)
-                reward = 0.0
-                terminated = True
-                v_next = torch.tensor(0.0)
-            else:
-                # [num_states]
-                phi_next = torch.zeros(NUM_NON_TERMINAL_STATES)
-                phi_next[next_state] = 1.0
-                v_next = torch.dot(weights, phi_next)
-
-            # 1. Update Eligibility Trace: e_t = gamma * lambda * e_{t-1} + phi_t
+            # 2. Update Eligibility Trace: e_t = gamma * lambda * e_{t-1} + phi_t
             # Note: Gamma is 1.0 for this task.
             # update_accumulating_traces expects [batch, features]
             traces = update_accumulating_traces(
@@ -158,23 +123,23 @@ def random_walk_episode(
                 terminated=torch.tensor([False]),  # Only clear trace after episode
             ).squeeze(0)
 
-            # 2. Compute TD Error: delta_t = r + gamma * V(s') - V(s)
-            # compute_td_error expects [batch]
-            delta = compute_td_error(
-                v_t.unsqueeze(0),
-                v_next.unsqueeze(0),
-                torch.tensor([reward]),
-                torch.tensor([terminated]),
+            # 3. Compute and Apply semi-gradient TD Update
+            # weights = weights + alpha * delta * traces
+            weights = semi_gradient_td_update(
+                features=phi_t,
+                reward=reward,
+                next_features=phi_next,
                 gamma=1.0,
-            ).squeeze(0)
-
-            # 3. Apply Update: w = w + alpha * delta * e_t
-            weights = weights + alpha * delta * traces
+                weights=weights,
+                alpha=alpha,
+                update_vector=traces,
+                terminated=terminated,
+            )
 
             if terminated:
                 break
 
-            state = next_state
+            phi_t = phi_next
 
     return weights
 
@@ -231,6 +196,7 @@ def run_batch_experiment():
         total_rms_error = 0.0
 
         for episodes in training_sets:
+            # TODO: have we inlined something here that should be in td.py in the functional folder?
             # We want to find w such that sum(delta_t * e_t) = 0
             # sum( (r_t + gamma * w.T * phi_{t+1} - w.T * phi_t) * e_t ) = 0
             # sum( r_t * e_t ) + sum( e_t * (gamma * phi_{t+1} - phi_t).T * w ) = 0

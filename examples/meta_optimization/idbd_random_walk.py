@@ -21,9 +21,9 @@ from typing import Tuple
 # TODO: find better ranges for params and U shaped curves.
 
 from functional.meta_optimization import (
-    compute_idbd_update,
-    compute_k1_update,
-    compute_k2_update,
+    compute_idbd_rates,
+    compute_k1_rates,
+    compute_k2_rates,
 )
 from envs.streams.random_walk import make_random_walk_tracking_task
 
@@ -83,19 +83,18 @@ def run_tracking_experiment(
             weights = weights + (param * error * inputs) / norm
 
         elif algorithm == "IDBD":
-            weights, betas, h, _ = compute_idbd_update(
-                weights.unsqueeze(0),
+            betas, h, alphas = compute_idbd_rates(
                 betas.unsqueeze(0),
                 h.unsqueeze(0),
                 inputs.unsqueeze(0),
                 error.view(1, 1),
                 meta_lr=param,
             )
-            weights, betas, h = weights.squeeze(0), betas.squeeze(0), h.squeeze(0)
+            betas, h, alphas = betas.squeeze(0), h.squeeze(0), alphas.squeeze(0)
+            weights = weights + alphas * error * inputs
 
         elif algorithm == "K1":
-            weights, betas, h, _ = compute_k1_update(
-                weights.unsqueeze(0),
+            betas, h, k_gain = compute_k1_rates(
                 betas.unsqueeze(0),
                 h.unsqueeze(0),
                 inputs.unsqueeze(0),
@@ -103,18 +102,19 @@ def run_tracking_experiment(
                 meta_lr=param,
                 r_hat=r_true,
             )
-            weights, betas, h = weights.squeeze(0), betas.squeeze(0), h.squeeze(0)
+            betas, h, k_gain = betas.squeeze(0), h.squeeze(0), k_gain.squeeze(0)
+            weights = weights + k_gain * error
 
         elif algorithm == "K2":
-            weights, betas, _ = compute_k2_update(
-                weights.unsqueeze(0),
+            betas, k_gain = compute_k2_rates(
                 betas.unsqueeze(0),
                 inputs.unsqueeze(0),
                 error.view(1, 1),
                 meta_lr=param,
                 r_hat=r_true,
             )
-            weights, betas = weights.squeeze(0), betas.squeeze(0)
+            betas, k_gain = betas.squeeze(0), k_gain.squeeze(0)
+            weights = weights + k_gain * error
 
         elif algorithm == "LS":
             # Paper Eq 6 & 7: Least Squares with covariance modification

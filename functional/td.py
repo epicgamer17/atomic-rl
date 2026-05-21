@@ -1,6 +1,23 @@
+"""
+Temporal Difference (TD) Learning Utilities.
+
+This module is divided into two distinct paradigms:
+
+1. Target Generators (`compute_*_target`):
+   - Agnostic to function approximator (Works with Deep NNs).
+   - Returns the target tensor to be used with standard PyTorch Loss functions and Optimizers.
+   - Typically used in batched/replay settings (DQN, Actor-Critic).
+
+2. Explicit Weight Updaters (`*_update`):
+   - STRICTLY for Linear Function Approximation (V(s) = theta^T phi).
+   - Manually applies the mathematical gradient step and returns the new weight vector.
+   - Typically used in pure online, streaming RL settings without standard PyTorch Optimizers.
+"""
+
 import torch
 import torch.nn.functional as F
 from einops import rearrange
+from typing import Tuple
 
 
 # TODO: I think truncation right now works for single env trajectories without auto resetting, but would fail for vectorized envs with auto resetting. as the next_q_values would be on the resetted state instead of the one from the info. verify this, and if it is an issue, unify the vectorization logic in our buffer to work with offline buffers as well somehow.
@@ -33,22 +50,6 @@ def compute_v_td_target(
     ), f"Shape mismatch: rewards {rewards.shape}, terminated {terminated.shape}, next_values {next_values.shape}"
 
     return rewards + gamma * next_values.detach() * (1 - terminated.float())
-
-
-# TODO: probably remove this function.
-def compute_td_error(
-    values: torch.Tensor,  # [B]
-    next_values: torch.Tensor,  # [B]
-    rewards: torch.Tensor,  # [B]
-    terminated: torch.Tensor,  # [B]
-    gamma: torch.Tensor,  # [B] or scalar
-) -> torch.Tensor:
-    """
-    Computes the standard 1-step TD error (delta).
-    Formula: delta_t = r_t + gamma * (1 - term) * V(s_{t+1}) - V(s_t)
-    """
-    target = compute_v_td_target(next_values, rewards, terminated, gamma)
-    return target - values
 
 
 def compute_q_td_target(
@@ -179,3 +180,209 @@ def compute_categorical_q_td_target(
     m_flat.index_add_(0, offset_u, prob_upper)
 
     return m
+
+
+# GRADIENT TD METHODS
+# TODO: more semantic naming instead of phi and theta etc?
+# TODO: actually use/test importance sampling
+# TODO: document that terminated defaults to false for the continual learning case by default.
+# TODO: should we remove in favor of TDC? or True Online TD?
+# TODO: batch updates where phi comes from vectorized envs. "batched online learning"
+def semi_gradient_td_update(
+    features: torch.Tensor,
+    reward: float | torch.Tensor,
+    next_features: torch.Tensor,
+    gamma: float | torch.Tensor,
+    weights: torch.Tensor,
+    alpha: float | torch.Tensor,
+    update_vector: torch.Tensor,
+    rho: float | torch.Tensor = 1.0,
+    terminated: bool | torch.Tensor = False,
+) -> torch.Tensor:
+    """
+    Performs a semi-gradient Temporal Difference (TD) update for linear function approximation. Allows for eligibility traces.
+    Args:
+        features: Feature vector of the current state [features].
+        reward: Reward received after transitioning from the current state.
+        next_features: Feature vector of the next state [features].
+        gamma: Discount factor.
+        weights: Current weight vector [features].
+        alpha: Learning rate.
+        update_vector: The vector used to step the weights.
+            - For TD(0), pass `features`.
+            - For TD(lambda), pass the accumulated `eligibility_trace`.
+        rho: Importance sampling ratio (default: 1.0 for on-policy).
+        terminated: Whether the next state is a terminal state (default: False).
+
+    Returns:
+        The updated weight vector weights [features].
+
+    NOTE: Strictly linear function approximation.
+    """
+    # 1. Compute state values using linear function approximation: V(s) = weights^T * features
+    v_t = torch.dot(weights, features)
+    # Mask v_next if terminated
+    v_next = torch.dot(weights, next_features) * (1.0 - float(terminated))
+
+    # 2. Compute TD error: delta = r + gamma * v_next - v_t
+    td_error = reward + gamma * v_next - v_t
+
+    # 3. Apply semi-gradient update
+    # weights = weights + alpha * rho * delta * update_vector
+    weights_new = weights + alpha * rho * td_error * update_vector
+
+    return weights_new
+
+
+# TODO: should we remove in favor of TDC? or True Online TD?
+def gtd0_update(
+    features: torch.Tensor,
+    reward: float | torch.Tensor,
+    next_features: torch.Tensor,
+    gamma: float | torch.Tensor,
+    weights: torch.Tensor,
+    u: torch.Tensor,
+    alpha: float | torch.Tensor,
+    beta: float | torch.Tensor,
+    rho: float | torch.Tensor = 1.0,
+    terminated: bool | torch.Tensor = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    GTD(0) update from Sutton et al. (2009). NOTE: Faithful to the original 2009 paper, not modern GTD2/TDC.
+
+    Args:
+        features: Feature vector of the current state [features].
+        reward: Reward received after transitioning from the current state.
+        next_features: Feature vector of the next state [features].
+        gamma: Discount factor.
+        weights: Current weight vector [features].
+        u: Auxiliary weight vector for GTD(0) [features].
+        alpha: Learning rate.
+        beta: Step size for auxiliary weight updates.
+        rho: Importance sampling ratio (default: 1.0 for on-policy).
+        terminated: Whether the next state is a terminal state (default: False).
+
+    Returns:
+        The updated weight vector weights [features] and auxiliary weight vector u [features].
+
+    NOTE: This implementation is strictly TD(0). It does not yet support eligibility traces.
+    NOTE: Strictly linear function approximation.
+    """
+    v_t = torch.dot(weights, features)
+    v_next = torch.dot(weights, next_features) * (1.0 - float(terminated))
+    td_error = reward + gamma * v_next - v_t
+
+    # Update auxiliary weights (u)
+    u_new = u + beta * rho * (td_error * features - u)
+
+    # Update primary weights (weights)
+    weights_new = weights + alpha * rho * (
+        features - gamma * next_features * (1.0 - float(terminated))
+    ) * torch.dot(features, u)
+
+    return weights_new, u_new
+
+
+def tdc_update(
+    features: torch.Tensor,
+    reward: float | torch.Tensor,
+    next_features: torch.Tensor,
+    gamma: float | torch.Tensor,
+    weights: torch.Tensor,
+    w: torch.Tensor,
+    alpha: float | torch.Tensor,
+    beta: float | torch.Tensor,
+    rho: float | torch.Tensor = 1.0,
+    terminated: bool | torch.Tensor = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Fast-GTD / TDC update from Sutton et al. (2009).
+
+    Args:
+        features: Feature vector of the current state [features].
+        reward: Reward received after transitioning from the current state.
+        next_features: Feature vector of the next state [features].
+        gamma: Discount factor.
+        weights: Current weight vector [features].
+        w: Auxiliary weight vector for TDC [features].
+        alpha: Learning rate.
+        beta: Step size for auxiliary weight updates.
+        rho: Importance sampling ratio (default: 1.0 for on-policy).
+        terminated: Whether the next state is a terminal state (default: False).
+
+    Returns:
+        The updated weight vector weights [features] and auxiliary weight vector w [features].
+
+    NOTE: This implementation is strictly TD(0). It does not yet support eligibility traces.
+    NOTE: Strictly linear function approximation.
+    """
+    v_t = torch.dot(weights, features)
+    v_next = torch.dot(weights, next_features) * (1.0 - float(terminated))
+    td_error = reward + gamma * v_next - v_t
+
+    # Update auxiliary weights (w)
+    w_new = w + beta * rho * (td_error - torch.dot(w, features)) * features
+
+    # Update primary weights (weights) with gradient correction
+    weights_new = (
+        weights
+        + alpha * rho * td_error * features
+        - alpha * rho * gamma * next_features * (1.0 - float(terminated)) * torch.dot(w, features)
+    )
+
+    return weights_new, w_new
+
+
+def true_online_td_update(
+    features: torch.Tensor,
+    reward: float | torch.Tensor,
+    next_features: torch.Tensor,
+    v_old: float | torch.Tensor,
+    gamma: float | torch.Tensor,
+    weights: torch.Tensor,
+    alpha: float | torch.Tensor,
+    trace: torch.Tensor,
+    terminated: bool | torch.Tensor = False,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Performs a True Online Temporal Difference (TD) update for linear function approximation.
+
+    Args:
+        features: Feature vector of the current state [features].
+        reward: Reward received after transitioning from the current state.
+        next_features: Feature vector of the next state [features].
+        v_old: The value of the current state computed using the previous weight vector (weights_{t-1}^T features_t).
+        gamma: Discount factor.
+        weights: Current weight vector [features].
+        alpha: Learning rate.
+        trace: The updated True Online eligibility trace for the current step (e_t) [features].
+        terminated: Whether the next state is a terminal state (default: False).
+
+    Returns:
+        A tuple of (weights_new, v_next):
+            - weights_new: The updated weight vector [features].
+            - v_next: The value of the next state computed with the current weights (weights_t^T features_{t+1}).
+                      This must be passed as `v_old` in the next environment step.
+
+    NOTE: Strictly linear function approximation.
+    """
+    # Fail Fast: Ensure shape alignment
+    assert features.ndim == 1, f"Expected 1D features [features], got {features.shape}"
+    assert (
+        weights.shape == features.shape
+    ), f"Shape mismatch: weights {weights.shape}, features {features.shape}"
+
+    # 1. Compute v_next using the CURRENT weights: v_{S'} = weights^T * next_features
+    v_next = torch.dot(weights, next_features) * (1.0 - float(terminated))
+
+    # 2. Compute TD error: delta = R + gamma * v_{S'} - v_old
+    td_error = reward + gamma * v_next - v_old
+
+    # 3. Compute v_current using the CURRENT weights: v_S = weights^T * features
+    v_current = torch.dot(weights, features)
+
+    # 4. Apply True Online TD weight update
+    # weights_{t+1} = weights_t + delta_t * e_t + alpha * (v_old - v_current) * features_t
+    weights_new = weights + td_error * trace + alpha * (v_old - v_current) * features
+
+    return weights_new, v_next

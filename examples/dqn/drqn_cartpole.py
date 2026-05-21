@@ -6,6 +6,8 @@ Key Ideas:
 - NOTE: Unlike the original DRQN paper we do not store individual transitions, instead we use an approach similar to R2D2's where we store overlapping sequences and perform a burn-in period per sequence. We also store old hidden states, which is a better start for the burn in that an fresh LSTM state, and also acts as a regularizer for the learning.
 """
 
+# TODO: results seem slightly noisier/worse than normal DQN. in some ways like my PPO+lstm results. should add a comparison on the flickering env of DQN and DRQN.
+
 import random
 from typing import Tuple, Optional
 
@@ -320,7 +322,9 @@ def train():
                     {
                         "loss/total": loss.item(),
                         "epsilon": current_epsilon,
-                        "q_values/mean": q_pred_flat[flat_mask.to(torch.bool)].mean().item(),
+                        "q_values/mean": q_pred_flat[flat_mask.to(torch.bool)]
+                        .mean()
+                        .item(),
                         "td_targets/mean": td_targets_flat[flat_mask.to(torch.bool)]
                         .mean()
                         .item(),

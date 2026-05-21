@@ -20,8 +20,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from functional.meta_optimization import (
-    compute_idbd_update,
-    compute_autostep_idbd_update,
+    compute_idbd_rates,
+    compute_autostep_rates,
 )
 from envs.streams.random_walk import make_random_walk_tracking_task
 from functional.utils import set_seed
@@ -73,21 +73,23 @@ def evaluate_algorithm(
             b_e = error.view(1, 1)
 
             if algo == "IDBD":
-                weights, betas, h, _ = compute_idbd_update(
-                    b_w, b_b, b_h, b_x, b_e, meta_lr=param
+                betas, h, alphas = compute_idbd_rates(
+                    b_b, b_h, b_x, b_e, meta_lr=param
                 )
-                weights, betas, h = weights.squeeze(0), betas.squeeze(0), h.squeeze(0)
+                betas, h, alphas = betas.squeeze(0), h.squeeze(0), alphas.squeeze(0)
+                weights = weights + alphas * error * inputs
 
             elif algo == "Autostep":
-                weights, betas, h, v, _ = compute_autostep_idbd_update(
-                    b_w, b_b, b_h, v.unsqueeze(0), b_x, b_e, meta_lr=param, tau=10000.0
+                betas, h, v, alphas = compute_autostep_rates(
+                    b_b, b_h, v.unsqueeze(0), b_x, b_e, meta_lr=param, tau=10000.0
                 )
-                weights, betas, h, v = (
-                    weights.squeeze(0),
+                betas, h, v, alphas = (
                     betas.squeeze(0),
                     h.squeeze(0),
                     v.squeeze(0),
+                    alphas.squeeze(0),
                 )
+                weights = weights + alphas * error * inputs
 
     return sum(squared_errors) / len(squared_errors)
 

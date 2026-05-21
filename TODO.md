@@ -73,3 +73,12 @@ IMPROVE MESSY LSTM CODE
 IMPROVE MESSY EXAMPLES.
 
 Consider bringing orchestration code back for TD losses like Q learning losses.
+
+Noisy Net A2C 
+Full Read of Noisy Nets Paper
+Full Read of Distributional DQN Paper
+Full Read of Dueling DQN Paper
+
+Add severly biased MNIST from PER Paper
+
+Look more into the prioritized memory idea from PER paper

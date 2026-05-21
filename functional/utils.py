@@ -232,3 +232,39 @@ def to_numpy_action(action_tensor: torch.Tensor) -> np.ndarray:
         return res.astype(np.int32)
     # For continuous actions, we keep the original shape and dtype (float32)
     return res
+
+
+# TODO: is this the same as ema?
+def update_welford_stats(
+    mean: torch.Tensor, var: torch.Tensor, count: torch.Tensor, batch: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Pure mathematical update for running mean and variance using Welford's online algorithm.
+    """
+    assert batch.dim() == 2, f"Expected [Batch, Features], got {batch.shape}"
+    batch_size = batch.size(0)
+
+    new_count = count + batch_size
+    delta = batch - mean.unsqueeze(0)
+    new_mean = mean + delta.sum(dim=0) / new_count
+
+    delta2 = batch - new_mean.unsqueeze(0)
+    new_var = var + (delta * delta2).sum(dim=0)
+
+    return new_mean, new_var, new_count
+
+
+def normalize_features(
+    features: torch.Tensor,
+    mean: torch.Tensor,
+    var: torch.Tensor,
+    count: torch.Tensor,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """
+    Applies running normalization to the features.
+    """
+    # Use unbiased variance if we have more than 1 sample
+    unbiased_var = var / torch.clamp(count - 1, min=1.0)
+    std = torch.sqrt(unbiased_var + eps)
+    return (features - mean) / std

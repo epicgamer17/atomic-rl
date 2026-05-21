@@ -13,6 +13,8 @@ import torch.nn.functional as F
 from functional.plasticity import (
     init_cbp_state,
     apply_continual_backprop,
+)
+from functional.metrics import (
     compute_dead_units_proportion,
     compute_average_weight_magnitude,
     compute_average_gradient_magnitude,

@@ -227,3 +227,6 @@ def plot_plasticity_correlates(
     plt.savefig(save_path, dpi=150)
     print(f"Plot saved to {save_path}")
     plt.close()  # Close figure to prevent memory leaks in loops
+
+
+# TODO: the visualization from Dueling DQN that tells you what the agent is looking at on the screen/board. specifically the value vs advantage. Saliency maps (Simonyan et al., 2013)?

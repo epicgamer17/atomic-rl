@@ -1,47 +1,42 @@
+# TODO: clean up Random Walk MDP, make it cleaner and more general.
 import torch
-from typing import Iterator, Tuple
 
 
-def make_random_walk_episode(
-    num_non_terminal_states: int = 5, start_state: int = 2
-) -> Iterator[Tuple[torch.Tensor, float, torch.Tensor, bool]]:
-    """
-    Generates transitions for a single episode of the Random Walk (Sutton 1988).
+# TODO: should this be a gym env?
+class RandomWalkEnv:
+    def __init__(self, num_states=5, start_state=2):
+        self.num_states = num_states
+        self.start_state = start_state
+        self.state = self.start_state
 
-    Args:
-        num_non_terminal_states: Number of non-terminal states (default 5 for A,B,C,D,E).
-        start_state: The starting index (default 2 for C).
+    def reset(self):
+        self.state = self.start_state
+        return self._get_features(self.state)
 
-    Yields:
-        Tuple containing:
-        - phi_t: One-hot encoded state tensor.
-        - reward: Float reward for the transition.
-        - phi_next: One-hot encoded next state tensor (zeros if terminated).
-        - terminated: Boolean flag indicating episode end.
-    """
-    state = start_state
-
-    while True:
-        phi_t = torch.zeros(num_non_terminal_states)
-        phi_t[state] = 1.0
-
-        # Transition: Left (-1) or Right (+1) with equal probability
-        next_state = state + (1 if torch.rand(1).item() > 0.5 else -1)
+    def step(self):
+        # Random transition
+        self.state += 1 if torch.rand(1).item() > 0.5 else -1
 
         terminated = False
         reward = 0.0
-        phi_next = torch.zeros(num_non_terminal_states)
 
-        if next_state == num_non_terminal_states:  # Right terminal (Win)
+        if self.state == self.num_states:  # Right terminal
             reward = 1.0
             terminated = True
-        elif next_state == -1:  # Left terminal (Lose)
+        elif self.state == -1:  # Left terminal
             reward = 0.0
             terminated = True
-        else:
-            phi_next[next_state] = 1.0
 
-        yield phi_t, reward, phi_next, terminated
+        next_features = (
+            self._get_features(self.state)
+            if not terminated
+            else torch.zeros(self.num_states)
+        )
 
-        if terminated:
-            break
+        return next_features, reward, terminated
+
+    def _get_features(self, state):
+        phi = torch.zeros(self.num_states)
+        if 0 <= state < self.num_states:
+            phi[state] = 1.0
+        return phi
