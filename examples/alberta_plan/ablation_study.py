@@ -3,6 +3,7 @@
 # TODO why do both fail with adversarial noise. what actual RL problem would have that?
 # TODO improvement is so little find a better task.
 # TODO/NOTE: i think the math of True Online TD(lambda) doesnt work with the feature wise alphas (like for IDBD) because of the eligibility trace update rule for it. It should work for TD(0) though. if we want to use True Online TD(lambda) for this, we need to find a way to make it work, something like AdaGain or TIDBD or like MetaTraces or something.
+# NOTE: we may be using a semi gradient method at the moment for IDBD with TD(0) the more correct version would be TIDBD.
 """
 Idea of this example is to attempt to combine the Alberta Plan Related papers i have created so far.
 

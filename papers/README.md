@@ -86,7 +86,29 @@ This directory maintains a mapping between the research papers in this folder an
 - **Toward Generate-and-Test Algorithms for Continual Feature Discovery**
 - **SwiftTD** 
 - **Metatrace actor-critic: Online step-size tuning by meta-gradient descent for reinforcement learning control** (AC(lambda) variant), an incremental version of AC with meta optimization
+- **Implementation Details of the TD( λ ) Procedure for the Case of Vector Predictions and Backpropagation** NonLinear TD/Backprop.
+- **Reinforcement Learning an Introduction Second Edition**
+    - Section 1.1 to 1.7: Introduction
+    Tabular Methods
+    - Section 2.1 to 2.10: Multi-armed Bandits
+    - Section 3.1 to 3.8: Finite MDPs
+    - Section 4.1 to 4.8: Dynamic Programming
+    - Section 5.1 to 5.10: Monte Carlo Methods
+    - Section 6.1 to 6.9: TD Learning
+    - Section 7.1 to 7.6: N-step Bootstrapping
+    - Section 8.1 to 8.13: Planning and Learning with Tabular Methods 
+    Approximate Solution Methods
+    - Section 9.1 to 9.12: On-policy Prediction with Approximation 
+    - Section 10.1 to 10.6: On-policy Control with Approximation
+    - Section 11.1 to 11.10: *Off-policy Methods with Approximation
+    - Section 12.1 to 12.13: Eligibility Traces
+    - Section 13.1 to 13.8: Policy Gradient Methods
+    
+    Skipped the Neuro and Psych
 
+    - Section 16.1 to 16.8: Applications and Case-Studies
+    - Section 17.1 to 17.6: Frontiers 
+    
 
 
 

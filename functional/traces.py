@@ -93,6 +93,8 @@ def update_true_online_traces(
 
     Returns:
         The updated traces of shape [batch, num_features].
+
+    NOTE: We implement True Online TD(lambda) trace update from Suttons Textbook (2nd Ed.) not from the True Online TD(lambda) paper.
     """
     # Fail Fast: Ensure shape alignment
     assert (
@@ -104,14 +106,13 @@ def update_true_online_traces(
 
     term_mask = terminated.unsqueeze(-1).float()
 
-    # 1. Decay the trace and zero out if the episode terminated
-    e_decay = gamma * lam * traces * (1.0 - term_mask)
+    # \gamma * \lambda * z
+    z_decay = gamma * lam * traces * (1.0 - term_mask)
 
-    # 2. Compute inner product: (gamma * lambda * e_{t-1})^T features_t
-    # Batched dot product along the feature dimension -> [B, 1]
-    inner_dot = torch.sum(e_decay * features, dim=-1, keepdim=True)
+    # z^T * x
+    inner_dot = torch.sum(traces * features, dim=-1, keepdim=True)
 
-    # 3. Apply True Online trace update
-    new_traces = e_decay + alpha * (1.0 - inner_dot) * features
+    # z_t = gamma * lambda * z_{t-1} + (1 - alpha * gamma * lambda * z_{t-1}^T features_t) * features_t
+    new_traces = z_decay + (1.0 - alpha * gamma * lam * inner_dot) * features
 
     return new_traces

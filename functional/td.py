@@ -327,7 +327,12 @@ def tdc_update(
     weights_new = (
         weights
         + alpha * rho * td_error * features
-        - alpha * rho * gamma * next_features * (1.0 - float(terminated)) * torch.dot(w, features)
+        - alpha
+        * rho
+        * gamma
+        * next_features
+        * (1.0 - float(terminated))
+        * torch.dot(w, features)
     )
 
     return weights_new, w_new
@@ -365,6 +370,7 @@ def true_online_td_update(
                       This must be passed as `v_old` in the next environment step.
 
     NOTE: Strictly linear function approximation.
+    NOTE: We implement True Online TD(lambda) weight update from Suttons Textbook (2nd Ed.) not from the True Online TD(lambda) paper.
     """
     # Fail Fast: Ensure shape alignment
     assert features.ndim == 1, f"Expected 1D features [features], got {features.shape}"
@@ -372,17 +378,36 @@ def true_online_td_update(
         weights.shape == features.shape
     ), f"Shape mismatch: weights {weights.shape}, features {features.shape}"
 
-    # 1. Compute v_next using the CURRENT weights: v_{S'} = weights^T * next_features
-    v_next = torch.dot(weights, next_features) * (1.0 - float(terminated))
-
-    # 2. Compute TD error: delta = R + gamma * v_{S'} - v_old
-    td_error = reward + gamma * v_next - v_old
-
-    # 3. Compute v_current using the CURRENT weights: v_S = weights^T * features
+    # V = w^T * x
     v_current = torch.dot(weights, features)
 
-    # 4. Apply True Online TD weight update
-    # weights_{t+1} = weights_t + delta_t * e_t + alpha * (v_old - v_current) * features_t
-    weights_new = weights + td_error * trace + alpha * (v_old - v_current) * features
+    # V' = w^T * x'
+    v_next = torch.dot(weights, next_features) * (1.0 - float(terminated))
+
+    # Standard TD Error: \delta = R + \gamma * V' - V
+    td_error = reward + gamma * v_next - v_current
+
+    # w <- w + \alpha * (\delta + V - V_old) * z - \alpha * (V - V_old) * x
+    v_diff = v_current - v_old
+    weights_new = (
+        weights + alpha * (td_error + v_diff) * trace - alpha * v_diff * features
+    )
+
+    return weights_new, v_next
+
+    # V = w^T * x
+    v_current = torch.dot(weights, features)
+
+    # V' = w^T * x'
+    v_next = torch.dot(weights, next_features) * (1.0 - float(terminated))
+
+    # Standard TD Error: \delta = R + \gamma * V' - V
+    td_error = reward + gamma * v_next - v_current
+
+    # w <- w + \alpha * (\delta + V - V_old) * z - \alpha * (V - V_old) * x
+    v_diff = v_current - v_old
+    weights_new = (
+        weights + alpha * (td_error + v_diff) * trace - alpha * v_diff * features
+    )
 
     return weights_new, v_next

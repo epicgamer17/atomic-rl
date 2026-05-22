@@ -67,8 +67,12 @@ def argmax_selector(
     else:
         vals = predictions
 
+    # Add microscopic noise to break ties randomly
+    noise = torch.rand_like(vals) * 1e-8
+    vals_with_noise = vals + noise
+
     # Force [B, 1] output for consistency
-    action = torch.argmax(vals, dim=1, keepdim=True)
+    action = torch.argmax(vals_with_noise, dim=1, keepdim=True)
     return action, {}
 
 
