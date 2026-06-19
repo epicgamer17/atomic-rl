@@ -30,9 +30,9 @@ from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
 from functional.rollout_buffer import (
     init_rollout_buffer,
-    store_rollout_step,
+    store_rollout_step_,
     flatten_rollout_buffer,
-    record_truncations,
+    record_truncations_,
     get_rollout_next_values,
 )
 from functional.utils import (
@@ -204,7 +204,7 @@ for iteration in range(MAX_ITERATIONS):
                 },
                 batch_size=[NUM_ENVS],
             )
-            store_rollout_step(buffer=buffer, step=step, transition=transition)
+            store_rollout_step_(buffer=buffer, step=step, transition=transition)
 
             # 4. Handle Truncations (Gymnasium auto-resets)
             if "final_observation" in info:
@@ -214,7 +214,7 @@ for iteration in range(MAX_ITERATIONS):
                 # Filter to only record environments that were truncated
                 trunc_mask = truncated[env_indices]
                 if trunc_mask.any():
-                    record_truncations(
+                    record_truncations_(
                         buffer,
                         step,
                         torch.as_tensor(

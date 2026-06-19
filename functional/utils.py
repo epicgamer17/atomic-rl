@@ -65,11 +65,9 @@ def extract_vector_env_final_obs(info) -> Tuple[np.ndarray, np.ndarray]:
               Returns (empty_array, empty_array) if no environments ended or if the
               info format does not expose final observations.
     """
-    # Non-dict info formats (e.g. PufferLib emits a list) cannot expose
-    # final observations; bail out cleanly.
+    # Note: If `info` is not a dict (e.g. PufferLib lists), this will explicitly crash,
+    # which is intended under the fail-fast philosophy unless handled explicitly.
     # TODO: implement correct behaviour for pufferlib
-    if not isinstance(info, dict):
-        return np.array([]), np.array([])
 
     # Vector envs only add this key if at least one environment ended
     if "final_observation" not in info:

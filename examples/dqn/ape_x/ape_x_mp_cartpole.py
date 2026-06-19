@@ -37,7 +37,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_ape_x_epsilon
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network_
 
 # --- Constants ---
 ENV_NAME = "CartPole-v1"
@@ -363,7 +363,7 @@ def learner_worker(
 
         step_count += 1
         if step_count % TARGET_NET_UPDATE_FREQ == 0:
-            hard_update_target_network(local_model, target_model)
+            hard_update_target_network_(local_model, target_model)
 
         if step_count % 100 == 0:
             print(f"Step {step_count}: Loss={weighted_loss.item():.4f}")

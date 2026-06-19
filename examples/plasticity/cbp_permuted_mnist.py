@@ -43,10 +43,23 @@ opt_cbp = torch.optim.Adam(model_cbp.parameters(), lr=LR)
 init_fn = gnt_init_wrapper(nn.init.kaiming_uniform_)
 
 cbp_states = {
-    model_cbp[0]: init_cbp_state(model_cbp[0]),
-    model_cbp[2]: init_cbp_state(model_cbp[2]),
+    model_cbp[0].weight: init_cbp_state(model_cbp[0].weight),
+    model_cbp[2].weight: init_cbp_state(model_cbp[2].weight),
 }
-layer_pairs = [(model_cbp[0], model_cbp[2]), (model_cbp[2], model_cbp[4])]
+layer_pairs = [
+    (
+        model_cbp[0].weight,
+        model_cbp[0].bias,
+        model_cbp[2].weight,
+        model_cbp[2].bias,
+    ),
+    (
+        model_cbp[2].weight,
+        model_cbp[2].bias,
+        model_cbp[4].weight,
+        model_cbp[4].bias,
+    ),
+]
 
 stream = make_permuted_mnist_stream(batch_size=64)
 

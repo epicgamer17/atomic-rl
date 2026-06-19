@@ -47,7 +47,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network_
 from functional.visualization import log_distributional_metrics
 
 from functional.td import compute_categorical_q_td_target
@@ -253,4 +253,4 @@ for step in range(MAX_STEPS):
 
     # 4. Target Network Update
     if step % TARGET_NET_UPDATE_FREQ == 0:
-        hard_update_target_network(model, target_model)
+        hard_update_target_network_(model, target_model)

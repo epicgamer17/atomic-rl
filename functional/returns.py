@@ -26,6 +26,7 @@ def compute_mc_returns(
 
     Returns:
         Discounted returns [B, T].
+        Note: The returned tensor is not explicitly detached.
     """
     assert rewards.ndim == 2, f"Expected 2D rewards [B, T], got {rewards.shape}"
     assert (
@@ -91,6 +92,7 @@ def compute_n_step_returns(
 
     Returns:
         N-step returns [B, T].
+        Note: The returned tensor is not explicitly detached.
     """
     assert rewards.ndim == 2, f"Expected 2D rewards [B, T], got {rewards.shape}"
     assert (
@@ -142,6 +144,10 @@ def compute_gae(
         gamma (float): The discount factor.
         gae_lambda (float): The GAE lambda parameter (typically 0.95 or 0.99).
     Expects exact [B, T] shapes.
+
+    Returns:
+        The Generalized Advantage Estimate [B, T].
+        Note: The returned tensor is not explicitly detached.
     """
     assert rewards.ndim == 2, f"Expected 2D rewards [B, T], got {rewards.shape}"
     assert (
@@ -183,6 +189,10 @@ def compute_td_lambda_returns(
     Mathematically, TD(λ) returns are equivalent to GAE + State Values.
     We preserve compute_gae as a separate function for semantic readability,
     but compose it here to unify the returns API.
+
+    Returns:
+        The TD(lambda) returns [B, T].
+        Note: The returned tensor is not explicitly detached.
     """
     advantages = compute_gae(
         rewards, terminated, truncated, values, next_values, gamma, lam

@@ -46,6 +46,7 @@ def unroll_rnn(
     inputs: torch.Tensor,
     initial_state: Any,
     dones: Optional[torch.Tensor] = None,
+    batch_first: bool = False,
 ) -> Tuple[torch.Tensor, Any]:
     """
     Vectorized RNN unrolling with support for mid-sequence state resets.
@@ -56,6 +57,7 @@ def unroll_rnn(
         initial_state (Any): Initial recurrent state(s).
         dones (Optional[torch.Tensor]): Optional binary mask of shape [Batch, Time].
             1.0 indicates the start of a new episode (reset state).
+        batch_first (bool): Indicates if the cell expects batch-major inputs.
 
     Returns:
         Tuple[torch.Tensor, Any]:
@@ -65,13 +67,14 @@ def unroll_rnn(
     # TODO what are all these different paths? what is the purpose of the reshaping?
     if dones is None:
         # Fast path for natively compiled unrolling (e.g., DRQN random updates)
-        is_batch_first = getattr(cell, "batch_first", False)
-        if is_batch_first:
+        if batch_first:
             return cell(inputs, initial_state)
 
         # [B, T, F] -> [T, B, F]
         out, state = cell(inputs.transpose(0, 1), initial_state)
-        return out.transpose(0, 1), state
+        # .contiguous() is fundamentally required here because the transpose makes the sequence-major output non-contiguous. 
+        # If the caller attempts to .view() or flatten the sequence dimensions for MLP processing, it will trigger a RuntimeError.
+        return out.transpose(0, 1).contiguous(), state
 
     # Slower path for sequences with mid-stream resets (e.g., PPO rollouts)
     outputs = []
@@ -85,17 +88,16 @@ def unroll_rnn(
         # mask shape: [1, B, 1] to broadcast across [Layers, Batch, Hidden]
         mask = (1.0 - d_t).view(1, -1, 1)
 
-        # TODO: why the is instance check?
-        if isinstance(state, tuple):
-            state = (state[0] * mask, state[1] * mask)
-        else:
-            state = state * mask
+        # Use tree_map to structurally mask all nested state tensors simultaneously (handles LSTM tuples vs GRU scalars cleanly)
+        state = torch.utils._pytree.tree_map(lambda s: s * mask, state)
 
         # cell expects [Seq, Batch, Features], so we unsqueeze(0) for seq_len=1
         out, state = cell(x_t.unsqueeze(0), state)
         outputs.append(out)
 
-    return torch.cat(outputs, dim=0).transpose(0, 1), state
+    # .contiguous() is fundamentally required here because the transpose makes the sequence-major output non-contiguous.
+    # If the caller attempts to .view() or flatten the sequence dimensions for MLP processing, it will trigger a RuntimeError.
+    return torch.cat(outputs, dim=0).transpose(0, 1).contiguous(), state
 
     # NOTE/TODO: there are many ways of handling recurrent states in learning. they tend to differ between online and offline. online simply uses the hidden states from the collection steps, so no burn in is requred. the below method is one way of handling this for offline learning which requires a burn in. Make this more clear.
     # TODO: thoughts on this API:
@@ -123,8 +125,8 @@ def make_burn_in_evaluator(
 
         # Initialize zero states (DRQN Bootstrapped Random Update rule)
         zero_state = (
-            torch.zeros(num_layers, batch_size, hidden_size, device=device),
-            torch.zeros(num_layers, batch_size, hidden_size, device=device),
+            obs.new_zeros(num_layers, batch_size, hidden_size),
+            obs.new_zeros(num_layers, batch_size, hidden_size),
         )
 
         # Forward pass

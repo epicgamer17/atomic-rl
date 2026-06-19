@@ -65,7 +65,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_ape_x_epsilon
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network_
 
 # --- Constants ---
 ENV_NAME = "CartPole-v1"
@@ -411,7 +411,7 @@ class LearnerActor:
 
         self.step_count += 1
         if self.step_count % TARGET_NET_UPDATE_FREQ == 0:
-            hard_update_target_network(self.model, self.target_model)
+            hard_update_target_network_(self.model, self.target_model)
 
         metrics = {
             "learner/loss": weighted_loss.item(),

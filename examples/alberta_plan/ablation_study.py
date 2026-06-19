@@ -169,10 +169,13 @@ def run_experiment(config: str):
     use_plasticity = config in ["B", "D", "F"]
     if use_plasticity:
         cbp_states = {
-            backbone.fc1: init_cbp_state(backbone.fc1),
-            backbone.fc2: init_cbp_state(backbone.fc2),
+            backbone.fc1.weight: init_cbp_state(backbone.fc1.weight),
+            backbone.fc2.weight: init_cbp_state(backbone.fc2.weight),
         }
-        layer_pairs = [(backbone.fc1, backbone.fc2), (backbone.fc2, theta.unsqueeze(0))]
+        layer_pairs = [
+            (backbone.fc1.weight, backbone.fc1.bias, backbone.fc2.weight, backbone.fc2.bias),
+            (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None)
+        ]
         init_fn = gnt_init_wrapper(
             lambda t: nn.init.kaiming_uniform_(t, a=math.sqrt(5))
         )
@@ -302,8 +305,8 @@ def run_experiment(config: str):
             # TODO: is theta is updated out-of-place? we assume it is so we dynamically reconstruct
             # the layer pairs to avoid a "stale reference" bug where CBP refers to the step 0 theta.
             current_layer_pairs = [
-                (backbone.fc1, backbone.fc2),
-                (backbone.fc2, theta.unsqueeze(0)),
+                (backbone.fc1.weight, backbone.fc1.bias, backbone.fc2.weight, backbone.fc2.bias),
+                (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None),
             ]
             replacement_masks = apply_continual_backprop(
                 layer_pairs=current_layer_pairs,
@@ -315,7 +318,7 @@ def run_experiment(config: str):
                 replacement_rate=1e-4,
             )
 
-            replacement_mask = replacement_masks.get(backbone.fc2, None)
+            replacement_mask = replacement_masks.get(backbone.fc2.weight, None)
 
             if replacement_mask is not None and replacement_mask.any():
                 num_replaced = replacement_mask.sum().item()
@@ -363,7 +366,7 @@ def run_experiment(config: str):
             )
             if use_plasticity and cbp_states is not None:
                 cbp_util_mag = torch.mean(
-                    torch.abs(cbp_states[backbone.fc2]["utilities"])
+                    torch.abs(cbp_states[backbone.fc2.weight]["utilities"])
                 ).item()
                 print(
                     f"[{config} Step {step}] CBP utilities magnitude (abs mean):  {cbp_util_mag:.5f}"

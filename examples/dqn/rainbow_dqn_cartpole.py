@@ -38,7 +38,7 @@ from functional.action_selection import (
     gather_q_values,
 )
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network_
 from functional.visualization import log_distributional_metrics
 from functional.utils import (
     to_tensor,
@@ -322,4 +322,4 @@ for step in range(MAX_STEPS):
 
     # 4. Target Network Update
     if step % TARGET_NET_UPDATE_FREQ == 0:
-        hard_update_target_network(model, target_model)
+        hard_update_target_network_(model, target_model)

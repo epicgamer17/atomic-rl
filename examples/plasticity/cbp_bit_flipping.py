@@ -53,7 +53,15 @@ opt_adam = torch.optim.Adam(model_adam.parameters(), lr=LR)
 opt_cbp = torch.optim.Adam(model_cbp.parameters(), lr=LR)
 
 init_fn = gnt_init_wrapper(nn.init.kaiming_uniform_)
-cbp_states = {model_cbp[0]: init_cbp_state(model_cbp[0])}
+cbp_states = {model_cbp[0].weight: init_cbp_state(model_cbp[0].weight)}
+layer_pairs = [
+    (
+        model_cbp[0].weight,
+        model_cbp[0].bias,
+        model_cbp[2].weight,
+        model_cbp[2].bias,
+    )
+]
 stream = make_bit_flipping_stream(m=M, f=F_BITS, t_flip=T_FLIP, target_hidden_size=100)
 
 # Linear Tracker Ensemble (vectorized for step-size sweep)
@@ -107,7 +115,7 @@ for step, (x, y) in enumerate(stream):
     opt_cbp.step()
 
     apply_continual_backprop(
-        layer_pairs=[(model_cbp[0], model_cbp[2])],
+        layer_pairs=layer_pairs,
         activations=[a1_cbp.unsqueeze(0)],
         cbp_states=cbp_states,
         optimizer=opt_cbp,

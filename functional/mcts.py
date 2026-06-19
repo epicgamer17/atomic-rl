@@ -40,7 +40,7 @@ def mcts_search(
     batch_range = torch.arange(batch_size, device=device)
 
     # 1. Initialize Tree State
-    tree = init_mcts_tree(root_embeddings, num_simulations, num_actions, device)
+    tree = init_mcts_tree(root_embeddings, num_simulations, num_actions)
     if root_to_play is not None:
         tree["to_play"][:, 0] = root_to_play
 
@@ -90,7 +90,6 @@ def init_mcts_tree(
     root_embeddings: torch.Tensor,
     num_simulations: int,
     num_actions: int,
-    device: torch.device,
 ) -> TensorDict:
     """
     Initializes the MCTS tree structure as a TensorDict.
@@ -110,33 +109,32 @@ def init_mcts_tree(
     # We pre-allocate the tree to avoid dynamic resizing (Torch Compile friendly)
     tree = TensorDict(
         {
-            "embeddings": torch.zeros(
-                (batch_size, max_nodes, *root_embeddings.shape[1:]), device=device
+            "embeddings": root_embeddings.new_zeros(
+                (batch_size, max_nodes, *root_embeddings.shape[1:])
             ),
-            "children_index": torch.full(
+            "children_index": root_embeddings.new_full(
                 (batch_size, max_nodes, num_actions),
                 -1,
                 dtype=torch.long,
-                device=device,
             ),
-            "children_prior": torch.zeros(
-                (batch_size, max_nodes, num_actions), device=device
+            "children_prior": root_embeddings.new_zeros(
+                (batch_size, max_nodes, num_actions)
             ),
-            "children_visits": torch.zeros(
-                (batch_size, max_nodes, num_actions), device=device
+            "children_visits": root_embeddings.new_zeros(
+                (batch_size, max_nodes, num_actions)
             ),
-            "children_rewards": torch.zeros(
-                (batch_size, max_nodes, num_actions), device=device
+            "children_rewards": root_embeddings.new_zeros(
+                (batch_size, max_nodes, num_actions)
             ),
-            "children_q_values": torch.zeros(
-                (batch_size, max_nodes, num_actions), device=device
+            "children_q_values": root_embeddings.new_zeros(
+                (batch_size, max_nodes, num_actions)
             ),
-            "node_counts": torch.ones(batch_size, dtype=torch.long, device=device),
-            "to_play": torch.zeros(
-                batch_size, max_nodes, dtype=torch.long, device=device
+            "node_counts": root_embeddings.new_ones(batch_size, dtype=torch.long),
+            "to_play": root_embeddings.new_zeros(
+                batch_size, max_nodes, dtype=torch.long
             ),
-            "min_q": torch.full((batch_size,), 1e9, device=device),
-            "max_q": torch.full((batch_size,), -1e9, device=device),
+            "min_q": root_embeddings.new_full((batch_size,), 1e9),
+            "max_q": root_embeddings.new_full((batch_size,), -1e9),
         },
         batch_size=[batch_size],
     )
@@ -203,12 +201,12 @@ def puct_score(
 
     pb_c = (
         torch.log(
-            (torch.tensor(total_visit_counts, device=q_values.device) + pb_c_base + 1)
+            (q_values.new_tensor(total_visit_counts) + pb_c_base + 1)
             / pb_c_base
         )
         + pb_c_init
     )
-    pb_c *= torch.sqrt(torch.tensor(total_visit_counts, device=q_values.device)) / (
+    pb_c *= torch.sqrt(q_values.new_tensor(total_visit_counts)) / (
         visit_counts + 1
     )
 
@@ -244,11 +242,11 @@ def select_leaf(
     device = tree.device
     batch_range = torch.arange(batch_size, device=device)
 
-    current_node = torch.zeros(batch_size, dtype=torch.long, device=device)
+    current_node = tree["min_q"].new_zeros(batch_size, dtype=torch.long)
     trajectory = []  # List of (node_idx, action_idx, mask)
 
     # Track which batch elements are still descending the tree
-    active_mask = torch.ones(batch_size, dtype=torch.bool, device=device)
+    active_mask = tree["min_q"].new_ones(batch_size, dtype=torch.bool)
 
     # The search depth is naturally bounded by the number of nodes or a safety limit
     for _ in range(max_depth):

@@ -40,13 +40,17 @@ class PERBufferState(BufferState):
     tree_capacity: int
 
 
-def init_buffer(capacity: int, shapes: dict, device: str = "cpu") -> BufferState:
+def init_buffer(
+    capacity: int, shapes: dict, device: Optional[torch.device] = None
+) -> BufferState:
     """Initializes a standard buffer."""
     data = _allocate_tensordict(shapes, [capacity], device)
     return BufferState(data=data, pointer=0, size=0, capacity=capacity, steps_seen=0)
 
 
-def init_per_buffer(capacity: int, shapes: dict, device="cpu") -> PERBufferState:
+def init_per_buffer(
+    capacity: int, shapes: dict, device: Optional[torch.device] = None
+) -> PERBufferState:
     """Initializes a PER buffer."""
     tree_capacity = 1 << (capacity - 1).bit_length() if capacity > 0 else 1
     empty_data = _allocate_tensordict(shapes, [capacity], device)
@@ -54,7 +58,7 @@ def init_per_buffer(capacity: int, shapes: dict, device="cpu") -> PERBufferState
         data=empty_data,
         sum_tree=torch.zeros(2 * tree_capacity - 1, device=device),
         min_tree=torch.full((2 * tree_capacity - 1,), float("inf"), device=device),
-        max_priority=1.0,
+        max_priority=torch.tensor(1.0, device=device),
         pointer=0,
         size=0,
         capacity=capacity,
@@ -206,7 +210,7 @@ def sample_per(
     ) * segment_length
 
     # Vectorized Tree Traversal
-    indices = torch.zeros(batch_size, dtype=torch.long)
+    indices = buffer_state.sum_tree.new_zeros(batch_size, dtype=torch.long)
 
     # Depth of tree is log2(capacity). We loop exactly this many times.
     import math
@@ -290,7 +294,7 @@ def update_priorities(
         buffer_state.sum_tree, buffer_state.min_tree, tree_indices, priorities
     )
 
-    new_max_priority = max(buffer_state.max_priority, torch.max(priorities).item())
+    new_max_priority = torch.maximum(buffer_state.max_priority, torch.max(priorities))
 
     return PERBufferState(
         data=buffer_state.data,
@@ -338,8 +342,8 @@ def with_per_tracking(write_strategy_fn: Callable) -> Callable:
 
             new_state.sum_tree = new_sum_tree
             new_state.min_tree = new_min_tree
-            new_state.max_priority = max(
-                new_state.max_priority, torch.max(priorities).item()
+            new_state.max_priority = torch.maximum(
+                new_state.max_priority, torch.max(priorities)
             )
 
         return new_state
@@ -380,14 +384,14 @@ def make_n_step_accumulator(n_steps: int, gamma: float, num_envs: int = 1) -> Ca
                 (
                     obs[i].detach(),
                     action[i].detach(),
-                    reward[i].item(),
+                    reward[i].detach(),
                     next_obs[i].detach(),
-                    terminated[i].item(),
-                    truncated[i].item(),
+                    terminated[i].detach(),
+                    truncated[i].detach(),
                 )
             )
 
-            done_i = is_done[i].item()
+            done_i = is_done[i]
 
             if len(h) == n_steps and not done_i:
                 n_step_reward = 0.0
@@ -399,15 +403,16 @@ def make_n_step_accumulator(n_steps: int, gamma: float, num_envs: int = 1) -> Ca
                 first_obs, first_action, _, _, _, _ = h[0]
                 _, _, _, final_next_obs, final_term, final_trunc = h[-1]
 
+                # Coerce to tensor safely without introspection
                 ready_transitions.append(
                     {
                         "obs": first_obs,
                         "action": first_action,
-                        "reward": torch.tensor(n_step_reward, dtype=torch.float32),
+                        "reward": torch.as_tensor(n_step_reward).detach(),
                         "next_obs": final_next_obs,
-                        "terminated": torch.tensor(final_term, dtype=torch.float32),
-                        "truncated": torch.tensor(final_trunc, dtype=torch.float32),
-                        "gamma": torch.tensor(gamma**n_steps, dtype=torch.float32),
+                        "terminated": torch.as_tensor(final_term).detach(),
+                        "truncated": torch.as_tensor(final_trunc).detach(),
+                        "gamma": torch.as_tensor(gamma**n_steps),
                     }
                 )
                 h.popleft()
@@ -427,11 +432,11 @@ def make_n_step_accumulator(n_steps: int, gamma: float, num_envs: int = 1) -> Ca
                         {
                             "obs": first_obs,
                             "action": first_action,
-                            "reward": torch.tensor(n_step_reward, dtype=torch.float32),
+                            "reward": torch.as_tensor(n_step_reward).detach(),
                             "next_obs": final_next_obs,
-                            "terminated": torch.tensor(final_term, dtype=torch.float32),
-                            "truncated": torch.tensor(final_trunc, dtype=torch.float32),
-                            "gamma": torch.tensor(gamma ** len(h), dtype=torch.float32),
+                            "terminated": torch.as_tensor(final_term).detach(),
+                            "truncated": torch.as_tensor(final_trunc).detach(),
+                            "gamma": torch.as_tensor(gamma ** len(h)),
                         }
                     )
                     h.popleft()
@@ -461,7 +466,7 @@ def make_padded_chunk_accumulator(
     chunk_size: int,
     num_envs: int,
     shapes: dict,
-    device: str = "cpu",
+    device: Optional[torch.device] = None,
     overlap: int = 0,  # Used for R2D2 burn-in
 ) -> Callable[[TensorDict], TensorDict]:
     """

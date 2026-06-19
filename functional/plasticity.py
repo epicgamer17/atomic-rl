@@ -20,8 +20,9 @@ TODO: add CBP Notes.
 
 import torch
 import torch.nn as nn
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Optional
 from functional.utils import ema_update, ema_update_
+
 # TODO: some messy is instance checks. these are necessary for IDBD and linear value heads and stuff, but maybe there is a cleaner way to do this.
 
 # TODO: The functions now return masks, but examples have not been updated to use this interface yet, and at the moment pretend there are no masks. NOTE: it may be that for nn.Modules (ie standard deep learning) the function has an implicit effect, whereas for linear and other methods (alberta plan) the mask is used. im not sure if i love this and ideally it would be unified across both.
@@ -102,9 +103,12 @@ def get_proportional_pruning_mask(
     num_pruned = int(kd)
     dec_part = kd - num_pruned
 
-    if dec_part > 0:
+    import random
+
+    if dec_part > 0 and random.random() < dec_part:
         # Bernoulli sample the fractional remainder to get exact expected pruning rate
-        num_pruned += torch.bernoulli(torch.tensor(dec_part)).int().item()
+        # TODO: should we do num_pruned += torch.bernoulli(torch.tensor(dec_part)).int().item(). Problem is this has a item() call which violates are rules to prevent GPU-CPU coupling.
+        num_pruned += 1
 
     num_pruned = min(num_pruned, d)
     mask = torch.zeros_like(utilities, dtype=torch.bool)
@@ -230,23 +234,23 @@ def apply_selective_weight_reinitialization(
     return masks_applied
 
 
-def init_cbp_state(layer: nn.Linear) -> dict[str, torch.Tensor]:
+# TODO: is this only for linear layers or Conv layers GRU layers etc? I want to confirm that other implementations and papers do it the same way.
+def init_cbp_state(weight: torch.Tensor) -> dict[str, torch.Tensor]:
     """
     Initializes the state tracking tensors required for Continual Backpropagation (CBP)
-    for a given linear layer. This state should be preserved across training steps.
+    for a given linear layer's weight. This state should be preserved across training steps.
 
     Args:
-        layer (nn.Linear): The layer whose features/neurons will be tracked.
+        weight (torch.Tensor): The weight tensor whose features/neurons will be tracked.
 
     Returns:
         dict[str, torch.Tensor]: A dictionary containing initialized state tensors.
     """
-    device = layer.weight.device
-    num_features = layer.out_features
+    num_features = weight.size(0)
     return {
-        "ages": torch.zeros(num_features, device=device),
-        "utilities": torch.zeros(num_features, device=device),
-        "avg_activations": torch.zeros(num_features, device=device),
+        "ages": weight.new_zeros(num_features),
+        "utilities": weight.new_zeros(num_features),
+        "avg_activations": weight.new_zeros(num_features),
     }
 
 
@@ -274,31 +278,41 @@ def get_cbp_replacement_mask(
     num_replace = int(kd)
     dec_part = kd - num_replace
 
-    if dec_part > 0:
+    import random
+
+    if dec_part > 0 and random.random() < dec_part:
         # Bernoulli sample the fractional remainder to get exact expected replacement rate
-        num_replace += torch.bernoulli(torch.tensor(dec_part)).int().item()
+        num_replace += 1
 
-    num_eligible = eligible_mask.sum().item()
-    num_replace = min(num_replace, num_eligible)
-
+    # We don't sum eligible_mask to avoid a CPU sync. We just take topk up to num_replace. TODO: is this functionally the same as summing eligible mask?
+    # We will mask out the ineligible ones after topk.
     mask = torch.zeros_like(utilities, dtype=torch.bool)
 
     if num_replace > 0:
         # We want to find the lowest utility among *eligible* units.
         # Give ineligible units a utility of infinity so they aren't chosen.
         masked_utils = torch.where(eligible_mask, utilities, torch.inf)
-        _, indices = torch.topk(masked_utils, num_replace, largest=False)
+        # Ensure we don't request more than the total number of features
+        k = min(num_replace, num_features)
+        _, indices = torch.topk(masked_utils, k, largest=False)
 
         flat_mask = mask.view(-1)
         flat_mask[indices] = True
+
+        # Ensure we don't replace ineligible features (in case num_replace > num_eligible)
+        mask &= eligible_mask
 
     return mask
 
 
 def apply_continual_backprop(
-    layer_pairs: Iterable[tuple[nn.Linear, nn.Linear | torch.Tensor]],
+    layer_pairs: Iterable[
+        tuple[
+            torch.Tensor, Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor]
+        ]
+    ],
     activations: Iterable[torch.Tensor],
-    cbp_states: dict[nn.Linear, dict[str, torch.Tensor]],
+    cbp_states: dict[torch.Tensor, dict[str, torch.Tensor]],
     optimizer: torch.optim.Optimizer,  # Contains step size
     init_fn: Callable[
         [torch.Tensor], None
@@ -306,7 +320,7 @@ def apply_continual_backprop(
     eta: float = 0.99,  # Decay rate
     maturity_threshold: int = 100,
     replacement_rate: float = 1e-4,
-) -> dict[nn.Linear, torch.BoolTensor]:
+) -> dict[torch.Tensor, torch.BoolTensor]:
     """
     Orchestrates Continual Backpropagation (CBP) for a set of feedforward linear layer pairs.
     This calculates contribution/adaptation utilities, updates running statistics, and selectively
@@ -318,10 +332,10 @@ def apply_continual_backprop(
     TODO/NOTE: PyTorch's default Adam tracks the `step` count as a single scalar per parameter tensor, not element-wise. Therefore, the element-wise timestep reset mentioned in the CBP paper is omitted. Element-wise momentum (`exp_avg`, `exp_avg_sq`) resetting is fully supported but in future perhaps make a GnT version of Adam to fully support the CBP paper?
 
     Args:
-        layer_pairs: Iterable of (layer, next_layer) tuples (e.g., [(layer1, layer2)]).
+        layer_pairs: Iterable of tuples: `(weight, bias, next_weight, next_bias)`.
         activations: Iterable of activation tensors corresponding to the output of the first
                      layer in each pair (post-activation, shape: [Batch, Features]).
-        cbp_states: Dictionary mapping `layer` to its state dictionary (from `init_cbp_state`).
+        cbp_states: Dictionary mapping a layer's `weight` tensor to its state dictionary (from `init_cbp_state`).
         optimizer: The optimizer being used to train the parameters.
         init_fn: A function that applies the desired reinitialization to a tensor.
             NOTE: Use `functional.utils.gnt_init_wrapper` to ensure biases are correctly zeroed. TODO can we do this automatically for the user or somehow enforce Fail Fast on this.
@@ -342,8 +356,8 @@ def apply_continual_backprop(
 
     replacement_masks = {}
 
-    for (layer, next_layer), act in zip(layer_pairs, activations):
-        state = cbp_states[layer]
+    for (weight, bias, next_weight, next_bias), act in zip(layer_pairs, activations):
+        state = cbp_states[weight]
         ages = state["ages"]
         utilities = state["utilities"]
         avg_activations = state["avg_activations"]
@@ -362,11 +376,8 @@ def apply_continual_backprop(
             act_diff = torch.abs(act - f_hat.unsqueeze(0)).mean(dim=0)
 
             # Sum of absolute outgoing and incoming weights
-            if isinstance(next_layer, torch.Tensor):
-                out_weight_sum = next_layer.abs().sum(dim=0)
-            else:
-                out_weight_sum = next_layer.weight.abs().sum(dim=0)
-            in_weight_sum = layer.weight.abs().sum(dim=1).clamp(min=1e-8)
+            out_weight_sum = next_weight.abs().sum(dim=0)
+            in_weight_sum = weight.abs().sum(dim=1).clamp(min=1e-8)
 
             # NOTE: We skip explicitly tracking Eq 4 (Contribution EMA) to save memory.
             # Instead, we calculate instantaneous contribution/adaptation and apply
@@ -385,38 +396,33 @@ def apply_continual_backprop(
             mask = get_cbp_replacement_mask(u_hat, eligible_mask, replacement_rate)
 
             if not mask.any():
-                replacement_masks[layer] = mask
+                replacement_masks[weight] = mask
                 continue
 
             # Apply Replacement, Lines 5, 6, 7 of the pseudo code loop over layers
 
             # Transfer contribution to the bias of consumer (next_layer) (NOTE: not in pseudocode but mentioned in paper)
-            if not isinstance(next_layer, torch.Tensor) and next_layer.bias is not None:
+            if next_bias is not None:
                 # Multiply outgoing weights by the bias-corrected average activation of the removed unit
-                contribution = (
-                    next_layer.weight[:, mask] * f_hat[mask].unsqueeze(0)
-                ).sum(dim=1)
-                next_layer.bias.add_(contribution)
+                contribution = (next_weight[:, mask] * f_hat[mask].unsqueeze(0)).sum(
+                    dim=1
+                )
+                next_bias.add_(contribution)
 
             # 7. Reset input weights and bias (NOTE bias part not in pseudocode but mentioned in paper)
             # TODO: if using standard init_fns can this be simpler?
-            temp_weight = torch.empty_like(layer.weight)
+            temp_weight = torch.empty_like(weight)
             init_fn(temp_weight)
             # Using mask.unsqueeze(1) expands the 1D feature mask across the in_features dimension (Rows)
-            layer.weight.copy_(
-                torch.where(mask.unsqueeze(1), temp_weight, layer.weight)
-            )
+            weight.copy_(torch.where(mask.unsqueeze(1), temp_weight, weight))
 
-            # TODO: how should this be handled? Should it be initialized like it was at the beginning of training or something similar to how we do SWR (ie our custom init func)? If like SWR
-            if layer.bias is not None:
-                layer.bias.masked_fill_(mask, 0.0)
+            # SWR paper (and standard practice) initializes biases to zero to avoid massive offsets for newly generated units.
+            if bias is not None:
+                bias.masked_fill_(mask, 0.0)
 
             # 6. Reset output weights
             # Using mask.unsqueeze(0) expands the 1D feature mask across the next_out_features dimension (Columns)
-            if isinstance(next_layer, torch.Tensor):
-                next_layer.masked_fill_(mask.unsqueeze(0), 0.0)
-            else:
-                next_layer.weight.masked_fill_(mask.unsqueeze(0), 0.0)
+            next_weight.masked_fill_(mask.unsqueeze(0), 0.0)
 
             # 7. Reset CBP state for replaced features
             ages.masked_fill_(mask, 0.0)
@@ -429,23 +435,16 @@ def apply_continual_backprop(
 
         # Input weights (Resetting rows)
         reset_optimizer_states_elementwise_(
-            optimizer, layer.weight, mask.unsqueeze(1).expand_as(layer.weight)
+            optimizer, weight, mask.unsqueeze(1).expand_as(weight)
         )
-        if layer.bias is not None:
-            reset_optimizer_states_elementwise_(optimizer, layer.bias, mask)
+        if bias is not None:
+            reset_optimizer_states_elementwise_(optimizer, bias, mask)
 
         # Output weights (Resetting columns)
-        if isinstance(next_layer, torch.Tensor):
-            reset_optimizer_states_elementwise_(
-                optimizer, next_layer, mask.unsqueeze(0).expand_as(next_layer)
-            )
-        else:
-            reset_optimizer_states_elementwise_(
-                optimizer,
-                next_layer.weight,
-                mask.unsqueeze(0).expand_as(next_layer.weight),
-            )
+        reset_optimizer_states_elementwise_(
+            optimizer, next_weight, mask.unsqueeze(0).expand_as(next_weight)
+        )
 
-        replacement_masks[layer] = mask
+        replacement_masks[weight] = mask
 
     return replacement_masks

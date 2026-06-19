@@ -39,6 +39,7 @@ def compute_v_td_target(
 
     Returns:
         The TD target of shape [B].
+        Note: The returned tensor is not explicitly detached.
     """
     # Fail Fast: Ensure shape alignment
     assert (
@@ -71,6 +72,7 @@ def compute_q_td_target(
 
     Returns:
         The TD target of shape [B].
+        Note: The returned tensor is not explicitly detached.
     """
     assert (
         next_q_values.ndim == 2
@@ -117,6 +119,7 @@ def compute_categorical_q_td_target(
 
     Returns:
         The projected Categorical TD target distribution [B, Atoms].
+        Note: The returned tensor is not explicitly detached.
     """
     assert (
         next_logits.ndim == 3
@@ -153,7 +156,7 @@ def compute_categorical_q_td_target(
 
     # 5. Distribute probabilities onto the fixed support (Projection)
     batch_size = rewards.size(0)
-    m = torch.zeros(batch_size, atom_size, device=rewards.device)
+    m = rewards.new_zeros(batch_size, atom_size)
     offset = (
         torch.linspace(
             0,
@@ -184,7 +187,6 @@ def compute_categorical_q_td_target(
 # GRADIENT TD METHODS
 # TODO: more semantic naming instead of phi and theta etc?
 # TODO: actually use/test importance sampling
-# TODO: document that terminated defaults to false for the continual learning case by default. Should it even have a default or simply be required to prevent silent errors?
 # TODO: batch updates where phi comes from vectorized envs. "batched online learning"
 # TODO: remove value specific logic to make these work for Policy updates URGENT FOR STREAM RL.
 # TODO: allow for entropy regularization with TD policy method
@@ -198,8 +200,8 @@ def semi_gradient_td_update(
     weights: torch.Tensor,
     alpha: float | torch.Tensor,
     update_vector: torch.Tensor,
+    terminated: bool | torch.Tensor,
     rho: float | torch.Tensor = 1.0,
-    terminated: bool | torch.Tensor = False,
 ) -> torch.Tensor:
     """
     Performs a semi-gradient Temporal Difference (TD) update for linear function approximation. Allows for eligibility traces.
@@ -214,7 +216,7 @@ def semi_gradient_td_update(
             - For TD(0), pass `features`.
             - For TD(lambda), pass the accumulated `eligibility_trace`.
         rho: Importance sampling ratio (default: 1.0 for on-policy).
-        terminated: Whether the next state is a terminal state (default: False).
+        terminated: Whether the next state is a terminal state.
 
     Returns:
         The updated weight vector weights [features].
@@ -246,8 +248,8 @@ def gtd0_update(
     u: torch.Tensor,
     alpha: float | torch.Tensor,
     beta: float | torch.Tensor,
+    terminated: bool | torch.Tensor,
     rho: float | torch.Tensor = 1.0,
-    terminated: bool | torch.Tensor = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     GTD(0) update from Sutton et al. (2009). NOTE: Faithful to the original 2009 paper, not modern GTD2/TDC.
@@ -262,7 +264,7 @@ def gtd0_update(
         alpha: Learning rate.
         beta: Step size for auxiliary weight updates.
         rho: Importance sampling ratio (default: 1.0 for on-policy).
-        terminated: Whether the next state is a terminal state (default: False).
+        terminated: Whether the next state is a terminal state.
 
     Returns:
         The updated weight vector weights [features] and auxiliary weight vector u [features].
@@ -294,8 +296,8 @@ def tdc_update(
     w: torch.Tensor,
     alpha: float | torch.Tensor,
     beta: float | torch.Tensor,
+    terminated: bool | torch.Tensor,
     rho: float | torch.Tensor = 1.0,
-    terminated: bool | torch.Tensor = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Fast-GTD / TDC update from Sutton et al. (2009).
@@ -310,7 +312,7 @@ def tdc_update(
         alpha: Learning rate.
         beta: Step size for auxiliary weight updates.
         rho: Importance sampling ratio (default: 1.0 for on-policy).
-        terminated: Whether the next state is a terminal state (default: False).
+        terminated: Whether the next state is a terminal state.
 
     Returns:
         The updated weight vector weights [features] and auxiliary weight vector w [features].
@@ -349,7 +351,7 @@ def true_online_td_update(
     weights: torch.Tensor,
     alpha: float | torch.Tensor,
     trace: torch.Tensor,
-    terminated: bool | torch.Tensor = False,
+    terminated: bool | torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Performs a True Online Temporal Difference (TD) update for linear function approximation.
@@ -363,7 +365,7 @@ def true_online_td_update(
         weights: Current weight vector [features].
         alpha: Learning rate.
         trace: The updated True Online eligibility trace for the current step (e_t) [features].
-        terminated: Whether the next state is a terminal state (default: False).
+        terminated: Whether the next state is a terminal state.
 
     Returns:
         A tuple of (weights_new, v_next):

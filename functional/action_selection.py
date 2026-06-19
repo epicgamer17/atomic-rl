@@ -89,7 +89,9 @@ def sample_distribution(
             - An info dictionary containing "log_prob".
     """
     if not explore:
-        # Deterministic selection
+        # Note: This is one of the rare cases where isinstance/hasattr is unavoidable.
+        # PyTorch's torch.distributions does not enforce a uniform interface for the 'mode'
+        # or greedy action across continuous/discrete distributions.
         if isinstance(dist, torch.distributions.Categorical):
             action = torch.argmax(dist.probs, dim=-1)
         elif hasattr(dist, "mean"):
@@ -129,7 +131,7 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
         mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, dict]:
         # Expected [B, 1], dict. The selector_fn handles masked predictions naturally
-        greedy_actions, info = selector_fn(predictions)  
+        greedy_actions, info = selector_fn(predictions)
 
         if epsilon <= 0.0:
             return greedy_actions, {**info, "generator": generator}
@@ -138,20 +140,21 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
 
         if mask is not None:
             # Fail Fast: Ensure mask matches [Batch, Actions]
-            assert mask.shape == (batch_size, num_actions), \
-                f"Mask shape {mask.shape} does not match expected ({batch_size}, {num_actions})"
-            
+            assert mask.shape == (
+                batch_size,
+                num_actions,
+            ), f"Mask shape {mask.shape} does not match expected ({batch_size}, {num_actions})"
+
             # Fail Fast: Ensure no environment has zero valid actions
-            assert (mask.sum(dim=-1) > 0).all(), \
-                "Encountered a mask where an environment has 0 valid actions."
+            assert (
+                mask.sum(dim=-1) > 0
+            ).all(), "Encountered a mask where an environment has 0 valid actions."
 
             # Convert bool mask to probability weights (1.0 for valid, 0.0 for invalid)
             valid_weights = mask.to(predictions.dtype)
-            
+
             # Uniformly sample 1 valid action per batch element
-            random_actions = torch.multinomial(
-                valid_weights, 1, generator=generator
-            )
+            random_actions = torch.multinomial(valid_weights, 1, generator=generator)
         else:
             # Standard uniform sampling over all actions
             random_actions = torch.randint(
@@ -222,7 +225,7 @@ def gather_q_values(q_values: torch.Tensor, actions: torch.Tensor) -> torch.Tens
         actions: The action indices.
 
     Returns:
-        The Q-values for the selected actions.
+        The Q-values for the selected actions. (Note: Returns a view of the gathered tensor)
     """
     assert q_values.ndim in [2, 3], f"Expected 2D or 3D q_values, got {q_values.shape}"
     if actions.ndim == 2:

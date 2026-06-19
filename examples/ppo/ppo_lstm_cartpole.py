@@ -26,9 +26,9 @@ from functional.visualization import compute_explained_variance
 from functional.network import unroll_rnn
 from functional.rollout_buffer import (
     init_rollout_buffer,
-    store_rollout_step,
+    store_rollout_step_,
     flatten_rollout_buffer,
-    record_truncations,
+    record_truncations_,
     get_rollout_next_values,
     yield_shuffled_minibatches,
     yield_sequential_minibatches,
@@ -353,7 +353,7 @@ def train_ppo(use_lstm: bool = False):
 
                 # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
                 transition = TensorDict(transition_data, batch_size=[NUM_ENVS])
-                store_rollout_step(buffer=buffer, step=step, transition=transition)
+                store_rollout_step_(buffer=buffer, step=step, transition=transition)
 
                 if "final_observation" in info:
                     env_indices, final_obs = extract_vector_env_final_obs(info)
@@ -362,7 +362,7 @@ def train_ppo(use_lstm: bool = False):
                         # TODO: We should correctly handle LSTM hidden states on bootstrapping truncated states.
                         # Currently we only store the final observation, but the hidden state should also be preserved
                         # or re-computed to get an accurate value estimate for the truncated state.
-                        record_truncations(
+                        record_truncations_(
                             buffer,
                             step,
                             torch.as_tensor(

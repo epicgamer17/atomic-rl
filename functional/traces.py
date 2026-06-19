@@ -11,8 +11,8 @@ From Stream RL Paper:
 def update_accumulating_traces(
     traces: torch.Tensor,  # [batch, num_features]
     gradients: torch.Tensor,  # [batch, num_features]
-    gamma: float,  # TODO: should these be tensors like gamma in my other functions?
-    lam: float,  # TODO: should these be tensors like gamma in my other functions?
+    gamma: float | torch.Tensor,
+    lam: float | torch.Tensor,
     terminated: torch.Tensor,  # [batch]
 ) -> torch.Tensor:
     """

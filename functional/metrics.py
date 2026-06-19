@@ -5,6 +5,7 @@ from typing import Iterable
 # TODO: should we merge this with visualzations.py? should stuff from visualizations.py be moved here?
 
 
+@torch.no_grad()
 def compute_dead_units_proportion(activations: torch.Tensor) -> float:
     """
     Computes the proportion of dead units in a layer.
@@ -21,6 +22,7 @@ def compute_dead_units_proportion(activations: torch.Tensor) -> float:
     return dead_mask.sum().item() / dead_mask.numel()
 
 
+@torch.no_grad()
 def compute_average_weight_magnitude(parameters: Iterable[nn.Parameter]) -> float:
     """Computes the mean absolute value of all weights in the given parameters."""
     total_mag = 0.0
@@ -32,6 +34,7 @@ def compute_average_weight_magnitude(parameters: Iterable[nn.Parameter]) -> floa
     return total_mag / total_elements if total_elements > 0 else 0.0
 
 
+@torch.no_grad()
 def compute_average_gradient_magnitude(parameters: Iterable[nn.Parameter]) -> float:
     """Computes the mean absolute value of all gradients in the given parameters."""
     total_mag = 0.0
@@ -44,6 +47,7 @@ def compute_average_gradient_magnitude(parameters: Iterable[nn.Parameter]) -> fl
     return total_mag / total_elements if total_elements > 0 else 0.0
 
 
+@torch.no_grad()
 def compute_stable_rank(activations: torch.Tensor) -> float:
     """
     Computes the stable rank of the representation matrix.

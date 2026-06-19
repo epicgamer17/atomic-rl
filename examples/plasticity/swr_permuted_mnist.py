@@ -65,11 +65,26 @@ def run_permuted_mnist(mode: str, num_tasks: int = 50):
     layer_pairs = []
     if mode == "cbp":
         layer_pairs = [
-            (model[0], model[2]),
-            (model[2], model[4]),
-            (model[4], model[6]),
+            (
+                model[0].weight,
+                model[0].bias,
+                model[2].weight,
+                model[2].bias,
+            ),
+            (
+                model[2].weight,
+                model[2].bias,
+                model[4].weight,
+                model[4].bias,
+            ),
+            (
+                model[4].weight,
+                model[4].bias,
+                model[6].weight,
+                model[6].bias,
+            ),
         ]
-        cbp_states = {layer: init_cbp_state(layer) for layer, _ in layer_pairs}
+        cbp_states = {weight: init_cbp_state(weight) for weight, _, _, _ in layer_pairs}
 
     # Isolate parameters for SWR (paper applies it to all parameters including biases)
     hidden_params = list(model.parameters())

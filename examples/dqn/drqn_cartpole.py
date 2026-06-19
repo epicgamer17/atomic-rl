@@ -28,7 +28,7 @@ from functional.action_selection import (
     with_epsilon_greedy,
 )
 from functional.losses import mse_loss, with_sequence_mask
-from functional.network import hard_update_target_network
+from functional.network import hard_update_target_network_
 from functional.replay_buffer import (
     circular_write_strategy,
     init_buffer,
@@ -337,7 +337,7 @@ def train():
 
         # 5. Target Network Update
         if step % TARGET_NET_UPDATE_FREQ == 0:
-            hard_update_target_network(model, target_model)
+            hard_update_target_network_(model, target_model)
 
     wandb.finish()
 

@@ -36,6 +36,7 @@ Minimze dead code and useless functions. Without good reason (semantic or effici
 Avoid OOP unless absolutely necessary, aim for a functional style of programming.
 Break large functions into smaller, more manageable functions and compose them together to achieve the desired functionality. This is preferred over writing a single monolithic function and prevents combinatorial explosion. 
 In general follow PyTorch best practices and try and make sure things integrate well with PyTorch
+Minimize use of isinstance, hasattr, getattr, try-except blocks and other checks or retrievals like this when possible. It makes the code messy and harder to read. It can lead to hidden defaults, hidden value, and hidden behaviour. And it probably indicates bad design. It may be necessary sometimes, but should be limited when possible. 
 Generally but not always, functional core, stateful wrapper (like PyTorch)
 Where possible we should not try and recreate the wheel and use existing torch utilities. Try to avoid making simple wrappers for things that are already implemented in torch, unless the wrapper provides clear semantic meaning or establishes a consistent interface for swappability (e.g., hard_update vs. soft_update).
 
@@ -60,6 +61,8 @@ PyTorch allows implicit broadcasting (e.g., adding a [Batch, 1] tensor to a [Bat
 If a function returns a view of a tensor rather than an allocated copy, it must be documented.
 If a function fundamentally requires a contiguous block of memory (common when reshaping after a .transpose()), use .contiguous() explicitly and document why it is necessary.
 
+TorchRL-like conventions
+Never blindly zero-out values using a generic done mask. If an episode is Truncated (hit a time limit), the state still has a bootstrap value, and masking it to 0 artificially corrupts the value function. Your functional TD-learning and return functions must explicitly expect terminated masks, not generic done masks
 
 *examples/*
 This layer contains examples of how to use the functions in the functional layer.

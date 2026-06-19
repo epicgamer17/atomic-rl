@@ -37,7 +37,7 @@ def _allocate_tensordict(
     data = TensorDict({}, batch_size=batch_size, device=device)
     for key, shape in shapes.items():
         dtype = torch.long if "action" in key else torch.float32
-        data.set(key, torch.zeros((*batch_size, *shape), dtype=dtype))
+        data.set(key, torch.zeros((*batch_size, *shape), dtype=dtype, device=device))
     return data
 
 
@@ -98,10 +98,10 @@ def sparse_init_weight_(tensor: torch.Tensor, sparsity: float) -> None:
         sparsity: The fraction of fan_in to set to 0.
     """
     with torch.no_grad():
-        try:
+        if tensor.dim() < 2:
+            fan_in = tensor.size(0)
+        else:
             fan_in = torch.nn.init._calculate_fan_in_and_fan_out(tensor)[0]
-        except ValueError:
-            fan_in = tensor.size(1) if tensor.dim() >= 2 else tensor.size(0)
 
         n = int(sparsity * fan_in)
 

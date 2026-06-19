@@ -102,6 +102,7 @@ from typing import Dict, Any
 from torch.optim.optimizer import Optimizer
 
 
+@torch.no_grad()
 def update_idbd_rates_(
     betas: torch.Tensor,
     h: torch.Tensor,
@@ -138,7 +139,9 @@ def update_idbd_rates_(
     # NOTE: By checking that inputs is broadcastable/matches the last dimension of betas (rather than being completely identical in shape),
     # this allows the algorithm to run in parallel across hundreds of output neurons in a standard PyTorch nn.Linear layer without altering the underlying math.
     assert betas.shape == h.shape, "Betas and traces must match weight shapes."
-    assert inputs.shape[-1] == betas.shape[-1], "Input features must match weight in_features."
+    assert (
+        inputs.shape[-1] == betas.shape[-1]
+    ), "Input features must match weight in_features."
 
     # Fail Fast: Ensure error is explicitly broadcastable to the feature dimension.
     if inputs.dim() > 1:
@@ -168,6 +171,7 @@ def update_idbd_rates_(
     return alphas
 
 
+@torch.no_grad()
 def update_k1_rates_(
     betas: torch.Tensor,
     h: torch.Tensor,
@@ -203,7 +207,9 @@ def update_k1_rates_(
     # NOTE: By checking that inputs is broadcastable/matches the last dimension of betas (rather than being completely identical in shape),
     # this allows the algorithm to run in parallel across hundreds of output neurons in a standard PyTorch nn.Linear layer without altering the underlying math.
     assert betas.shape == h.shape, "Betas and traces must match weight shapes."
-    assert inputs.shape[-1] == betas.shape[-1], "Input features must match weight in_features."
+    assert (
+        inputs.shape[-1] == betas.shape[-1]
+    ), "Input features must match weight in_features."
     if inputs.dim() > 1:
         assert (
             error.dim() == inputs.dim() and error.shape[-1] == 1
@@ -236,6 +242,7 @@ def update_k1_rates_(
     return k_gain
 
 
+@torch.no_grad()
 def update_k2_rates_(
     betas: torch.Tensor,
     inputs: torch.Tensor,
@@ -268,7 +275,9 @@ def update_k2_rates_(
     """
     # NOTE: By checking that inputs is broadcastable/matches the last dimension of betas (rather than being completely identical in shape),
     # this allows the algorithm to run in parallel across hundreds of output neurons in a standard PyTorch nn.Linear layer without altering the underlying math.
-    assert inputs.shape[-1] == betas.shape[-1], "Input features must match weight in_features."
+    assert (
+        inputs.shape[-1] == betas.shape[-1]
+    ), "Input features must match weight in_features."
     if inputs.dim() > 1:
         assert (
             error.dim() == inputs.dim() and error.shape[-1] == 1
@@ -303,6 +312,7 @@ def update_k2_rates_(
 import torch
 
 
+@torch.no_grad()
 def update_autostep_v_normalizer_(
     v: torch.Tensor,
     abs_meta_grad: torch.Tensor,
@@ -338,6 +348,7 @@ def update_autostep_v_normalizer_(
 
 
 # TODO: can this be merged or reused for the ObGD logic?
+@torch.no_grad()
 def update_autostep_m_cap_(
     betas: torch.Tensor,
     inputs: torch.Tensor,
@@ -372,6 +383,7 @@ def update_autostep_m_cap_(
     return temp_alphas.div_(m)
 
 
+@torch.no_grad()
 def update_autostep_rates_(
     betas: torch.Tensor,
     h: torch.Tensor,
@@ -411,8 +423,12 @@ def update_autostep_rates_(
     """
     # NOTE: By checking that inputs is broadcastable/matches the last dimension of betas (rather than being completely identical in shape),
     # this allows the algorithm to run in parallel across hundreds of output neurons in a standard PyTorch nn.Linear layer without altering the underlying math.
-    assert betas.shape == h.shape == v.shape, "Betas, traces, and normalizers must match weight shapes."
-    assert inputs.shape[-1] == betas.shape[-1], "Input features must match weight in_features."
+    assert (
+        betas.shape == h.shape == v.shape
+    ), "Betas, traces, and normalizers must match weight shapes."
+    assert (
+        inputs.shape[-1] == betas.shape[-1]
+    ), "Input features must match weight in_features."
 
     if inputs.dim() > 1:
         assert (

@@ -23,6 +23,7 @@ def compute_explained_variance(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return 1 - np.var(y_true - y_pred) / var_y
 
 
+@torch.no_grad()
 def log_distributional_metrics(
     info_dict: dict, support: torch.Tensor, step: int, log_chart: bool = False
 ) -> dict:

@@ -58,7 +58,7 @@ def record_truncations_(
         final_observations (torch.Tensor): 2D tensor of final observations for those environments.
     """
     for i, env_idx in enumerate(truncated_envs):
-        buffer.truncation_records.append((step, env_idx.item(), final_observations[i]))
+        buffer.truncation_records.append((step, int(env_idx), final_observations[i]))
 
 
 def get_rollout_next_values(
@@ -75,7 +75,7 @@ def get_rollout_next_values(
         truncated_steps = buffer.data["truncated"].bool().nonzero(as_tuple=False)
         if truncated_steps.numel() > 0:
             expected_records = {
-                (int(step.item()), int(env_idx.item()))
+                (int(step), int(env_idx))
                 for env_idx, step in truncated_steps
             }
             actual_records = {
@@ -121,7 +121,7 @@ def get_rollout_next_values(
 
 
 def flatten_rollout_buffer(buffer: RolloutBufferState) -> TensorDict:
-    """Flattens [B, T] into [B*T]."""
+    """Flattens [B, T] into [B*T]. (Note: Returns a view of the buffer data)"""
     return buffer.data.flatten(0, 1)
 
 

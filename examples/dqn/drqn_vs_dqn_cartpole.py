@@ -25,7 +25,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network, unroll_rnn
+from functional.network import hard_update_target_network_, unroll_rnn
 from envs.wrappers import FlickeringObservation
 
 # TODO: make this be more like PPO + LSTM. First fix the TODOs in PPO + LSTM relating to LSTM stuff.
