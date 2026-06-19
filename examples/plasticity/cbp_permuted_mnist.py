@@ -3,6 +3,7 @@ Example: CBP vs Standard Adam on Online Permuted MNIST
 """
 
 # TODO: improve and make plots and stuff like SWR example
+from functional.initialization import gnt_init_wrapper
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,7 +20,6 @@ from functional.visualization import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
-from functional.utils import gnt_init_wrapper
 from envs.streams.permuted_mnist import make_permuted_mnist_stream
 
 HIDDEN, RHO, ETA, MATURITY, LR = 2000, 1e-4, 0.99, 1000, 0.01

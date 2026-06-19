@@ -5,6 +5,7 @@ REINFORCE adapted for continuous action spaces using a Gaussian policy.
 The Actor outputs the mean (mu) and has a learnable log standard deviation (log_std).
 """
 
+from functional.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,7 +15,6 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
-from einops import rearrange
 
 from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
@@ -24,11 +24,9 @@ from functional.utils import (
     ema_update,
     standardize_tensor,
     scale_tensor_by_std,
-    set_seed,
     to_tensor,
     to_numpy_action,
 )
-from functional.network import layer_init
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -156,7 +154,7 @@ for episode in range(MAX_EPISODES):
 
     loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        log_probs=rearrange(torch.stack(log_probs), "t 1 -> t"),
+        log_probs=torch.stack(log_probs).flatten(),
     )
     loss = loss.mean()
 

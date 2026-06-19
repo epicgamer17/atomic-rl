@@ -8,6 +8,7 @@ Introduces policy gradient, simply put increase the probability of playing "good
 On-Policy Algorithm so it can't store old data. Simple places for inovation and changes, data efficiency, baseline methods/advantage computation, adding a value network, more efficient data collection, allowing for trajectories instead of only episodes, relying on Monte Carlo returns (high variance), allowing for offline data, among many others.
 """
 
+from functional.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,7 +18,6 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
-from einops import rearrange
 from functools import partial
 
 from functional.action_selection import sample_distribution
@@ -28,11 +28,9 @@ from functional.utils import (
     ema_update,
     standardize_tensor,
     scale_tensor_by_std,
-    set_seed,
     to_tensor,
     to_numpy_action,
 )
-from functional.network import layer_init
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -95,7 +93,9 @@ for episode in range(MAX_EPISODES):
         action_np = to_numpy_action(action)
 
         # 2. Step Env
-        next_obs, reward, terminated, truncated, info = env.step(action_np)
+        # Extract the scalar for a non-vectorized Gymnasium environment
+        action_int = int(action_np.item())
+        next_obs, reward, terminated, truncated, info = env.step(action_int)
 
         # 3. Add to "online" buffers
         rewards.append(reward)

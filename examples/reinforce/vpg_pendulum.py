@@ -7,6 +7,7 @@ The Critic predicts state values to compute advantages.
 NOTE: very similar to A2C/A3C
 """
 
+from functional.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,7 +17,6 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
-from einops import rearrange
 
 from functional.action_selection import gaussian_sampling_selector
 from functional.optimizer import apply_gradients
@@ -28,7 +28,6 @@ from functional.utils import (
     to_numpy_action,
 )
 from functional.visualization import compute_explained_variance
-from functional.network import layer_init
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -168,7 +167,7 @@ for episode in range(MAX_EPISODES):
         gamma=GAMMA,
     )[0]
 
-    values_tensor = rearrange(torch.stack(values), "t 1 1 -> t")
+    values_tensor = torch.stack(values).flatten()
 
     # 2. Define Baseline & Calculate Advantage using the Critic
     raw_advantages = returns - values_tensor.detach()
@@ -176,7 +175,7 @@ for episode in range(MAX_EPISODES):
 
     pg_loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        log_probs=rearrange(torch.stack(log_probs), "t 1 -> t"),
+        log_probs=torch.stack(log_probs).flatten(),
     )
     pg_loss = pg_loss.mean()
 

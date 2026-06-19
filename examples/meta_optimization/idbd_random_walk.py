@@ -11,6 +11,7 @@ Task:
 - Seed reset at the beginning of each algorithm/parameter run.
 """
 
+from functional.initialization import set_seed
 import torch
 import math
 import os
@@ -21,14 +22,11 @@ from typing import Tuple
 # TODO: find better ranges for params and U shaped curves.
 
 from functional.meta_optimization import (
-    compute_idbd_rates,
-    compute_k1_rates,
-    compute_k2_rates,
+    IDBD,
+    K1,
+    K2,
 )
 from envs.streams.random_walk import make_random_walk_tracking_task
-
-
-from functional.utils import set_seed
 
 
 def run_tracking_experiment(
@@ -47,12 +45,15 @@ def run_tracking_experiment(
         num_features=num_features, num_relevant=5, obs_noise_var=r_true, drift_var=1.0
     )
 
-    weights = torch.zeros(num_features)
+    weights = torch.nn.Parameter(torch.zeros(num_features))
 
-    # State for IDBD/K1/K2
-    initial_beta = math.log(1.0 / num_features)
-    betas = torch.full((num_features,), initial_beta)
-    h = torch.zeros(num_features)
+    # Initialize Optimizers
+    if algorithm == "IDBD":
+        optimizer = IDBD([weights], initial_lr=1.0 / num_features, meta_lr=param)
+    elif algorithm == "K1":
+        optimizer = K1([weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true)
+    elif algorithm == "K2":
+        optimizer = K2([weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true)
 
     # State for LS (RLS)
     # Parameter 'param' is the initialization P(0) = param * I
@@ -73,48 +74,18 @@ def run_tracking_experiment(
         if step >= burn_in:
             squared_errors.append(error.item() ** 2)
 
-        # Base Algorithmic Updates
         if algorithm == "LMS":
-            weights = weights + param * error * inputs
+            with torch.no_grad():
+                weights.add_(param * error * inputs)
 
         elif algorithm == "NLMS":
             # Standard NLMS update
             norm = torch.dot(inputs, inputs) + r_true
-            weights = weights + (param * error * inputs) / norm
+            with torch.no_grad():
+                weights.add_((param * error * inputs) / norm)
 
-        elif algorithm == "IDBD":
-            betas, h, alphas = compute_idbd_rates(
-                betas.unsqueeze(0),
-                h.unsqueeze(0),
-                inputs.unsqueeze(0),
-                error.view(1, 1),
-                meta_lr=param,
-            )
-            betas, h, alphas = betas.squeeze(0), h.squeeze(0), alphas.squeeze(0)
-            weights = weights + alphas * error * inputs
-
-        elif algorithm == "K1":
-            betas, h, k_gain = compute_k1_rates(
-                betas.unsqueeze(0),
-                h.unsqueeze(0),
-                inputs.unsqueeze(0),
-                error.view(1, 1),
-                meta_lr=param,
-                r_hat=r_true,
-            )
-            betas, h, k_gain = betas.squeeze(0), h.squeeze(0), k_gain.squeeze(0)
-            weights = weights + k_gain * error
-
-        elif algorithm == "K2":
-            betas, k_gain = compute_k2_rates(
-                betas.unsqueeze(0),
-                inputs.unsqueeze(0),
-                error.view(1, 1),
-                meta_lr=param,
-                r_hat=r_true,
-            )
-            betas, k_gain = betas.squeeze(0), k_gain.squeeze(0)
-            weights = weights + k_gain * error
+        elif algorithm in ["IDBD", "K1", "K2"]:
+            optimizer.step(inputs, error)
 
         elif algorithm == "LS":
             # Paper Eq 6 & 7: Least Squares with covariance modification
@@ -123,7 +94,8 @@ def run_tracking_experiment(
             denom = r_true + torch.dot(inputs, p_phi)
             k_gain = p_phi / denom
 
-            weights = weights + k_gain * error
+            with torch.no_grad():
+                weights.add_(k_gain * error)
 
             # P(t+1) = P(t) - P(t) phi phi^T P(t) / denom + Q_hat
             q_hat = param * torch.eye(num_features)
@@ -142,7 +114,8 @@ def run_tracking_experiment(
             denom = r_true + torch.dot(inputs, p_phi)
             k_gain = p_phi / denom
 
-            weights = weights + k_gain * error
+            with torch.no_grad():
+                weights.add_(k_gain * error)
 
             k_p_mat = k_p_mat - torch.ger(p_phi, p_phi) / denom + q_hat
 

@@ -16,7 +16,6 @@ This module is divided into two distinct paradigms:
 
 import torch
 import torch.nn.functional as F
-from einops import rearrange
 from typing import Tuple
 
 
@@ -134,10 +133,10 @@ def compute_categorical_q_td_target(
     next_probs_a = next_probs.gather(1, next_actions_expanded).squeeze(1)  # [B, Atoms]
 
     # 3. Compute the target support (Tz) [B, Atoms]
-    support_b = rearrange(support, "a -> 1 a")
-    rewards_b = rearrange(rewards, "b -> b 1")
-    gamma_b = rearrange(gamma, "b -> b 1")
-    term_b = rearrange(terminated, "b -> b 1")
+    support_b = support.unsqueeze(0)
+    rewards_b = rewards.unsqueeze(1)
+    gamma_b = gamma.unsqueeze(1)
+    term_b = terminated.unsqueeze(1)
 
     Tz = rewards_b + gamma_b * support_b * (1 - term_b.float())
     Tz = Tz.clamp(min=v_min, max=v_max)
@@ -168,12 +167,12 @@ def compute_categorical_q_td_target(
     )
 
     # Flatten views for categorical projection
-    m_flat = rearrange(m, "b a -> (b a)")
-    offset_l = rearrange(l + offset, "b a -> (b a)")
-    offset_u = rearrange(u + offset, "b a -> (b a)")
+    m_flat = m.view(-1)
+    offset_l = (l + offset).view(-1)
+    offset_u = (u + offset).view(-1)
 
-    prob_lower = rearrange(next_probs_a * (u.float() - b), "b a -> (b a)")
-    prob_upper = rearrange(next_probs_a * (b - l.float()), "b a -> (b a)")
+    prob_lower = (next_probs_a * (u.float() - b)).view(-1)
+    prob_upper = (next_probs_a * (b - l.float())).view(-1)
 
     # Index Add becomes clean and fast:
     m_flat.index_add_(0, offset_l, prob_lower)
@@ -185,9 +184,12 @@ def compute_categorical_q_td_target(
 # GRADIENT TD METHODS
 # TODO: more semantic naming instead of phi and theta etc?
 # TODO: actually use/test importance sampling
-# TODO: document that terminated defaults to false for the continual learning case by default.
-# TODO: should we remove in favor of TDC? or True Online TD?
+# TODO: document that terminated defaults to false for the continual learning case by default. Should it even have a default or simply be required to prevent silent errors?
 # TODO: batch updates where phi comes from vectorized envs. "batched online learning"
+# TODO: remove value specific logic to make these work for Policy updates URGENT FOR STREAM RL.
+# TODO: allow for entropy regularization with TD policy method
+# TODO: is it possible to unify these?
+# TODO: there is an orginization and semantic issue arising here. not all interfaces are the same. and there are some stream TD methods that use gradients to update weights (as in stream RL works) some that work only on linear methods, some that get expanded to work on linear and non linear methods with backprop. So there is a like a mix of things going on here.
 def semi_gradient_td_update(
     features: torch.Tensor,
     reward: float | torch.Tensor,

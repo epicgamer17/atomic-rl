@@ -19,6 +19,7 @@ This paradigm/approach of treating q value estimation, value estimation, or rewa
 NOTE: the below DQN implementation is not the same as used in the paper (it does not use dueling DQN, double DQN, etc).
 """
 
+from functional.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -30,7 +31,7 @@ import random
 import wandb
 from tensordict import TensorDict
 from functools import partial
-from einops import rearrange
+from functional.utils import to_numpy_action
 
 from functional.replay_buffer import (
     init_buffer,
@@ -46,7 +47,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network, layer_init
+from functional.network import hard_update_target_network
 from functional.visualization import log_distributional_metrics
 
 from functional.td import compute_categorical_q_td_target
@@ -89,7 +90,7 @@ class CategoricalDQN(nn.Module):
         x = F.relu(self.l1(x))
         x = F.relu(self.l2(x))
         x = self.l3(x)
-        return rearrange(x, "b (a s) -> b a s", a=self.num_actions, s=self.atom_size)
+        return x.view(x.size(0), self.num_actions, self.atom_size)
 
 
 # --- 1. Initialization (Defining the State) ---
@@ -124,12 +125,7 @@ rng_key = torch.Generator(device=device)
 rng_key.manual_seed(SEED)
 
 # 1. Initialize the Distributional DQN rollout selector
-action_selector = with_epsilon_greedy(
-    partial(
-        argmax_selector,
-        extractor_fn=partial(expected_value, support=SUPPORT.to(device)),
-    )
-)
+action_selector = with_epsilon_greedy(argmax_selector)
 
 # Initialize W&B
 wandb.init(
@@ -154,17 +150,20 @@ for step in range(MAX_STEPS):
         obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32, device=device)
 
         predictions = model(obs_tensor)
+        expected_qs = expected_value(predictions, support=SUPPORT.to(device))
         action, info = action_selector(
-            predictions=predictions,
+            predictions=expected_qs,
             epsilon=current_epsilon,
             num_actions=num_actions,
             generator=rng_key,
         )
         rng_key = info["generator"]
-        action_np = action.item()
+        action_np = to_numpy_action(action)
 
     # 2. Step Env
-    next_obs, reward, terminated, truncated, info = env.step(action_np)
+    # Extract the scalar for a non-vectorized Gymnasium environment
+    action_int = int(action_np.item())
+    next_obs, reward, terminated, truncated, info = env.step(action_int)
 
     # 3. Add to Buffer
     # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.

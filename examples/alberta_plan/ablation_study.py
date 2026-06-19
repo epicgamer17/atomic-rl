@@ -17,7 +17,9 @@ Generate-and-Test Mechanics: [functional/plasticity.py] (e.g. SWR, CBP). In comb
 Resource Budgeting: Controlled by: k (SWR) or replacement_rate (CBP).
 
 """
+
 # TODO: should this use ema?
+from functional.initialization import gnt_init_wrapper
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,9 +31,8 @@ from pathlib import Path
 
 from functional.td import true_online_td_update, semi_gradient_td_update
 from functional.traces import update_true_online_traces
-from functional.meta_optimization import compute_autostep_rates, compute_idbd_rates
+from functional.meta_optimization import update_autostep_rates_, update_idbd_rates_
 from functional.plasticity import apply_continual_backprop, init_cbp_state
-from functional.utils import gnt_init_wrapper
 
 # Configuration
 NUM_STATES = 19
@@ -220,7 +221,7 @@ def run_experiment(config: str):
         if use_autostep:
             # TODO: Pass raw features, not traces, to AutoStep. The meta-optimizer needs to track correlations of the actual state representation so the per-feature alpha multipliers are well-defined. OR When using TD(lambda), the weight update is driven by the eligibility trace, not the raw features. We must pass traces to the meta-optimizer to ensure the meta-gradients are calculated w.r.t the actual update vector.
             # TODO: TIDBD? or does Autostep work?
-            betas_head, h_head, v_head, alphas_head = compute_autostep_rates(
+            alphas_head = update_autostep_rates_(
                 betas=betas_head,
                 h=h_head,
                 v=v_head,
@@ -230,7 +231,7 @@ def run_experiment(config: str):
             )
         elif use_idbd:
             # NOTE: Pass raw features, not traces, to IDBD. Same rationale as AutoStep.
-            betas_head, h_head, alphas_head = compute_idbd_rates(
+            alphas_head = update_idbd_rates_(
                 betas=betas_head,
                 h=h_head,
                 inputs=rep_t.detach(),

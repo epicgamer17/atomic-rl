@@ -1,3 +1,4 @@
+from functional.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,7 +10,6 @@ import random
 import wandb
 from tensordict import TensorDict
 from functools import partial
-from einops import rearrange
 
 from functional.replay_buffer import (
     init_buffer,
@@ -25,7 +25,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network, layer_init, unroll_rnn
+from functional.network import hard_update_target_network, unroll_rnn
 from envs.wrappers import FlickeringObservation
 
 # TODO: make this be more like PPO + LSTM. First fix the TODOs in PPO + LSTM relating to LSTM stuff.

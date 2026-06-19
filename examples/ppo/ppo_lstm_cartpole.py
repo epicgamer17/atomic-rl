@@ -1,3 +1,4 @@
+from functional.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,7 +23,7 @@ from functional.losses import (
 )
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
-from functional.network import layer_init, unroll_rnn
+from functional.network import unroll_rnn
 from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step,
@@ -211,6 +212,7 @@ def make_env(env_id, seed, idx, flickering_prob: float = 0.0):
     return thunk
 
 
+# TODO: maybe remove this train_ppo function since its not the convention in our code, or update the code to make this the convention
 def train_ppo(use_lstm: bool = False):
     device = torch.device("cpu")
     envs = gym.vector.SyncVectorEnv(
@@ -466,8 +468,8 @@ def train_ppo(use_lstm: bool = False):
                 )
             else:
                 flat_data = flatten_rollout_buffer(buffer)
-                flat_data["advantages"] = rearrange(advantages, "b t -> (b t) 1")
-                flat_data["returns"] = rearrange(returns, "b t -> (b t) 1")
+                flat_data["advantages"] = advantages.view(-1, 1)
+                flat_data["returns"] = returns.view(-1, 1)
                 minibatch_generator = (
                     (mb, None)
                     for mb in yield_shuffled_minibatches(
@@ -484,7 +486,8 @@ def train_ppo(use_lstm: bool = False):
                     new_logits, new_values = model(mb["observations"])
 
                 dist = torch.distributions.Categorical(logits=new_logits)
-                new_log_probs = dist.log_prob(mb["actions"])
+                # dist has batch shape [B]. mb["actions"] is [B, 1]. Squeeze for log_prob, unsqueeze output.
+                new_log_probs = dist.log_prob(mb["actions"].squeeze(-1)).unsqueeze(-1)
 
                 ratio = probability_ratio(
                     old_log_probs=mb["logprobs"], new_log_probs=new_log_probs
@@ -528,8 +531,8 @@ def train_ppo(use_lstm: bool = False):
         buffer.truncation_records.clear()
 
         if iteration % 10 == 0:
-            flat_returns = rearrange(returns, "b t -> (b t)")
-            flat_values = rearrange(buffer.data["values"], "b t -> (b t)")
+            flat_returns = returns.flatten()
+            flat_values = buffer.data["values"].flatten()
             explained_var = compute_explained_variance(
                 flat_returns.detach().cpu().numpy(),
                 flat_values.detach().cpu().numpy(),

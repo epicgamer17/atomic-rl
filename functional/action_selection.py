@@ -3,7 +3,6 @@ from typing import Tuple, Callable, Optional, Dict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
 
 
 def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
@@ -44,10 +43,8 @@ def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Te
     return values
 
 
-# TODO: remove the use of extractor_fn from the function, inline that in the orchestration loops.
 def argmax_selector(
     predictions: torch.Tensor,
-    extractor_fn: Optional[Callable] = None,
 ) -> Tuple[torch.Tensor, dict]:
     """
     Selects the action with the maximum value.
@@ -55,21 +52,15 @@ def argmax_selector(
 
     Args:
         predictions: The model predictions (e.g. Q-values or logits).
-        extractor_fn: Function to extract scalar values from predictions.
 
     Returns:
         A tuple containing:
             - The selected actions of shape [B, 1].
             - An empty info dictionary.
     """
-    if extractor_fn is not None:
-        vals = extractor_fn(predictions)
-    else:
-        vals = predictions
-
     # Add microscopic noise to break ties randomly
-    noise = torch.rand_like(vals) * 1e-8
-    vals_with_noise = vals + noise
+    noise = torch.rand_like(predictions) * 1e-8
+    vals_with_noise = predictions + noise
 
     # Force [B, 1] output for consistency
     action = torch.argmax(vals_with_noise, dim=1, keepdim=True)
@@ -123,6 +114,7 @@ def sample_distribution(
 def with_epsilon_greedy(selector_fn: Callable) -> Callable:
     """
     Higher-order function that augments a selector with epsilon-greedy logic.
+    Supports optional action masking during the random exploration phase.
 
     Args:
         selector_fn (Callable): The function to use for action selection.
@@ -134,24 +126,43 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
         epsilon: float,
         num_actions: int,
         generator: torch.Generator = None,
+        mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, dict]:
-        greedy_actions, info = selector_fn(predictions)  # Expected [B, 1], dict
+        # Expected [B, 1], dict. The selector_fn handles masked predictions naturally
+        greedy_actions, info = selector_fn(predictions)  
 
         if epsilon <= 0.0:
             return greedy_actions, {**info, "generator": generator}
 
         batch_size = predictions.shape[0]
 
-        # Sample random actions
-        random_actions = torch.randint(
-            0,
-            num_actions,
-            (batch_size, 1),
-            generator=generator,
-            device=predictions.device,
-        )
+        if mask is not None:
+            # Fail Fast: Ensure mask matches [Batch, Actions]
+            assert mask.shape == (batch_size, num_actions), \
+                f"Mask shape {mask.shape} does not match expected ({batch_size}, {num_actions})"
+            
+            # Fail Fast: Ensure no environment has zero valid actions
+            assert (mask.sum(dim=-1) > 0).all(), \
+                "Encountered a mask where an environment has 0 valid actions."
 
-        # Decide which actions are random
+            # Convert bool mask to probability weights (1.0 for valid, 0.0 for invalid)
+            valid_weights = mask.to(predictions.dtype)
+            
+            # Uniformly sample 1 valid action per batch element
+            random_actions = torch.multinomial(
+                valid_weights, 1, generator=generator
+            )
+        else:
+            # Standard uniform sampling over all actions
+            random_actions = torch.randint(
+                0,
+                num_actions,
+                (batch_size, 1),
+                generator=generator,
+                device=predictions.device,
+            )
+
+        # Decide which actions are random vs greedy
         random_mask = (
             torch.rand((batch_size, 1), generator=generator, device=predictions.device)
             < epsilon

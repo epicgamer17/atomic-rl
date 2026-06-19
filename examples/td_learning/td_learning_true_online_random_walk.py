@@ -44,7 +44,7 @@ def true_online_random_walk_episode(
     env = RandomWalkEnv(num_states=NUM_NON_TERMINAL_STATES, start_state=START_STATE)
     phi_t = env.reset()
     traces = torch.zeros_like(weights)
-    
+
     # Explicitly calculate the initial v_old using the starting weights
     v_old = torch.dot(weights, phi_t)
 

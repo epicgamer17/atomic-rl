@@ -13,6 +13,7 @@ range of meta_lr values, whereas IDBD will heavily depend on tuning meta_lr
 depending on the task's variance scale.
 """
 
+from functional.initialization import set_seed
 import torch
 import math
 import os
@@ -20,11 +21,10 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 from functional.meta_optimization import (
-    compute_idbd_rates,
-    compute_autostep_rates,
+    IDBD,
+    Autostep,
 )
 from envs.streams.random_walk import make_random_walk_tracking_task
-from functional.utils import set_seed
 
 
 def evaluate_algorithm(
@@ -35,18 +35,15 @@ def evaluate_algorithm(
         num_features=20, num_relevant=5, obs_noise_var=1.0, drift_var=drift_var
     )
 
-    weights = torch.zeros(20)
+    weights = torch.nn.Parameter(torch.zeros(20))
 
     # Initialization based on paper heuristics:
     # Autostep relies on the M-cap so it initializes at a confident 0.1
     # IDBD must be initialized safely at 0.1/n to prevent immediate divergence
     if algo == "Autostep":
-        betas = torch.full((20,), math.log(0.1))
-    else:
-        betas = torch.full((20,), math.log(0.1 / 20))
-
-    h = torch.zeros(20)
-    v = torch.zeros(20)  # Only used for autostep
+        optimizer = Autostep([weights], initial_lr=0.1, meta_lr=param, tau=10000.0)
+    elif algo == "IDBD":
+        optimizer = IDBD([weights], initial_lr=0.1 / 20.0, meta_lr=param)
 
     squared_errors = []
 
@@ -64,32 +61,10 @@ def evaluate_algorithm(
 
         # Algorithmic Updates
         if algo == "LMS":
-            weights = weights + param * error * inputs
+            with torch.no_grad():
+                weights.add_(param * error * inputs)
         else:
-            b_w = weights.unsqueeze(0)
-            b_b = betas.unsqueeze(0)
-            b_h = h.unsqueeze(0)
-            b_x = inputs.unsqueeze(0)
-            b_e = error.view(1, 1)
-
-            if algo == "IDBD":
-                betas, h, alphas = compute_idbd_rates(
-                    b_b, b_h, b_x, b_e, meta_lr=param
-                )
-                betas, h, alphas = betas.squeeze(0), h.squeeze(0), alphas.squeeze(0)
-                weights = weights + alphas * error * inputs
-
-            elif algo == "Autostep":
-                betas, h, v, alphas = compute_autostep_rates(
-                    b_b, b_h, v.unsqueeze(0), b_x, b_e, meta_lr=param, tau=10000.0
-                )
-                betas, h, v, alphas = (
-                    betas.squeeze(0),
-                    h.squeeze(0),
-                    v.squeeze(0),
-                    alphas.squeeze(0),
-                )
-                weights = weights + alphas * error * inputs
+            optimizer.step(inputs, error)
 
     return sum(squared_errors) / len(squared_errors)
 

@@ -1,6 +1,5 @@
 import pytest
 import torch
-from einops import rearrange
 from functional.returns import (
     compute_mc_returns,
     compute_n_step_returns,

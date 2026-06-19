@@ -4,9 +4,13 @@ Experiment: Mountain Car Control (Section 5).
 
 Recreates Figure 4 comparing True Online Sarsa(lambda) with standard Sarsa(lambda) variants.
 
-NOTE: We are unable to exactly recreate the results of the original papers/scores (around -200 for true online), but we mostly match the results from Richard Suttons textbook on True Online Sarsa for the official python version of the textbook (Our shapes are the same). The cause of the difference is unclear, but it is probably something related to the tiling or env more than the math as all are results seem shifted compared to the paper, and compared to the textbook our results are a little less stable. Gemini believes the difference is because they use a Hash Table for their tiling and we use a full table, and that the Hash Table can acts as a regulerizer. Im not sure I believe this at all, but to be honest dont have many other explenations.
+NOTE: We are unable to exactly recreate the results of the original papers/scores (around -200 for true online), but we mostly match the results from Richard Suttons textbook on True Online Sarsa for the official python version of the textbook (Our shapes are the same). The cause of the difference is unclear, but it is probably something related to the tiling or env more than the math as all are results seem shifted compared to the paper, and compared to the textbook our results are a little less stable. Gemini believes the difference is because they use a Hash Table for their tiling and we use a full table, and that the Hash Table can acts as a regulerizer. Im not sure I believe this at all, but to be honest dont have many other explanations.
+
+NOTE: the textbook uses 8x8 with 5000 steps and in the recreation code only TD with Dutch Traces (not True Online TD lambda) and does not show a divergence for TD with dutch traces at alpha = 2.0. The paper uses 10x10 with (assumed) 1000 steps and True Online TD and shows a drop but not divergence at alpha = 2.0. The paper also shows a more clear improvement of True Online TD Lamdba over the other methods. The textbook less so. The textbook code used float64 which helps to alleviate divergence issues at alpha = 2.0. It should also be noted there is a slight difference in the math between the textbook and the paper. Regardless of all this I can only for the most part seem to recreate the textbook results (i have not tested with only dutch traces and not True Online TD learning) but get a consistent divergence at alpha = 2.0 for true online TD Lambda.
 """
 
+# TODO: clean up and make more consistent.
+# TODO: try and make all examples more consistent.
 # Removed inline TODO about updating to use existing functions
 import torch
 import numpy as np
@@ -68,7 +72,7 @@ def true_online_sarsa_episode(
     )
 
     traces = torch.zeros_like(weights)
-    q_old = torch.dot(weights, phi_t)
+    q_old = torch.tensor(0.0, dtype=torch.float64)
     episode_return = 0.0
     step_count = 0
 

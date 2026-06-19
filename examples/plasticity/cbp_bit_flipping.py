@@ -7,6 +7,7 @@ time (bit flips) and the target is more complex than the learner, the best
 approximation continually changes, requiring the learner to track it.
 """
 
+from functional.initialization import gnt_init_wrapper
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,7 +24,6 @@ from functional.visualization import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
-from functional.utils import gnt_init_wrapper
 from envs.streams.bit_flipping import make_bit_flipping_stream
 
 # TODO: improve and make plots and stuff like SWR example

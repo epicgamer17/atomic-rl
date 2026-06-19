@@ -1,4 +1,5 @@
 from . import action_selection
+from . import initialization
 from . import losses
 from . import mcts
 from . import network
@@ -12,6 +13,7 @@ from . import utils
 
 __all__ = [
     "action_selection",
+    "initialization",
     "losses",
     "mcts",
     "network",

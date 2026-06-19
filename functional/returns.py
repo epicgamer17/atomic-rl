@@ -1,6 +1,5 @@
 import torch
 import warnings
-from einops import rearrange
 
 # TODO: eventually will have to figure out how to get these working with MuZero (alternating players and all). it works fine for single agent or if we treat the opponent as part of the environment (ie not an agent), but for things like muzero where the agent learns as both players and value depends on the agents perspective this needs to be updated. (ie for chess, players alternate so if p1 won at the end of the game they get a reward 1, but the mc returns for all the states is not 1, it is 1, -1, -1, 1, -1, ...). There may be several solutions, for one i know mctx does there tree search without worrying about player turn, is there a way to do that? maybe some kind of higher order function to make it player turn aware? or another function to flip the sign of the returns depending on the player the user uses before passing to these or something?
 

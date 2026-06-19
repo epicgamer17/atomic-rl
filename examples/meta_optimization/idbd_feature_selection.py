@@ -15,7 +15,7 @@ import os
 import numpy as np
 from tqdm import tqdm
 
-from functional.meta_optimization import compute_idbd_rates
+from functional.meta_optimization import IDBD
 from functional.visualization import plot_learning_rate_traces
 from envs.streams.drifting_concept import make_drifting_concept_task
 
@@ -36,9 +36,8 @@ def main():
     )
 
     # 2. Initialize IDBD State
-    weights = torch.zeros(num_features)
-    betas = torch.full((num_features,), math.log(init_lr))
-    h = torch.zeros(num_features)
+    weights = torch.nn.Parameter(torch.zeros(num_features))
+    optimizer = IDBD([weights], initial_lr=init_lr, meta_lr=meta_lr)
 
     # 3. Logging Buffer
     # We log every 100 steps to save memory/plotting time
@@ -53,19 +52,12 @@ def main():
         pred = torch.dot(weights, inputs)
         error = target - pred
 
-        # Compute IDBD (Adding batch dimension via unsqueeze)
-        betas, h, alphas = compute_idbd_rates(
-            betas.unsqueeze(0),
-            h.unsqueeze(0),
-            inputs.unsqueeze(0),
-            error.view(1, 1),
-            meta_lr=meta_lr,
-        )
-        betas, h, alphas = betas.squeeze(0), h.squeeze(0), alphas.squeeze(0)
-        weights = weights + alphas * error * inputs
+        # Compute IDBD
+        optimizer.step(inputs, error)
 
         if step % log_interval == 0:
-            alphas_history[step // log_interval] = alphas.squeeze(0).numpy()
+            alphas = torch.exp(optimizer.state[weights]["beta"]).detach()
+            alphas_history[step // log_interval] = alphas.numpy()
 
     # 4. Visualize Results
     script_dir = os.path.dirname(os.path.abspath(__file__))

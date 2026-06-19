@@ -14,6 +14,7 @@ which uses a wider architecture (2 hidden layers of 2000 units), the Adam optimi
 and a larger batch size of 64.
 """
 
+from functional.initialization import gnt_init_wrapper
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -38,7 +39,6 @@ from functional.visualization import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
-from functional.utils import gnt_init_wrapper
 
 # Standardized initialization for GnT methods (SWR/CBP): Weights use Kaiming Uniform, Biases use Zero
 init_weights_kaiming = gnt_init_wrapper(

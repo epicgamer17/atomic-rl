@@ -1,5 +1,10 @@
 import torch
 
+"""
+From Stream RL Paper: 
+"eligibility traces have been found to be effective primarily in tabular settings or with linear function approximation, while none of their deep-learning counterparts are known to perform well" - they do things to make it work in the paper, but something to think about in general with the below.
+"""
+
 
 # TODO: should these be in my returns.py or something? what about td.py?
 # TODO: should we add alphas here?
@@ -25,6 +30,10 @@ def update_accumulating_traces(
 
     Returns:
         The updated traces of shape [batch, num_features].
+
+    NOTE: can be instable as the traces can grow arbitrarily large. A good update rule is needed.
+    NOTE: Can be used for both value and policy traces.
+    NOTE: Entropy regularization for the policy case should be done with the gradient. (from Appendix E: log_prob + tau * sign(delta) * entropy)
     """
     assert traces.shape == gradients.shape, "Trace and gradient shapes must match"
 

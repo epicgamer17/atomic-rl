@@ -1,4 +1,4 @@
-"""
+r"""
 Notes on Noisy DQN:
 
 This idea was introduced in Noisy Nets for Exploration. The idea is to add noise to the weights of the network to encourage exploration.
@@ -25,6 +25,7 @@ import random
 import wandb
 from tensordict import TensorDict
 from functools import partial
+from functional.utils import to_numpy_action
 
 from functional.replay_buffer import (
     init_buffer,
@@ -135,10 +136,12 @@ for step in range(MAX_STEPS):
 
         predictions = model(obs_tensor)
         action, _ = argmax_selector(predictions)
-        action_np = action.item()
+        action_np = to_numpy_action(action)
 
     # 2. Step Env
-    next_obs, reward, terminated, truncated, info = env.step(action_np)
+    # Extract the scalar for a non-vectorized Gymnasium environment
+    action_int = int(action_np.item())
+    next_obs, reward, terminated, truncated, info = env.step(action_int)
 
     # 3. Add to Buffer
     # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.

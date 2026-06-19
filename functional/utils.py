@@ -2,49 +2,16 @@ import torch
 import torch.nn as nn
 import numpy as np
 import random
-from typing import Tuple, List, Callable, Optional
+from typing import Tuple, List, Callable, Optional, Union
 from tensordict import TensorDict
-
-
-def set_seed(seed: int) -> None:
-    """
-    Sets random seeds for reproducibility across random, numpy, and torch.
-
-    Args:
-        seed: The integer seed to use.
-    """
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        # Ensure deterministic behavior for some ops if needed,
-        # though this can slow down performance.
-        # torch.backends.cudnn.deterministic = True
-        # torch.backends.cudnn.benchmark = False
-
-    if torch.backends.mps.is_available():
-        torch.mps.manual_seed(seed)
-
-
-def _allocate_tensordict(
-    shapes: dict, batch_size: List[int], device: str = "cpu"
-) -> TensorDict:
-    """Allocates a zeroed TensorDict of any arbitrary geometry."""
-    data = TensorDict({}, batch_size=batch_size, device=device)
-    for key, shape in shapes.items():
-        dtype = torch.long if "action" in key else torch.float32
-        data.set(key, torch.zeros((*batch_size, *shape), dtype=dtype))
-    return data
 
 
 # NOTE: DONT LET THIS FILE BUILD UP AND HAVE A LOT FUNCTIONS, THAT IS A SIGN OF BAD ORGANIZATION.
 
 
+# TODO: do we need the inplace and not inplace operations?
 def ema_update(
-    old_ema: torch.Tensor, new_value: torch.Tensor, alpha: float, inplace: bool = False
+    old_ema: torch.Tensor, new_value: torch.Tensor, alpha: float
 ) -> torch.Tensor:
     """
     Calculates the exponential moving average (EMA).
@@ -54,12 +21,23 @@ def ema_update(
         old_ema.shape == new_value.shape
     ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
 
-    if inplace:
-        # Use optimized in-place kernels: old = old * (1-a) + new * a
-        # This is rearranged for .add_ usage: old = old - a*old + a*new => old += a*(new - old)
-        return old_ema.lerp_(new_value, alpha)
-
     return (1.0 - alpha) * old_ema + alpha * new_value
+
+
+def ema_update_(
+    old_ema: torch.Tensor, new_value: torch.Tensor, alpha: float
+) -> torch.Tensor:
+    """
+    In-place exponential moving average (EMA).
+    Formula: (1 - alpha) * old_ema + alpha * new_value
+    """
+    assert (
+        old_ema.shape == new_value.shape
+    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+
+    # Use optimized in-place kernels: old = old * (1-a) + new * a
+    # This is rearranged for .add_ usage: old = old - a*old + a*new => old += a*(new - old)
+    return old_ema.lerp_(new_value, alpha)
 
 
 # TODO: messy, hard to read, and doesnt work reliably or at least not tested reliably on both gym vector envs and pufferlib's vector envs.
@@ -138,36 +116,11 @@ def scale_tensor_by_std(tensor: torch.Tensor, eps: float = 1e-8) -> torch.Tensor
     return tensor / (tensor.std() + eps)
 
 
-def gnt_init_wrapper(
-    init_fn: Callable[[torch.Tensor], None],
-) -> Callable[[torch.Tensor], None]:
-    """
-    Standardizes initialization for Generate and Test methods (CBP/SWR).
-
-    Wraps/Returns a new init fn to be used for GnT. If it's a weight matrix (2D+),
-    it uses the provided init_fn. If it's a bias vector (1D), it uses zeros.
-
-    Args:
-        init_fn: The base initialization function to use for weight matrices.
-
-    Returns:
-        Callable[[torch.Tensor], None]: A wrapped initialization function that
-            dispatches to init_fn for weights and zeros_ for biases.
-    """
-
-    def wrapped_init(tensor: torch.Tensor) -> None:
-        if tensor.dim() >= 2:
-            init_fn(tensor)
-        elif tensor.dim() == 1:
-            nn.init.zeros_(tensor)
-
-    return wrapped_init
-
-
 def add_dirichlet_noise(
     probs: torch.Tensor,
     epsilon: float,
     alpha: float,
+    mask: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Adds Dirichlet noise to the given probabilities for exploration.
@@ -178,6 +131,7 @@ def add_dirichlet_noise(
         probs: The probabilities to add noise to [..., Num_Actions].
         epsilon: The weight of the noise.
         alpha: The concentration parameter of the Dirichlet distribution.
+        mask: Optional boolean mask [..., Num_Actions] of valid actions.
 
     Returns:
         The probabilities with added noise.
@@ -190,24 +144,35 @@ def add_dirichlet_noise(
     dist = torch.distributions.Dirichlet(alphas)
     noise = dist.sample(probs.shape[:-1])  # [..., Num_Actions]
 
-    # 2. Combine with original probabilities
+    if mask is not None:
+        # Mask out noise for illegal actions
+        noise = noise * mask.to(probs.dtype)
+
+        # Re-normalize the noise so it still sums to 1.0 across valid actions
+        # Add 1e-8 to prevent division by zero in case of severe precision issues
+        noise_sum = noise.sum(dim=-1, keepdim=True)
+        noise = noise / (noise_sum + 1e-8)
+
     return (1.0 - epsilon) * probs + epsilon * noise
 
 
 def to_tensor(
-    numpy_array: np.ndarray, device: torch.device = torch.device("cpu")
+    numpy_array: Union[np.ndarray, int, float, bool],
+    device: torch.device = torch.device("cpu"),
+    dtype: Optional[torch.dtype] = torch.float32,
 ) -> torch.Tensor:
     """
-    Converts a numpy array to a float32 PyTorch tensor on the specified device.
+    Converts a numpy array (or primitive) to a PyTorch tensor on the specified device.
 
     Args:
-        numpy_array: The numpy array to convert.
+        numpy_array: The numpy array or primitive to convert.
         device: The target device.
+        dtype: The target data type. Defaults to float32.
 
     Returns:
         A PyTorch tensor.
     """
-    return torch.as_tensor(numpy_array, dtype=torch.float32, device=device)
+    return torch.as_tensor(numpy_array, dtype=dtype, device=device)
 
 
 # TODO: does this handle pendulum?
@@ -271,6 +236,7 @@ def normalize_features(
 
 
 # TODO: where to put this?
+# TODO: kind of messy, untested, and very mountaincar specific (in respect to defaults and dimensionality)
 def compute_tile_coding_features(
     state: np.ndarray,
     action: int,
@@ -283,12 +249,16 @@ def compute_tile_coding_features(
     """
     Computes a sparse binary feature vector phi(s, a) using tile coding.
     Follows 'Documentation by Signature' and 'Fail Fast' by strictly enforcing shapes.
+
+    According to the Stream RL paper, tile coding has been shown to reduce forgetting, as a form of "sparse initialization" but really sparse representation.
     """
     # 1. Clip the state to the bounds strictly
     clipped_state = np.clip(state, state_low, state_high)
 
     # 2. Normalize state to [0, tiles_per_tiling]
-    state_normalized = (clipped_state - state_low) / (state_high - state_low) * tiles_per_tiling
+    state_normalized = (
+        (clipped_state - state_low) / (state_high - state_low) * tiles_per_tiling
+    )
 
     # 2. Compute asymmetrical offsets for each tiling to prevent diagonal artifacts
     # Using 1 and 3 as displacement multipliers (Sutton's recommendation for 2D)
@@ -297,13 +267,13 @@ def compute_tile_coding_features(
         offsets[i, 0] = ((i * 1) % num_tilings) / num_tilings
         if len(state) > 1:
             offsets[i, 1] = ((i * 3) % num_tilings) / num_tilings
-            
+
     # 3. Find the active tile in each tiling
     active_tiles = []
     for i in range(num_tilings):
         tile_coords = np.floor(state_normalized + offsets[i]).astype(int)
         # Map 2D coordinates to a 1D index for this specific tiling
-        # Handling up to 2D for Mountain Car. 
+        # Handling up to 2D for Mountain Car.
         if len(state) == 2:
             tile_idx = (
                 i * ((tiles_per_tiling + 1) ** 2)
@@ -312,7 +282,7 @@ def compute_tile_coding_features(
             )
         else:
             tile_idx = i * (tiles_per_tiling + 1) + tile_coords[0]
-            
+
         active_tiles.append(tile_idx)
 
     # 4. Create the state-action flat vector

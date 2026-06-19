@@ -99,8 +99,10 @@ import torch
 import torch.nn as nn
 from typing import Dict, Any
 
+from torch.optim.optimizer import Optimizer
 
-def compute_idbd_rates(
+
+def update_idbd_rates_(
     betas: torch.Tensor,
     h: torch.Tensor,
     inputs: torch.Tensor,
@@ -108,9 +110,9 @@ def compute_idbd_rates(
     meta_lr: float,
     min_beta: float = -10.0,
     max_beta_change: float = 2.0,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
-    Decoupled IDBD: Only calculates new step sizes and updates meta-states.
+    Decoupled IDBD: Updates betas and h in-place. Returns the computed alphas.
     IDBD adapts the learning rate (alpha) of each individual weight based on the
     correlation between the current gradient and a trace of past gradient changes (h).
     It operates on the log-learning rate (beta) to ensure step sizes remain strictly positive.
@@ -127,16 +129,16 @@ def compute_idbd_rates(
         max_beta_change (float): Clips the update to beta to prevent explosion.
 
     Returns:
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-            - new_betas: The updated log-learning rates.
-            - new_h: The updated trace of past changes.
-            - alphas: The exponentiated learning rates (alpha = exp(beta)) used for this step.
+        torch.Tensor: alphas (the exponentiated learning rates for this step).
+
+    NOTE/TODO: Strictly linear at the moment
     """
 
     # Fail Fast: Strict shape assertions to catch mismatched dimensions immediately.
-    assert (
-        betas.shape == h.shape == inputs.shape
-    ), f"Shape mismatch: betas({betas.shape}), h({h.shape}), inputs({inputs.shape})"
+    # NOTE: By checking that inputs is broadcastable/matches the last dimension of betas (rather than being completely identical in shape),
+    # this allows the algorithm to run in parallel across hundreds of output neurons in a standard PyTorch nn.Linear layer without altering the underlying math.
+    assert betas.shape == h.shape, "Betas and traces must match weight shapes."
+    assert inputs.shape[-1] == betas.shape[-1], "Input features must match weight in_features."
 
     # Fail Fast: Ensure error is explicitly broadcastable to the feature dimension.
     if inputs.dim() > 1:
@@ -145,24 +147,28 @@ def compute_idbd_rates(
         ), f"Batched error must have shape [Batch, 1], got {error.shape}"
 
     # 1. Update betas
-    delta_beta = meta_lr * error * inputs * h
-    delta_beta = torch.clamp(delta_beta, min=-max_beta_change, max=max_beta_change)
-    new_betas = torch.clamp(betas + delta_beta, min=min_beta)
+    # TODO: To make these composable with Neural Networks in the future (like Hypergradient Descent or Adam-HD),
+    # you should gradually transition the API to accept gradients rather than inputs and error separately.
+    # Right now, you have: \Delta \beta = \theta \cdot \delta \cdot x \cdot h
+    delta_beta = (
+        (inputs * h).mul_(meta_lr * error).clamp_(-max_beta_change, max_beta_change)
+    )
+    betas.add_(delta_beta).clamp_(min=min_beta)
 
     # 2. Compute alphas (actual learning rates)
     # Equation: alpha(t+1) = exp(beta(t+1))
-    alphas = torch.exp(new_betas)
+    alphas = torch.exp(betas)
 
     # 3. Update the trace (h) without needing weights
-    decay = torch.clamp(1.0 - alphas * (inputs**2), min=0.0)
+    decay = (1.0 - alphas * inputs.square()).clamp_(min=0.0)
 
     # Equation: h(t+1) = h(t) * decay + alpha(t+1) * error * input
-    new_h = h * decay + alphas * error * inputs
+    h.mul_(decay).add_(inputs * alphas * error)
 
-    return new_betas, new_h, alphas
+    return alphas
 
 
-def compute_k1_rates(
+def update_k1_rates_(
     betas: torch.Tensor,
     h: torch.Tensor,
     inputs: torch.Tensor,
@@ -171,9 +177,9 @@ def compute_k1_rates(
     r_hat: float = 1.0,
     min_beta: float = -10.0,
     max_beta_change: float = 2.0,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
-    Computes a single step of the K1 algorithm (IDBD for Normalized LMS).
+    Computes a single step of the K1 algorithm (IDBD for Normalized LMS). Updates betas and h in-place.
 
     K1 is an O(n) approximation of the Kalman Filter. It treats the exponentiated
     betas as the diagonal entries of a pseudo-covariance matrix to compute a
@@ -190,43 +196,47 @@ def compute_k1_rates(
         max_beta_change (float): Clips the update to beta to prevent explosion.
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-            - new_betas: The updated log-learning rates.
-            - new_h: The updated memory trace.
-            - k_gain: The normalized gain vector used for the update.
+        torch.Tensor: k_gain (the normalized gain vector used for the update).
+
+    NOTE/TODO: Strictly linear at the moment
     """
-    assert (
-        betas.shape == h.shape == inputs.shape
-    ), f"Shape mismatch: betas({betas.shape}), h({h.shape}), inputs({inputs.shape})"
+    # NOTE: By checking that inputs is broadcastable/matches the last dimension of betas (rather than being completely identical in shape),
+    # this allows the algorithm to run in parallel across hundreds of output neurons in a standard PyTorch nn.Linear layer without altering the underlying math.
+    assert betas.shape == h.shape, "Betas and traces must match weight shapes."
+    assert inputs.shape[-1] == betas.shape[-1], "Input features must match weight in_features."
     if inputs.dim() > 1:
         assert (
             error.dim() == inputs.dim() and error.shape[-1] == 1
         ), f"Batched error must have shape [..., 1], got {error.shape}"
 
     # 1. Update betas
-    delta_beta = meta_lr * error * inputs * h
-    delta_beta = torch.clamp(delta_beta, min=-max_beta_change, max=max_beta_change)
-    new_betas = torch.clamp(betas + delta_beta, min=min_beta)
+    # TODO: To make these composable with Neural Networks in the future (like Hypergradient Descent or Adam-HD),
+    # you should gradually transition the API to accept gradients rather than inputs and error separately.
+    # Right now, you have: \Delta \beta = \theta \cdot \delta \cdot x \cdot h
+    delta_beta = (
+        (inputs * h).mul_(meta_lr * error).clamp_(-max_beta_change, max_beta_change)
+    )
+    betas.add_(delta_beta).clamp_(min=min_beta)
 
     # 2. Compute p_hat (diagonal of pseudo-covariance matrix)
-    p_hat = torch.exp(new_betas)
+    p_hat = torch.exp(betas)
 
     # 3. Compute the normalizer D(t) = R_hat + sum(p_hat * inputs^2)
     # sum is taken over the feature dimension (dim=-1)
-    d_t = r_hat + torch.sum(p_hat * (inputs**2), dim=-1, keepdim=True)
+    d_t = r_hat + torch.sum(p_hat * inputs.square(), dim=-1, keepdim=True)
 
     # 4. Compute normalized gain vector K(t)
-    k_gain = (p_hat * inputs) / d_t
+    k_gain = (p_hat * inputs).div_(d_t)
 
     # 5. Update trace h
     # Equation: h(t+1) = [h(t) + k(t) * error] * max(1 - k(t) * input, 0)
-    decay = torch.clamp(1.0 - k_gain * inputs, min=0.0)
-    new_h = (h + k_gain * error) * decay
+    decay = (1.0 - k_gain * inputs).clamp_(min=0.0)
+    h.add_(k_gain * error).mul_(decay)
 
-    return new_betas, new_h, k_gain
+    return k_gain
 
 
-def compute_k2_rates(
+def update_k2_rates_(
     betas: torch.Tensor,
     inputs: torch.Tensor,
     error: torch.Tensor,
@@ -234,7 +244,7 @@ def compute_k2_rates(
     r_hat: float = 1.0,
     min_beta: float = -10.0,
     max_beta_change: float = 2.0,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
     Computes a single step of the K2 algorithm.
 
@@ -252,13 +262,13 @@ def compute_k2_rates(
         max_beta_change (float): Clips the update to beta to prevent explosion.
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor]:
-            - new_betas: The updated log-learning rates.
-            - k_gain: The normalized gain vector used for the update.
+        torch.Tensor: k_gain (the normalized gain vector used for the update).
+
+    NOTE/TODO: Strictly linear at the moment
     """
-    assert (
-        betas.shape == inputs.shape
-    ), f"Shape mismatch: betas({betas.shape}), inputs({inputs.shape})"
+    # NOTE: By checking that inputs is broadcastable/matches the last dimension of betas (rather than being completely identical in shape),
+    # this allows the algorithm to run in parallel across hundreds of output neurons in a standard PyTorch nn.Linear layer without altering the underlying math.
+    assert inputs.shape[-1] == betas.shape[-1], "Input features must match weight in_features."
     if inputs.dim() > 1:
         assert (
             error.dim() == inputs.dim() and error.shape[-1] == 1
@@ -266,37 +276,40 @@ def compute_k2_rates(
 
     # 1. Compute regression error: delta^2 - R_hat - sum(p_hat_old * inputs^2)
     p_hat_old = torch.exp(betas)
-    predicted_variance = torch.sum(p_hat_old * (inputs**2), dim=-1, keepdim=True)
-    regression_error = (error**2) - r_hat - predicted_variance
+    predicted_variance = torch.sum(p_hat_old * inputs.square(), dim=-1, keepdim=True)
+    regression_error = error.square() - r_hat - predicted_variance
 
     # 2. Compute K2 beta normalizer: 1 + sum(inputs^4)
-    beta_normalizer = 1.0 + torch.sum(inputs**4, dim=-1, keepdim=True)
+    beta_normalizer = 1.0 + torch.sum(inputs.pow(4), dim=-1, keepdim=True)
 
     # 3. Update betas via incremental regression
-    delta_beta = (meta_lr * (inputs**2) / beta_normalizer) * regression_error
-    delta_beta = torch.clamp(delta_beta, min=-max_beta_change, max=max_beta_change)
-    new_betas = torch.clamp(betas + delta_beta, min=min_beta)
+    # TODO: To make these composable with Neural Networks in the future (like Hypergradient Descent or Adam-HD),
+    # you should gradually transition the API to accept gradients rather than inputs and error separately.
+    # Right now, you have: \Delta \beta = \theta \cdot \delta \cdot x \cdot h
+    delta_beta = inputs.square().mul_(meta_lr / beta_normalizer).mul_(regression_error)
+    delta_beta.clamp_(-max_beta_change, max_beta_change)
+    betas.add_(delta_beta).clamp_(min=min_beta)
 
     # 4. Compute new p_hat for the weight update
-    p_hat_new = torch.exp(new_betas)
+    p_hat_new = torch.exp(betas)
 
     # 5. Compute normalized gain vector K(t)
-    d_t = r_hat + torch.sum(p_hat_new * (inputs**2), dim=-1, keepdim=True)
-    k_gain = (p_hat_new * inputs) / d_t
+    d_t = r_hat + torch.sum(p_hat_new * inputs.square(), dim=-1, keepdim=True)
+    k_gain = (p_hat_new * inputs).div_(d_t)
 
-    return new_betas, k_gain
+    return k_gain
 
 
 import torch
 
 
-def compute_autostep_v_normalizer(
+def update_autostep_v_normalizer_(
     v: torch.Tensor,
     abs_meta_grad: torch.Tensor,
     alphas: torch.Tensor,
     inputs: torch.Tensor,
     tau: float = 10000.0,
-) -> torch.Tensor:
+):
     """
     Computes the updated running maximum of the absolute meta-gradient.
 
@@ -311,22 +324,24 @@ def compute_autostep_v_normalizer(
 
     Returns:
         torch.Tensor: The updated running maximums (new_v).
+
+    NOTE/TODO: Strictly linear at the moment
     """
     # Equation: v_decay = (alpha * x^2) / tau
-    v_decay_rate = (alphas * (inputs**2)) / tau
+    v_decay_rate = (alphas * inputs.square()).div_(tau)
 
     # Equation: v_update = v + v_decay * (|meta_grad| - v)
-    v_update = v + v_decay_rate * (abs_meta_grad - v)
+    v_update = (abs_meta_grad - v).mul_(v_decay_rate).add_(v)
 
     # Equation: new_v = max(|meta_grad|, v_update)
-    new_v = torch.maximum(abs_meta_grad, v_update)
-    return new_v
+    torch.maximum(abs_meta_grad, v_update, out=v)
 
 
-def compute_autostep_m_cap(
-    temp_betas: torch.Tensor,
+# TODO: can this be merged or reused for the ObGD logic?
+def update_autostep_m_cap_(
+    betas: torch.Tensor,
     inputs: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
     Computes the effective step size cap (M) and normalizes the log-learning rates.
 
@@ -338,27 +353,26 @@ def compute_autostep_m_cap(
         inputs (torch.Tensor): Current input features.
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor]:
-            - new_betas: The normalized log-learning rates.
-            - new_alphas: The normalized actual learning rates.
+        torch.Tensor: The normalized actual learning rates.
+
+    NOTE/TODO: Strictly linear at the moment
     """
-    temp_alphas = torch.exp(temp_betas)
+    temp_alphas = torch.exp(betas)
 
     # Calculate effective step size: sum(alpha_i * x_i^2)
     # NOTE: In multi-output mode, Autostep normalization is applied independently per output unit (per row of the weight matrix), equivalent to running separate scalar predictors sharing the same input features.
-    effective_step_size = torch.sum(temp_alphas * (inputs**2), dim=-1, keepdim=True)
+    effective_step_size = torch.sum(temp_alphas * inputs.square(), dim=-1, keepdim=True)
 
     # Cap at minimum 1.0 (if it's less than 1.0, m = 1.0 and no scaling occurs)
     m = torch.clamp(effective_step_size, min=1.0)
 
     # Scale alphas down by M, and shift betas down by log(M)
-    new_alphas = temp_alphas / m
-    new_betas = temp_betas - torch.log(m)
+    betas.sub_(torch.log(m))
 
-    return new_betas, new_alphas
+    return temp_alphas.div_(m)
 
 
-def compute_autostep_rates(
+def update_autostep_rates_(
     betas: torch.Tensor,
     h: torch.Tensor,
     v: torch.Tensor,
@@ -368,7 +382,7 @@ def compute_autostep_rates(
     tau: float = 10000.0,
     min_beta: float = -10.0,
     max_beta_change: float = 2.0,
-):
+) -> torch.Tensor:
     """
     Decoupled Autostep: Computes the normalized learning rates and updates meta-states.
     Does NOT modify weights.
@@ -391,15 +405,14 @@ def compute_autostep_rates(
             hi ← hi * (1 - αix^2i) + αiδxi
 
     Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            - new_betas: The normalized log-learning rates.
-            - new_h: The updated memory trace.
-            - new_v: The updated running maximums.
-            - new_alphas: The normalized actual learning rates.
+        torch.Tensor: The normalized actual learning rates.
+
+    NOTE/TODO: Strictly linear at the moment
     """
-    assert (
-        betas.shape == inputs.shape
-    ), f"Shape mismatch: betas({betas.shape}), inputs({inputs.shape})"
+    # NOTE: By checking that inputs is broadcastable/matches the last dimension of betas (rather than being completely identical in shape),
+    # this allows the algorithm to run in parallel across hundreds of output neurons in a standard PyTorch nn.Linear layer without altering the underlying math.
+    assert betas.shape == h.shape == v.shape, "Betas, traces, and normalizers must match weight shapes."
+    assert inputs.shape[-1] == betas.shape[-1], "Input features must match weight in_features."
 
     if inputs.dim() > 1:
         assert (
@@ -407,27 +420,215 @@ def compute_autostep_rates(
         ), f"Batched error must have shape [..., 1], got {error.shape}"
 
     # 1. Calculate base IDBD meta-gradient
+    # TODO: To make these composable with Neural Networks in the future (like Hypergradient Descent or Adam-HD),
+    # you should gradually transition the API to accept gradients rather than inputs and error separately.
+    # Right now, you have: \Delta \beta = \theta \cdot \delta \cdot x \cdot h
     meta_grad = error * inputs * h
     abs_meta_grad = torch.abs(meta_grad)
     alphas = torch.exp(betas)
 
     # 2. Apply Autostep Idea 1: Unit Normalization
-    new_v = compute_autostep_v_normalizer(v, abs_meta_grad, alphas, inputs, tau)
+    update_autostep_v_normalizer_(v, abs_meta_grad, alphas, inputs, tau)
     normalized_meta_grad = torch.where(
-        new_v != 0, meta_grad / new_v, torch.zeros_like(meta_grad)
+        v != 0, meta_grad / v, torch.zeros_like(meta_grad)
     )
 
     # 3. Propose new betas
-    delta_beta = torch.clamp(
-        meta_lr * normalized_meta_grad, min=-max_beta_change, max=max_beta_change
+    delta_beta = normalized_meta_grad.mul_(meta_lr).clamp_(
+        -max_beta_change, max_beta_change
     )
-    temp_betas = torch.clamp(betas + delta_beta, min=min_beta)
+    betas.add_(delta_beta).clamp_(min=min_beta)
 
     # 4. Apply Autostep Idea 2: Overshoot Prevention
-    new_betas, new_alphas = compute_autostep_m_cap(temp_betas, inputs)
+    new_alphas = update_autostep_m_cap_(betas, inputs)
 
     # 5. Update trace using the safe alphas
     # NOTE: the autostep paper pseudocode does not do a positive only clamp for 1.0 - new_alphas * (inputs**2) like IDBD does. As shown in Table 1. They correctly have the clamp in the IDBD pseudocode but not their Autostep pseudocode so it is assumed to be intentional.
-    new_h = h * (1.0 - new_alphas * (inputs**2)) + new_alphas * error * inputs
+    decay = 1.0 - new_alphas * inputs.square()
+    h.mul_(decay).add_(inputs * new_alphas * error)
 
-    return new_betas, new_h, new_v, new_alphas
+    return new_alphas
+
+
+class IDBD(Optimizer):
+    """
+    Incremental Delta-Bar-Delta (IDBD) Optimizer for linear models.
+    """
+
+    def __init__(self, params, initial_lr: float = 0.01, meta_lr: float = 0.01):
+        if initial_lr <= 0.0:
+            raise ValueError(f"Invalid initial_lr: {initial_lr}")
+        defaults = dict(initial_lr=initial_lr, meta_lr=meta_lr)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    # TODO: To make these composable with Neural Networks in the future (like Hypergradient Descent or Adam-HD),
+    # you should gradually transition the API to accept gradients rather than inputs and error separately.
+    # Right now, you have: \Delta \beta = \theta \cdot \delta \cdot x \cdot h
+    def step(self, inputs: torch.Tensor, error: torch.Tensor):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.shape[-1] != inputs.shape[-1]:
+                    raise ValueError(
+                        f"Linearity constraint violated: Parameter in_features {p.shape[-1]} does not "
+                        f"match input in_features {inputs.shape[-1]}."
+                    )
+                state = self.state[p]
+
+                # Lazy State Initialization
+                if len(state) == 0:
+                    state["beta"] = torch.full_like(p, math.log(group["initial_lr"]))
+                    state["h"] = torch.zeros_like(p)
+
+                # 1. Compute new rates and traces via pure functional core
+                alphas = update_idbd_rates_(
+                    betas=state["beta"],
+                    h=state["h"],
+                    inputs=inputs,
+                    error=error,
+                    meta_lr=group["meta_lr"],
+                )
+
+                # 3. Apply Weight Update: w <- w + α * δ * x
+                # Note: error is assumed to be a scalar or properly broadcastable
+                update = alphas * inputs * error
+                p.add_(update)
+
+
+class Autostep(Optimizer):
+    """
+    Autostep Optimizer: A normalized, tuning-free extension of IDBD.
+    """
+
+    def __init__(
+        self,
+        params,
+        initial_lr: float = 0.1,
+        meta_lr: float = 0.01,
+        tau: float = 10000.0,
+    ):
+        defaults = dict(initial_lr=initial_lr, meta_lr=meta_lr, tau=tau)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    # TODO: To make these composable with Neural Networks in the future (like Hypergradient Descent or Adam-HD),
+    # you should gradually transition the API to accept gradients rather than inputs and error separately.
+    # Right now, you have: \Delta \beta = \theta \cdot \delta \cdot x \cdot h
+    def step(self, inputs: torch.Tensor, error: torch.Tensor):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.shape[-1] != inputs.shape[-1]:
+                    raise ValueError(
+                        f"Linearity constraint violated: Parameter in_features {p.shape[-1]} does not "
+                        f"match input in_features {inputs.shape[-1]}."
+                    )
+                state = self.state[p]
+
+                if len(state) == 0:
+                    state["beta"] = torch.full_like(p, math.log(group["initial_lr"]))
+                    state["h"] = torch.zeros_like(p)
+                    state["v"] = torch.zeros_like(p)
+
+                alphas = update_autostep_rates_(
+                    betas=state["beta"],
+                    h=state["h"],
+                    v=state["v"],
+                    inputs=inputs,
+                    error=error,
+                    meta_lr=group["meta_lr"],
+                    tau=group["tau"],
+                )
+
+                # Apply Weight Update
+                update = alphas * inputs * error
+                p.add_(update)
+
+
+class K1(Optimizer):
+    """
+    K1 Optimizer: O(n) Kalman Filter approximation extending NLMS.
+    """
+
+    def __init__(
+        self,
+        params,
+        initial_lr: float = 0.01,
+        meta_lr: float = 0.01,
+        r_hat: float = 1.0,
+    ):
+        defaults = dict(initial_lr=initial_lr, meta_lr=meta_lr, r_hat=r_hat)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    # TODO: To make these composable with Neural Networks in the future (like Hypergradient Descent or Adam-HD),
+    # you should gradually transition the API to accept gradients rather than inputs and error separately.
+    # Right now, you have: \Delta \beta = \theta \cdot \delta \cdot x \cdot h
+    def step(self, inputs: torch.Tensor, error: torch.Tensor):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.shape[-1] != inputs.shape[-1]:
+                    raise ValueError(
+                        f"Linearity constraint violated: Parameter in_features {p.shape[-1]} does not "
+                        f"match input in_features {inputs.shape[-1]}."
+                    )
+                state = self.state[p]
+
+                if len(state) == 0:
+                    state["beta"] = torch.full_like(p, math.log(group["initial_lr"]))
+                    state["h"] = torch.zeros_like(p)
+
+                k_gain = update_k1_rates_(
+                    betas=state["beta"],
+                    h=state["h"],
+                    inputs=inputs,
+                    error=error,
+                    meta_lr=group["meta_lr"],
+                    r_hat=group["r_hat"],
+                )
+
+                # Apply Weight Update: w <- w + k * δ
+                p.add_(k_gain * error)
+
+
+class K2(Optimizer):
+    """
+    K2 Optimizer: Traceless IDBD approximation.
+    """
+
+    def __init__(
+        self,
+        params,
+        initial_lr: float = 0.01,
+        meta_lr: float = 0.01,
+        r_hat: float = 1.0,
+    ):
+        defaults = dict(initial_lr=initial_lr, meta_lr=meta_lr, r_hat=r_hat)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    # TODO: To make these composable with Neural Networks in the future (like Hypergradient Descent or Adam-HD),
+    # you should gradually transition the API to accept gradients rather than inputs and error separately.
+    # Right now, you have: \Delta \beta = \theta \cdot \delta \cdot x \cdot h
+    def step(self, inputs: torch.Tensor, error: torch.Tensor):
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.shape[-1] != inputs.shape[-1]:
+                    raise ValueError(
+                        f"Linearity constraint violated: Parameter in_features {p.shape[-1]} does not "
+                        f"match input in_features {inputs.shape[-1]}."
+                    )
+                state = self.state[p]
+
+                if len(state) == 0:
+                    state["beta"] = torch.full_like(p, math.log(group["initial_lr"]))
+
+                k_gain = update_k2_rates_(
+                    betas=state["beta"],
+                    inputs=inputs,
+                    error=error,
+                    meta_lr=group["meta_lr"],
+                    r_hat=group["r_hat"],
+                )
+
+                # Apply Weight Update: w <- w + k * δ
+                p.add_(k_gain * error)

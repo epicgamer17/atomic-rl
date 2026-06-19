@@ -48,11 +48,11 @@ def test_argmax_selector():
     assert actions[1, 0] == 0
     assert isinstance(info, dict)
 
-    # Test with extractor_fn
+    # Test with extracted values
     def dummy_extractor(x):
         return x * -1  # flip signs
 
-    actions_flipped, _ = argmax_selector(predictions, extractor_fn=dummy_extractor)
+    actions_flipped, _ = argmax_selector(dummy_extractor(predictions))
     assert actions_flipped[0, 0] == 0
     assert actions_flipped[1, 0] == 1
 

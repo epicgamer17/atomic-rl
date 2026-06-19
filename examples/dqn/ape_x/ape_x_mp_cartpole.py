@@ -4,6 +4,7 @@ APE-X DQN implemented with torch.multiprocessing.
 
 # TODO: attempt a cleanup if possible
 
+from functional.initialization import layer_init
 import os
 import time
 import torch
@@ -36,7 +37,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_ape_x_epsilon
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network, layer_init
+from functional.network import hard_update_target_network
 
 # --- Constants ---
 ENV_NAME = "CartPole-v1"
@@ -209,7 +210,9 @@ def actor_worker(
                 action = greedy_actions.squeeze(0).detach().to(torch.long)
 
         # Step
-        next_obs, reward, terminated, truncated, info = env.step(action_np)
+        # Extract the scalar for a non-vectorized Gymnasium environment
+        action_int = int(action_np.item())
+        next_obs, reward, terminated, truncated, info = env.step(action_int)
 
         # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.
         n_step_transitions = n_step_proc(

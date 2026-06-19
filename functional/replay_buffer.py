@@ -1,10 +1,10 @@
+from .initialization import _allocate_tensordict
 import torch
 from tensordict import TensorDict
 from typing import Tuple, Callable, List, Optional, Union
 import random
 from collections import deque
 from dataclasses import dataclass
-from .utils import _allocate_tensordict
 
 
 @dataclass(kw_only=True)

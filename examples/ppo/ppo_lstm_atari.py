@@ -2,6 +2,7 @@
 # TODO: compare with 37 implementation details of PPO results
 # TODO: attempt a cleanup if possible
 # TODO: notes on PPO + LSTM
+from functional.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -24,12 +25,12 @@ from functional.losses import (
 )
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
-from functional.network import layer_init, unroll_rnn
+from functional.network import unroll_rnn
 from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step,
-    flatten_rollout_buffer,
-    record_truncations,
+    store_rollout_step_,
+    record_truncations_,
     get_rollout_next_values,
     yield_shuffled_minibatches,
     yield_sequential_minibatches,
@@ -37,7 +38,6 @@ from functional.rollout_buffer import (
 from functional.utils import (
     ema_update,
     standardize_tensor,
-    set_seed,
     to_tensor,
     to_numpy_action,
 )
@@ -78,7 +78,7 @@ class ActorCriticLSTM(nn.Module):
             nn.ReLU(),
             layer_init(nn.Conv2d(64, 64, 3, stride=1)),
             nn.ReLU(),
-            nn.Flatten(),
+            layer_init(nn.Flatten()),
             layer_init(nn.Linear(64 * 7 * 7, 512)),
             nn.ReLU(),
         )
@@ -280,7 +280,7 @@ for iteration in range(MAX_ITERATIONS):
                 },
                 batch_size=[NUM_ENVS],
             )
-            store_rollout_step(buffer=buffer, step=step, transition=transition)
+            store_rollout_step_(buffer=buffer, step=step, transition=transition)
 
             # 4. Handle Truncations (Gymnasium auto-resets)
             if "final_observation" in info:
@@ -293,15 +293,11 @@ for iteration in range(MAX_ITERATIONS):
                     # TODO: We should correctly handle LSTM hidden states on bootstrapping truncated states.
                     # Currently we only store the final observation, but the hidden state should also be preserved
                     # or re-computed to get an accurate value estimate for the truncated state.
-                    record_truncations(
-                        buffer,
-                        step,
-                        torch.as_tensor(
-                            env_indices[trunc_mask], dtype=torch.long, device=device
-                        ),
-                        torch.as_tensor(
-                            final_obs[trunc_mask], dtype=torch.float32, device=device
-                        ),
+                    record_truncations_(
+                        buffer=buffer,
+                        step=step,
+                        truncated_envs=to_tensor(env_indices[trunc_mask], device),
+                        final_observations=to_tensor(final_obs[trunc_mask], device),
                     )
 
             if "final_info" in info:
@@ -364,8 +360,8 @@ for iteration in range(MAX_ITERATIONS):
     returns = advantages.unsqueeze(-1) + buffer.data["values"]
 
     # Add advantages and returns to the buffer data for sequential sampling
-    buffer.data["advantages"] = rearrange(advantages, "b t -> b t 1")
-    buffer.data["returns"] = rearrange(returns, "b t 1 -> b t 1")
+    buffer.data["advantages"] = advantages.unsqueeze(-1)
+    buffer.data["returns"] = returns
 
     # 3. Optimization Phase
     epoch_losses = []
@@ -388,7 +384,8 @@ for iteration in range(MAX_ITERATIONS):
 
             # Categorical distribution for Atari
             dist = torch.distributions.Categorical(logits=new_logits)
-            new_log_probs = dist.log_prob(mb["actions"])
+            # dist has batch shape [B]. mb["actions"] is [B, 1]. Squeeze for log_prob, unsqueeze output.
+            new_log_probs = dist.log_prob(mb["actions"].squeeze(-1)).unsqueeze(-1)
 
             # 1. Policy Loss (Clipped Surrogate)
             ratio = probability_ratio(
@@ -444,8 +441,8 @@ for iteration in range(MAX_ITERATIONS):
     # Logging
     if iteration % 10 == 0:
         explained_var = compute_explained_variance(
-            rearrange(buffer.data["returns"], "b t -> (b t)").detach().cpu().numpy(),
-            rearrange(buffer.data["values"], "b t -> (b t)").detach().cpu().numpy(),
+            buffer.data["returns"].flatten().detach().cpu().numpy(),
+            buffer.data["values"].flatten().detach().cpu().numpy(),
         )
 
         log_dict = {

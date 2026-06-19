@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as D
-from einops import rearrange
 from tensordict import TensorDict
 from typing import Callable, Tuple, Optional, Union
 from functional.action_selection import argmax_selector

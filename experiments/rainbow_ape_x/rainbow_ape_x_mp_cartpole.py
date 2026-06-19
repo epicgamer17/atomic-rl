@@ -28,10 +28,9 @@ from functional.replay_buffer import (
 from functional.losses import cross_entropy_loss
 from functional.td import compute_categorical_q_td_target
 from functional.action_selection import (
-    double_selector,
-    categorical_extractor,
     gather_q_values,
     expected_value,
+    argmax_selector,
 )
 from functional.schedules import get_ape_x_epsilon
 from functional.optimizer import apply_gradients
@@ -182,7 +181,6 @@ def actor_worker(
     model_creator: Callable[[float], nn.Module],
     shared_model: nn.Module,
     buffer: SharedPERBuffer,
-    selector_fn: Callable,
     target_fn: Callable,
     loss_fn: Callable,
     support: torch.Tensor,
@@ -220,7 +218,9 @@ def actor_worker(
 
         with torch.inference_mode():
             obs_tensor = torch.as_tensor(obs[None, ...], dtype=torch.float32)
-            _, actions = selector_fn(local_model, None, obs_tensor)
+            q_logits = local_model(obs_tensor)
+            expected_qs = expected_value(q_logits, support=support)
+            actions, _ = argmax_selector(expected_qs)
             action = actions.item()
 
         next_obs, reward, terminated, truncated, _ = env.step(action)
@@ -257,10 +257,8 @@ def actor_worker(
                 next_q_logits_online = local_model(collated["next_obs"])
                 next_q_logits_target = local_target_model(collated["next_obs"])
 
-                next_actions, _ = argmax_selector(
-                    next_q_logits_online,
-                    extractor_fn=partial(categorical_extractor, support=support),
-                )
+                next_expected_qs = expected_value(next_q_logits_online, support=support)
+                next_actions, _ = argmax_selector(next_expected_qs)
 
                 td_target = target_fn(
                     next_q_logits_target,
@@ -280,7 +278,6 @@ def learner_worker(
     model_creator: Callable[[float], nn.Module],
     shared_model: nn.Module,
     buffer: SharedPERBuffer,
-    selector_fn: Callable,
     target_fn: Callable,
     loss_fn: Callable,
 ):
@@ -327,10 +324,8 @@ def learner_worker(
             next_q_logits_target = target_model(batch["next_obs"])
 
             # 2. Next Action Selection (Double DQN: Online model selects)
-            next_actions, _ = argmax_selector(
-                next_q_logits_online,
-                extractor_fn=partial(categorical_extractor, support=local_model.support),
-            )
+            next_expected_qs = expected_value(next_q_logits_online, support=local_model.support)
+            next_actions, _ = argmax_selector(next_expected_qs)
 
             # 3. Target Calculation
             td_target = target_fn(
@@ -411,10 +406,6 @@ def main():
         support=support,
     )
 
-    my_selector_fn = partial(
-        double_selector,
-        extractor_fn=partial(categorical_extractor, support=support),
-    )
     my_target_fn = partial(
         compute_categorical_q_td_target,
         support=support,
@@ -447,7 +438,6 @@ def main():
             my_model_creator,
             shared_model,
             buffer,
-            my_selector_fn,
             my_target_fn,
             my_loss_fn,
         ),
@@ -464,7 +454,6 @@ def main():
                 my_model_creator,
                 shared_model,
                 buffer,
-                my_selector_fn,
                 my_target_fn,
                 my_loss_fn,
                 support,

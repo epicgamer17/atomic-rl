@@ -20,6 +20,7 @@ NOTE: perhaps this should be in VPG?
 NOTE: This does not implement the LSTM version which was also described in the A3C Paper or the equivalent Sarsa and DQN versions of the A3C algorithm.
 """
 
+from functional.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,7 +30,6 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
-from einops import rearrange
 from functools import partial
 
 from functional.action_selection import sample_distribution
@@ -38,7 +38,6 @@ from functional.returns import compute_n_step_returns
 from functional.losses import policy_gradient_loss, huber_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
-from functional.network import layer_init
 from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step,
@@ -50,7 +49,6 @@ from functional.utils import (
     standardize_tensor,
     to_tensor,
     to_numpy_action,
-    set_seed,
 )
 from tensordict import TensorDict
 
@@ -242,15 +240,16 @@ for iteration in range(MAX_ITERATIONS):
 
     # Flatten buffer for loss calculations
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "b t -> (b t) 1")
-    flat_returns = rearrange(returns, "b t -> (b t) 1")
+    flat_advantages = advantages.view(-1, 1)
+    flat_returns = returns.view(-1, 1)
 
     # --- Re-evaluation Pass ---
     new_logits, new_values = model(flat_data["observations"])
 
     # Re-calculate log probabilities for the actions taken
     dist = torch.distributions.Categorical(logits=new_logits)
-    new_log_probs = dist.log_prob(flat_data["actions"])
+    # dist has batch shape [B]. flat_data["actions"] is [B, 1]. Squeeze for log_prob, unsqueeze output.
+    new_log_probs = dist.log_prob(flat_data["actions"].squeeze(-1)).unsqueeze(-1)
 
     pg_loss, info_dict = policy_gradient_loss(
         advantages=flat_advantages,

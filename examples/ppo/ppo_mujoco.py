@@ -2,6 +2,7 @@
 # TODO: compare with 37 implementation details of PPO results, mine seem lower/have less variance than theirs for sure and a mean of 1000 after 1M steps instead of 2000 like theirs.
 # TODO: attempt a cleanup if possible
 # TODO: notes on multi continuous
+from functional.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,7 +11,6 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
-from einops import rearrange
 
 from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
@@ -24,10 +24,10 @@ from functional.losses import (
 )
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
-from functional.network import layer_init
 from functional.rollout_buffer import (
     init_rollout_buffer,
-    store_rollout_step,
+    store_rollout_step_,
+    record_truncations_,
     flatten_rollout_buffer,
     record_truncations,
     get_rollout_next_values,
@@ -36,7 +36,6 @@ from functional.rollout_buffer import (
 from functional.utils import (
     ema_update,
     standardize_tensor,
-    set_seed,
     to_tensor,
     to_numpy_action,
 )
@@ -224,7 +223,7 @@ for iteration in range(MAX_ITERATIONS):
                 },
                 batch_size=[NUM_ENVS],
             )
-            store_rollout_step(buffer=buffer, step=step, transition=transition)
+            store_rollout_step_(buffer=buffer, step=step, transition=transition)
 
             # 4. Handle Truncations (Gymnasium auto-resets)
             if "final_observation" in info:
@@ -234,15 +233,11 @@ for iteration in range(MAX_ITERATIONS):
                 # Filter to only record environments that were truncated
                 trunc_mask = truncated[env_indices]
                 if trunc_mask.any():
-                    record_truncations(
-                        buffer,
-                        step,
-                        torch.as_tensor(
-                            env_indices[trunc_mask], dtype=torch.long, device=device
-                        ),
-                        torch.as_tensor(
-                            final_obs[trunc_mask], dtype=torch.float32, device=device
-                        ),
+                    record_truncations_(
+                        buffer=buffer,
+                        step=step,
+                        truncated_envs=torch.as_tensor(env_indices[trunc_mask], dtype=torch.long, device=device),
+                        final_observations=torch.as_tensor(final_obs[trunc_mask], dtype=torch.float32, device=device),
                     )
 
             if "final_info" in info:
@@ -282,8 +277,8 @@ for iteration in range(MAX_ITERATIONS):
 
     # Flatten buffer for training
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "b t -> (b t) 1")
-    flat_returns = rearrange(returns, "b t 1 -> (b t) 1")
+    flat_advantages = advantages.view(-1, 1)
+    flat_returns = returns.view(-1, 1)
 
     flat_data["advantages"] = flat_advantages
     flat_data["returns"] = flat_returns

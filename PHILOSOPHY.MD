@@ -11,6 +11,7 @@ This layer contains "pure" mathematical functions.
 These functions should be stateless, have no side effects, and strictly avoid guessing the shapes of incoming tensors wherever possible. Exceptions are permitted for standard ML conventions that inherently require state (e.g., in-place network updates or buffer history closures), provided they are clearly documented. 
 If a function expects a batch dimension, it must receive a batch dimension. On top of this, shapes and expectations should aim to make it so reshaping is rarely needed and if it is, it should be explicit. 
 Ideally, functions are "pure", where the same inputs yield the same outputs, but this is not strictly enforced.
+Minimize footguns
 Functions should try to be compilable with torch.compile()
 Functions should try to be composable and build upon each other.
 Functions should try to be reusable. 
@@ -34,6 +35,8 @@ Minimize code that does multiple things. If a function is doing more than one th
 Minimze dead code and useless functions. Without good reason (semantic or efficiency) we should not have two functions that perform the exact same mathematical operation.
 Avoid OOP unless absolutely necessary, aim for a functional style of programming.
 Break large functions into smaller, more manageable functions and compose them together to achieve the desired functionality. This is preferred over writing a single monolithic function and prevents combinatorial explosion. 
+In general follow PyTorch best practices and try and make sure things integrate well with PyTorch
+Generally but not always, functional core, stateful wrapper (like PyTorch)
 Where possible we should not try and recreate the wheel and use existing torch utilities. Try to avoid making simple wrappers for things that are already implemented in torch, unless the wrapper provides clear semantic meaning or establishes a consistent interface for swappability (e.g., hard_update vs. soft_update).
 
 Common solution methods: 
@@ -43,6 +46,20 @@ Composability
 Higher order functions
 Partial execution of functions
 (More to be added as I learn more) 
+
+
+Torch-like conventions
+Follow PyTorch naming conventions. For example, if using inplace operations the function name should end with an underscore (_)
+Functions should never hardcode device='cuda' or device='cpu', nor should they default to float32 unless absolutely mathematically necessary.
+When creating new tensors inside a functional block, use .new_zeros(), .new_empty(), or torch.zeros_like(tensor) on an incoming tensor to inherently match its device and dtype. This prevents silent device-mismatch crashes during distributed training or when swapping from CPU to GPU.
+Functions that compute targets (e.g., TD-targets, GAE) should explicitly note in their docstrings whether they return detached tensors.
+If a functional operation mathematically does not require gradients (like computing evaluation metrics or updating meta-learning traces like IDBD's $h$ vector), wrap it in @torch.no_grad() or expect it to be called within that context to save memory.
+Never use .item(), .tolist(), or .numpy() inside the functional core or the main orchestration loop. These operations trigger a CUDA Synchronization, forcing the GPU to wait for the CPU, destroying performance.
+Avoid Python for loops over batch or feature dimensions at all costs. This is an absolute prerequisite if you want your functions to be friendly to torch.compile(). (If an operation is notoriously hard to vectorize, explore torch.vmap).
+PyTorch allows implicit broadcasting (e.g., adding a [Batch, 1] tensor to a [Batch, Features] tensor). While efficient, this is a massive source of silent bugs. Require explicit .unsqueeze() calls in the code so the reader can visually track how the dimensions are aligning before an operation.
+If a function returns a view of a tensor rather than an allocated copy, it must be documented.
+If a function fundamentally requires a contiguous block of memory (common when reshaping after a .transpose()), use .contiguous() explicitly and document why it is necessary.
+
 
 *examples/*
 This layer contains examples of how to use the functions in the functional layer.

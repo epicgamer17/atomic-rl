@@ -21,11 +21,16 @@ TODO: add CBP Notes.
 import torch
 import torch.nn as nn
 from typing import Callable, Iterable
-from functional.utils import ema_update
-
+from functional.utils import ema_update, ema_update_
 # TODO: some messy is instance checks. these are necessary for IDBD and linear value heads and stuff, but maybe there is a cleaner way to do this.
 
 # TODO: The functions now return masks, but examples have not been updated to use this interface yet, and at the moment pretend there are no masks. NOTE: it may be that for nn.Modules (ie standard deep learning) the function has an implicit effect, whereas for linear and other methods (alberta plan) the mask is used. im not sure if i love this and ideally it would be unified across both.
+
+# TODO: Make these more pytorchy? Can we do something with forward hooks? Make a new module wrapper for this? Make an optimizer wrapper? Interceptor (like LR Schedules)?
+
+# TODO: somehow enforce the API that optimizers need their own reset_elementwise_state functionality. This way we don't keep adding logic here. Somehow enforce that for all optimizers even existing torch ones.
+
+# TODO: also add a GnT Adam class
 
 
 def compute_gradient_utility(weight: torch.Tensor, grad: torch.Tensor) -> torch.Tensor:
@@ -116,7 +121,7 @@ def get_proportional_pruning_mask(
     return mask
 
 
-def reset_optimizer_states_elementwise(
+def reset_optimizer_states_elementwise_(
     optimizer: torch.optim.Optimizer,
     param: nn.Parameter | torch.Tensor,
     mask: torch.BoolTensor,
@@ -219,7 +224,7 @@ def apply_selective_weight_reinitialization(
             param.copy_(torch.where(mask, temp_tensor, param))
 
         # 4. Reset Optimizer Momentum (Must be out of the main no_grad context but acts in-place)
-        reset_optimizer_states_elementwise(optimizer, param, mask)
+        reset_optimizer_states_elementwise_(optimizer, param, mask)
         masks_applied[param] = mask
 
     return masks_applied
@@ -369,8 +374,8 @@ def apply_continual_backprop(
             instant_utility = (act_diff * out_weight_sum) / in_weight_sum
 
             # c. Update running averages (Eq 2, Eq 6 and Eq 4?)
-            ema_update(avg_activations, act.mean(dim=0), alpha=alpha, inplace=True)
-            ema_update(utilities, instant_utility, alpha=alpha, inplace=True)
+            ema_update_(avg_activations, act.mean(dim=0), alpha=alpha)
+            ema_update_(utilities, instant_utility, alpha=alpha)
 
             u_hat = utilities / bias_correction
             # 3. Find eligible features: Features with age more than m
@@ -423,19 +428,19 @@ def apply_continual_backprop(
         # TODO: Initialize timestep: Set tl−1[:, r], and tl[r, :] to 0
 
         # Input weights (Resetting rows)
-        reset_optimizer_states_elementwise(
+        reset_optimizer_states_elementwise_(
             optimizer, layer.weight, mask.unsqueeze(1).expand_as(layer.weight)
         )
         if layer.bias is not None:
-            reset_optimizer_states_elementwise(optimizer, layer.bias, mask)
+            reset_optimizer_states_elementwise_(optimizer, layer.bias, mask)
 
         # Output weights (Resetting columns)
         if isinstance(next_layer, torch.Tensor):
-            reset_optimizer_states_elementwise(
+            reset_optimizer_states_elementwise_(
                 optimizer, next_layer, mask.unsqueeze(0).expand_as(next_layer)
             )
         else:
-            reset_optimizer_states_elementwise(
+            reset_optimizer_states_elementwise_(
                 optimizer,
                 next_layer.weight,
                 mask.unsqueeze(0).expand_as(next_layer.weight),

@@ -1,10 +1,10 @@
+from .initialization import _allocate_tensordict
 import torch
 from tensordict import TensorDict
 from typing import Tuple, Callable, List, Optional, Union
 from dataclasses import dataclass, field
 import numpy as np
 from einops import rearrange
-from .utils import _allocate_tensordict
 
 
 @dataclass
@@ -33,7 +33,7 @@ def init_rollout_buffer(
     return RolloutBufferState(data=data, truncation_records=[])
 
 
-def store_rollout_step(
+def store_rollout_step_(
     buffer: RolloutBufferState, step: int, transition: TensorDict
 ) -> None:
     """Stores a transition batch into the rollout buffer."""
@@ -41,7 +41,7 @@ def store_rollout_step(
     buffer.data[:, step] = transition
 
 
-def record_truncations(
+def record_truncations_(
     buffer: RolloutBufferState,
     step: int,
     truncated_envs: torch.Tensor,
@@ -63,7 +63,7 @@ def record_truncations(
 
 def get_rollout_next_values(
     buffer: RolloutBufferState,
-    last_values: torch.Tensor,
+    last_values: torch.Tensor,  # shape [B, 1]
     get_value_fn: Callable[[torch.Tensor], torch.Tensor],
     device: torch.device,
 ) -> torch.Tensor:
@@ -92,8 +92,15 @@ def get_rollout_next_values(
                     f"Missing (step, env_idx) records: {missing_preview}"
                 )
 
-    if last_values.ndim == 1:
-        last_values = last_values.unsqueeze(1)
+    # Explicitly add the time dimension (dim=1) since last_values represents a single timestep
+    last_values = last_values.unsqueeze(1)
+    
+    assert (
+        last_values.ndim == values.ndim
+    ), f"Shape mismatch: last_values.ndim ({last_values.ndim}) != values.ndim ({values.ndim}). Ensure last_values matches the feature dimensions of values."
+    assert (
+        last_values.shape[2:] == values.shape[2:]
+    ), f"Feature dimensions mismatch: last_values {last_values.shape[2:]} vs values {values.shape[2:]}"
 
     # next_values[b, t] should be values[b, t+1] for t < T-1, and last_values[b] for t = T-1
     next_values = torch.cat([values[:, 1:], last_values], dim=1)
@@ -101,7 +108,11 @@ def get_rollout_next_values(
     if buffer.truncation_records:
         obs_batch = torch.stack([r[2] for r in buffer.truncation_records]).to(device)
         with torch.inference_mode():
-            v_patch = get_value_fn(obs_batch).squeeze(-1)
+            # get_value_fn must return a tensor shaped [N, *FeatureDims]
+            v_patch = get_value_fn(obs_batch)
+            assert (
+                v_patch.shape[1:] == values.shape[2:]
+            ), f"v_patch feature shape {v_patch.shape[1:]} does not match values feature shape {values.shape[2:]}"
 
         for i, (step, env_idx, _) in enumerate(buffer.truncation_records):
             next_values[env_idx, step] = v_patch[i]
@@ -180,7 +191,9 @@ def yield_sequential_minibatches(
 
         # 1. Select the initial LSTM states for these specific environments
         # All states are typically [layers, envs, hidden_dim]
-        mb_initial_states = tuple(s[:, mb_env_inds].detach() for s in initial_lstm_states)
+        mb_initial_states = tuple(
+            s[:, mb_env_inds].detach() for s in initial_lstm_states
+        )
 
         # 2. Slice the buffer data for these environments across ALL steps
         # buffer_data is [envs, steps, ...] -> slice to [envs_per_batch, steps, ...]

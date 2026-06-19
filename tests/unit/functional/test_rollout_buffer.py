@@ -4,7 +4,7 @@ import numpy as np
 from tensordict import TensorDict
 from functional.rollout_buffer import (
     init_rollout_buffer,
-    store_rollout_step,
+    store_rollout_step_,
     record_truncations,
     get_rollout_next_values,
     flatten_rollout_buffer,
@@ -41,7 +41,7 @@ def test_store_rollout_step():
         batch_size=[num_envs],
     )
 
-    store_rollout_step(buffer, step, transition)
+    store_rollout_step_(buffer, step, transition)
     torch.testing.assert_close(buffer.data[:, step], transition)
 
 
@@ -146,7 +146,7 @@ def test_flatten_rollout_buffer():
             },
             batch_size=[num_envs],
         )
-        store_rollout_step(buffer, i, transition)
+        store_rollout_step_(buffer, i, transition)
 
     flat_data = flatten_rollout_buffer(buffer)
 

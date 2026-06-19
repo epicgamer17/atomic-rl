@@ -5,6 +5,7 @@ Essentially REINFORCE + a value function for the baseline to compute advantages.
 NOTE: very similar to A2C/A3C
 """
 
+from functional.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,7 +15,6 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
-from einops import rearrange
 from functools import partial
 
 from functional.action_selection import sample_distribution
@@ -27,7 +27,6 @@ from functional.utils import (
     to_numpy_action,
 )
 from functional.visualization import compute_explained_variance
-from functional.network import layer_init
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -114,7 +113,9 @@ for episode in range(MAX_EPISODES):
         action_np = to_numpy_action(action)
 
         # 2. Step Env
-        next_obs, reward, terminated, truncated, info = env.step(action_np)
+        # Extract the scalar for a non-vectorized Gymnasium environment
+        action_int = int(action_np.item())
+        next_obs, reward, terminated, truncated, info = env.step(action_int)
 
         # 3. Add to "online" buffers
         rewards.append(reward)
@@ -149,7 +150,7 @@ for episode in range(MAX_EPISODES):
         gamma=GAMMA,
     )[0]
 
-    values = rearrange(torch.stack(values), "t 1 1 -> t")
+    values = torch.stack(values).flatten()
 
     # 2. Define Baseline & Calculate Advantage using the Critic
     # VPG traditionally uses the learned value function as the baseline
@@ -158,7 +159,7 @@ for episode in range(MAX_EPISODES):
 
     pg_loss, info_dict = policy_gradient_loss(
         advantages=advantages,
-        log_probs=rearrange(torch.stack(log_probs), "t 1 1 -> t"),
+        log_probs=torch.stack(log_probs).flatten(),
     )
     pg_loss = pg_loss.mean()
 

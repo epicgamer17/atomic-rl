@@ -8,6 +8,7 @@ Key Ideas:
 
 # TODO: results seem slightly noisier/worse than normal DQN. in some ways like my PPO+lstm results. should add a comparison on the flickering env of DQN and DRQN.
 
+from functional.initialization import layer_init, set_seed
 import random
 from typing import Tuple, Optional
 
@@ -27,7 +28,7 @@ from functional.action_selection import (
     with_epsilon_greedy,
 )
 from functional.losses import mse_loss, with_sequence_mask
-from functional.network import hard_update_target_network, layer_init
+from functional.network import hard_update_target_network
 from functional.replay_buffer import (
     circular_write_strategy,
     init_buffer,
@@ -36,7 +37,7 @@ from functional.replay_buffer import (
 )
 from functional.schedules import get_linear_schedule
 from functional.td import compute_q_td_target
-from functional.utils import set_seed, to_numpy_action, to_tensor
+from functional.utils import to_numpy_action, to_tensor
 
 # Constants
 BATCH_SIZE = 32
@@ -97,7 +98,7 @@ class RecurrentDQN(nn.Module):
         batch_size, seq_len, _ = obs_sequence.shape
 
         # (B, T, ObsDim) -> (B*T, HiddenSize)
-        flat_obs = rearrange(obs_sequence, "b t d -> (b t) d")
+        flat_obs = obs_sequence.flatten(0, 1)
         features = self.feature_extractor(flat_obs)
         features = rearrange(features, "(b t) h -> b t h", b=batch_size, t=seq_len)
 
@@ -212,7 +213,9 @@ def train():
 
         # 2. Step Env
         # TODO: do my other examples have a .item() for the action? i dont think they do. why is that?
-        next_obs, reward, terminated, truncated, info = env.step(action_np.item())
+        # Extract the scalar for a non-vectorized Gymnasium environment
+        action_int = int(action_np.item())
+        next_obs, reward, terminated, truncated, info = env.step(action_int)
 
         # 3. Accumulate Sequences
         # TODO: are there helpers i should use here?
@@ -267,23 +270,23 @@ def train():
             # Sequence Q-learning update
             # We use the stored hidden states from the START of the sequence
             # batch["hx"] shape: [BATCH_SIZE, SEQ_LENGTH, 1, HIDDEN_SIZE]
-            b_hx = rearrange(batch["hx"][:, 0], "b 1 h -> 1 b h").contiguous().detach()
-            b_cx = rearrange(batch["cx"][:, 0], "b 1 h -> 1 b h").contiguous().detach()
+            b_hx = batch["hx"][:, 0].transpose(0, 1).contiguous().detach()
+            b_cx = batch["cx"][:, 0].transpose(0, 1).contiguous().detach()
 
             # Online pass
             # We unroll through the entire sequence to get all Q-values
             q_all, _ = model(batch["observations"], (b_hx, b_cx))
             # Current Q-values for steps 0 to SEQ_LENGTH-2
             q_pred_flat = gather_q_values(
-                rearrange(q_all[:, :-1], "b t a -> (b t) a"),
-                rearrange(batch["actions"][:, :-1], "b t 1 -> (b t)"),
+                q_all[:, :-1].flatten(0, 1),
+                batch["actions"][:, :-1].flatten(),
             )
 
             with torch.no_grad():
                 # Target pass (use the same initial hidden state for target net)
                 target_q_all, _ = target_model(batch["observations"], (b_hx, b_cx))
                 # Target values for steps 1 to SEQ_LENGTH-1 (next states)
-                next_q_values_flat = rearrange(target_q_all[:, 1:], "b t a -> (b t) a")
+                next_q_values_flat = target_q_all[:, 1:].flatten(0, 1)
 
                 # Greedy action selection from target network
                 next_actions_flat, _ = argmax_selector(next_q_values_flat)
@@ -292,8 +295,8 @@ def train():
                 td_targets_flat = compute_q_td_target(
                     next_q_values=next_q_values_flat,
                     next_actions=next_actions_flat.squeeze(-1),
-                    rewards=rearrange(batch["rewards"][:, :-1], "b t -> (b t)"),
-                    terminated=rearrange(batch["terminated"][:, :-1], "b t -> (b t)"),
+                    rewards=batch["rewards"][:, :-1].flatten(),
+                    terminated=batch["terminated"][:, :-1].flatten(),
                     gamma=torch.tensor(GAMMA, device=device),
                 )
 
@@ -304,7 +307,7 @@ def train():
             valid_mask = batch["valid"][:, :-1].clone()
             if BURN_IN_STEPS > 0:
                 valid_mask[:, :BURN_IN_STEPS] = False
-            flat_mask = rearrange(valid_mask, "b t -> (b t)")
+            flat_mask = valid_mask.flatten()
 
             # Use sequence-aware loss
             loss_fn = with_sequence_mask(mse_loss, flat_mask)

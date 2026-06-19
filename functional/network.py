@@ -5,28 +5,8 @@ from typing import Any, Optional, Tuple, Callable
 from functional.utils import ema_update
 
 
-def layer_init(
-    layer: nn.Module, std: float = np.sqrt(2), bias_const: float = 0.0
-) -> nn.Module:
-    """
-    Orthogonal initialization of weights and constant initialization of biases.
-    Standard for PPO and other policy gradient methods in the CleanRL style.
-
-    Args:
-        layer (nn.Module): The layer to initialize.
-        std (float): The scaling factor (gain) for orthogonal initialization.
-        bias_const (float): The constant value to initialize the bias with.
-
-    Returns:
-        nn.Module: The initialized layer.
-    """
-    torch.nn.init.orthogonal_(layer.weight, std)
-    torch.nn.init.constant_(layer.bias, bias_const)
-    return layer
-
-
 # NOTE: This is a stateful function which is not ideal for the functional paradigm but follows standard pytorch and ml conventions.
-def soft_update_target_network(
+def soft_update_target_network_(
     model: nn.Module, target_model: nn.Module, tau: float = 0.005
 ) -> None:
     """
@@ -44,7 +24,7 @@ def soft_update_target_network(
 
 
 # NOTE: This is a stateful function which is not ideal for the functional paradigm but follows standard pytorch and ml conventions.
-def hard_update_target_network(model: nn.Module, target_model: nn.Module) -> None:
+def hard_update_target_network_(model: nn.Module, target_model: nn.Module) -> None:
     """
     Hard update of target network parameters.
     target_params = params

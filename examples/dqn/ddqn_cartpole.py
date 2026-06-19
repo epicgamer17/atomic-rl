@@ -1,4 +1,4 @@
-"""
+r"""
 Notes on Double DQN:
 The idea is to decouple value prediction from action selection. To prevent the estimation errors caused by the maximization step, where the same network is used to select the action and evaluate the value of that action, we use an online network and a delayed target network. The online network is used to select the action, and the target network is used to evaluate the value of that action. This prevents the network from overestimating the value of the action that it selects, which can lead to unstable training and poor performance. This is in contrast to DQN, where the same network is used to select the action and evaluate the value of that action.
 
@@ -7,6 +7,7 @@ Standard DQN Target: $Y_{t}^{DQN} \equiv R_{t+1} + \gamma \max_{a} Q(S_{t+1}, a;
 NOTE: this is implemented inline with common Rainbow Implementations and may not be in line with the original paper.
 """
 
+from functional.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,6 +19,7 @@ import random
 import wandb
 from tensordict import TensorDict
 from functools import partial
+from functional.utils import to_numpy_action
 
 from functional.replay_buffer import (
     init_buffer,
@@ -33,7 +35,7 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network, layer_init
+from functional.network import hard_update_target_network
 
 # Constants
 BATCH_SIZE = 128
@@ -132,10 +134,12 @@ for step in range(MAX_STEPS):
             generator=rng_key,
         )
         rng_key = info["generator"]
-        action_np = action.item()
+        action_np = to_numpy_action(action)
 
     # 2. Step Env
-    next_obs, reward, terminated, truncated, info = env.step(action_np)
+    # Extract the scalar for a non-vectorized Gymnasium environment
+    action_int = int(action_np.item())
+    next_obs, reward, terminated, truncated, info = env.step(action_int)
 
     # 3. Add to Buffer
     # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.

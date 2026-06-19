@@ -14,6 +14,7 @@ NOTE: DQN is fundamentally on off-policy algorithm and in theory works well with
 
 """
 
+from functional.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,7 +26,6 @@ import random
 import wandb
 from tensordict import TensorDict
 from functools import partial
-from einops import rearrange
 
 from functional.replay_buffer import (
     init_buffer,
@@ -41,9 +41,8 @@ from functional.action_selection import (
 )
 from functional.schedules import get_linear_schedule
 from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network, layer_init
+from functional.network import hard_update_target_network
 from functional.utils import (
-    set_seed,
     to_tensor,
     to_numpy_action,
 )
@@ -144,7 +143,9 @@ for step in range(MAX_STEPS):
         action_np = to_numpy_action(action)
 
     # 2. Step Env
-    next_obs, reward, terminated, truncated, info = env.step(action_np)
+    # Extract the scalar for a non-vectorized Gymnasium environment
+    action_int = int(action_np.item())
+    next_obs, reward, terminated, truncated, info = env.step(action_int)
 
     # 3. Add to Buffer
     # TODO: URGENT. Creating a new tensor every step in the hotloop. should do in a more efficient way, maybe some thing like the rollout buffer in PPO (possible reuse?) ie store in a rollout buffer before sending to main replay buffer. Idea being its pre allocated basically. Must consider the N-Step case.

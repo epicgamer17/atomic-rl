@@ -28,8 +28,6 @@ from functional.replay_buffer import (
 from functional.losses import cross_entropy_loss
 from functional.td import compute_categorical_q_td_target
 from functional.action_selection import (
-    double_selector,
-    categorical_extractor,
     gather_q_values,
     expected_value,
     argmax_selector,
@@ -165,7 +163,6 @@ class ActorActor:
         actor_id: int,
         num_actors: int,
         model_creator: Callable[[float], nn.Module],
-        selector_fn: Callable,
         target_fn: Callable,
         loss_fn: Callable,
         learner: ray.actor.ActorHandle,
@@ -193,10 +190,6 @@ class ActorActor:
         self.target_model.train()
 
         self.num_actions = self.env.action_space.n
-        self.selector_fn = partial(
-            selector_fn,
-            extractor_fn=partial(categorical_extractor, support=self.support),
-        )
         self.target_fn = partial(
             target_fn,
             support=self.support,
@@ -249,7 +242,9 @@ class ActorActor:
                 obs_tensor = torch.as_tensor(
                     self.obs[None, ...], dtype=torch.float32, device=self.device
                 )
-                _, actions = self.selector_fn(self.model, None, obs_tensor)
+                q_logits = self.model(obs_tensor)
+                expected_qs = expected_value(q_logits, support=self.support)
+                actions, _ = argmax_selector(expected_qs)
                 action = actions.item()
 
             # 4. Step Env
@@ -292,10 +287,8 @@ class ActorActor:
                     next_q_logits_online = self.model(collated["next_obs"])
                     next_q_logits_target = self.target_model(collated["next_obs"])
 
-                    next_actions, _ = argmax_selector(
-                        next_q_logits_online,
-                        extractor_fn=partial(categorical_extractor, support=self.support),
-                    )
+                    next_expected_qs = expected_value(next_q_logits_online, support=self.support)
+                    next_actions, _ = argmax_selector(next_expected_qs)
 
                     td_target = self.target_fn(
                         next_q_logits_target,
@@ -325,7 +318,6 @@ class LearnerActor:
     def __init__(
         self,
         model_creator: Callable[[float], nn.Module],
-        selector_fn: Callable,
         target_fn: Callable,
         loss_fn: Callable,
         buffer: ray.actor.ActorHandle,
@@ -343,10 +335,6 @@ class LearnerActor:
         self.target_model.train()
         self.optimizer = optim.Adam(self.model.parameters(), lr=LEARNING_RATE)
         self.buffer = buffer
-        self.selector_fn = partial(
-            selector_fn,
-            extractor_fn=partial(categorical_extractor, support=self.support),
-        )
         self.target_fn = partial(
             target_fn,
             support=self.support,
@@ -410,10 +398,8 @@ class LearnerActor:
             next_q_logits_target = self.target_model(batch["next_obs"])
 
             # 2. Next Action Selection (Double DQN: Online model selects)
-            next_actions, _ = argmax_selector(
-                next_q_logits_online,
-                extractor_fn=partial(categorical_extractor, support=self.support),
-            )
+            next_expected_qs = expected_value(next_q_logits_online, support=self.support)
+            next_actions, _ = argmax_selector(next_expected_qs)
 
             # 3. Target Calculation
             td_target = self.target_fn(
@@ -481,7 +467,6 @@ def main():
         obs_shape, num_actions, ATOM_SIZE, support, sigma_init=sigma
     )
 
-    my_selector_fn = double_selector
     my_target_fn = compute_categorical_q_td_target
     my_loss_fn = cross_entropy_loss
 
@@ -501,7 +486,6 @@ def main():
     print("Creating Learner...")
     learner = LearnerActor.remote(
         model_creator=my_model_creator,
-        selector_fn=my_selector_fn,
         target_fn=my_target_fn,
         loss_fn=my_loss_fn,
         buffer=buffer,
@@ -514,7 +498,6 @@ def main():
             actor_id=i,
             num_actors=NUM_ACTORS,
             model_creator=my_model_creator,
-            selector_fn=my_selector_fn,
             target_fn=my_target_fn,
             loss_fn=my_loss_fn,
             learner=learner,

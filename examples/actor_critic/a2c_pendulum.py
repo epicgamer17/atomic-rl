@@ -5,6 +5,7 @@ STRUCTURALLY SIMILAR TO a2c_cartpole.py but adapted for continuous actions.
 Uses standard Gymnasium Vector Envs and the functional rollout buffer system.
 """
 
+from functional.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,7 +15,6 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
-from einops import rearrange
 from functools import partial
 
 from functional.action_selection import sample_distribution
@@ -23,7 +23,6 @@ from functional.returns import compute_n_step_returns
 from functional.losses import policy_gradient_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
 from functional.visualization import compute_explained_variance
-from functional.network import layer_init
 from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step,
@@ -263,8 +262,8 @@ for iteration in range(MAX_ITERATIONS):
 
     # Flatten buffer for loss calculations
     flat_data = flatten_rollout_buffer(buffer)
-    flat_advantages = rearrange(advantages, "b t -> (b t) 1")
-    flat_returns = rearrange(returns, "b t -> (b t) 1")
+    flat_advantages = advantages.view(-1, 1)
+    flat_returns = returns.view(-1, 1)
 
     # --- Re-evaluation Pass ---
     new_mu, new_std, new_values = model(flat_data["observations"])
