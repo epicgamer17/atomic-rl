@@ -11,6 +11,7 @@ NOTE: the textbook uses 8x8 with 5000 steps and in the recreation code only TD w
 
 # TODO: clean up and make more consistent.
 # TODO: try and make all examples more consistent.
+# TODO: should we use the existing functions for computing td error for value and stuff?
 # Removed inline TODO about updating to use existing functions
 import torch
 import numpy as np
@@ -20,7 +21,7 @@ import matplotlib.pyplot as plt
 import concurrent.futures
 from typing import Tuple
 
-from functional.td import true_online_td_update, semi_gradient_td_update
+from functional.td import true_online_td_update, semi_gradient_update
 from functional.traces import (
     update_true_online_traces,
     update_replacing_traces,
@@ -98,17 +99,20 @@ def true_online_sarsa_episode(
                 terminated=torch.tensor([False]),
             ).squeeze(0)
 
-            weights, q_old = true_online_td_update(
-                features=phi_t,
-                reward=torch.tensor(reward, dtype=torch.float64),
-                next_features=phi_next,
+            v_t = torch.dot(weights, phi_t)
+            v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
+            td_error = torch.tensor(reward, dtype=torch.float64) + gamma * v_next - v_t
+
+            weights = true_online_td_update(
+                error=td_error,
+                v_current=v_t,
                 v_old=q_old,
-                gamma=gamma,
+                features=phi_t,
                 weights=weights,
                 alpha=alpha,
                 trace=traces,
-                terminated=torch.tensor(terminated, dtype=torch.bool),
             )
+            q_old = v_next
 
             if torch.isnan(weights).any() or torch.isinf(weights).any():
                 # torch.set_printoptions(profile="full")
@@ -207,15 +211,15 @@ def replacing_sarsa_episode(
                 terminated=torch.tensor([False]),
             ).squeeze(0)
 
-            weights = semi_gradient_td_update(
-                features=phi_t,
-                reward=torch.tensor(reward, dtype=torch.float64),
-                next_features=phi_next,
-                gamma=gamma,
+            v_t = torch.dot(weights, phi_t)
+            v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
+            td_error = reward + gamma * v_next - v_t
+
+            weights = semi_gradient_update(
+                error=td_error,
                 weights=weights,
                 alpha=alpha,
                 update_vector=traces,
-                terminated=torch.tensor(terminated, dtype=torch.bool),
             )
 
             if torch.isnan(weights).any() or torch.isinf(weights).any():
@@ -271,15 +275,15 @@ def accumulating_sarsa_episode(
                 terminated=torch.tensor([False]),
             ).squeeze(0)
 
-            weights = semi_gradient_td_update(
-                features=phi_t,
-                reward=torch.tensor(reward, dtype=torch.float64),
-                next_features=phi_next,
-                gamma=gamma,
+            v_t = torch.dot(weights, phi_t)
+            v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
+            td_error = reward + gamma * v_next - v_t
+
+            weights = semi_gradient_update(
+                error=td_error,
                 weights=weights,
                 alpha=alpha,
                 update_vector=traces,
-                terminated=torch.tensor(terminated, dtype=torch.bool),
             )
 
             if torch.isnan(weights).any() or torch.isinf(weights).any():

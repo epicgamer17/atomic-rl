@@ -66,17 +66,20 @@ def true_online_random_walk_episode(
 
             # 3. Compute and Apply True Online TD Update
             # Notice how v_old goes in, and the new v_next comes out to be used in the next step
-            weights, v_old = true_online_td_update(
-                features=phi_t,
-                reward=reward,
-                next_features=phi_next,
+            v_t = torch.dot(weights, phi_t)
+            v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
+            td_error = torch.tensor(reward, dtype=torch.float32) + 1.0 * v_next - v_t
+
+            weights = true_online_td_update(
+                error=td_error,
+                v_current=v_t,
                 v_old=v_old,
-                gamma=1.0,
+                features=phi_t,
                 weights=weights,
                 alpha=alpha,
                 trace=traces,
-                terminated=terminated,
             )
+            v_old = v_next
 
             if terminated:
                 break

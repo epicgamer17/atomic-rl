@@ -29,7 +29,6 @@ def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Te
     # Broadcast support safely to match probs
     if support.ndim == 1:
         # Support is [N], broadcast to match [..., N]
-        # TODO: using expand_as instead of einops. make a decision to keep or remove einops
         support = support.expand_as(probs)
     else:
         assert (

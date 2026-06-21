@@ -37,7 +37,7 @@ from functional.replay_buffer import (
 )
 from functional.schedules import get_linear_schedule
 from functional.td import compute_q_td_target
-from functional.utils import to_numpy_action, to_tensor
+from functional.utils import to_tensor
 
 # Constants
 BATCH_SIZE = 32
@@ -209,12 +209,11 @@ def train():
                 generator=rng_key,
             )
             rng_key = select_info["generator"]
-            action_np = to_numpy_action(action)
 
         # 2. Step Env
-        # TODO: do my other examples have a .item() for the action? i dont think they do. why is that?
-        # Extract the scalar for a non-vectorized Gymnasium environment
-        action_int = int(action_np.item())
+        # Convert the action tensor to a numpy array at the environment boundary for standard Gym.
+        # We index the batch dimension instead of using .item() to support vectorized environments.
+        action_int = int(action.cpu().numpy()[0])
         next_obs, reward, terminated, truncated, info = env.step(action_int)
 
         # 3. Accumulate Sequences

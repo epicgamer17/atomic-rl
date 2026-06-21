@@ -19,7 +19,7 @@ Resource Budgeting: Controlled by: k (SWR) or replacement_rate (CBP).
 """
 
 # TODO: should this use ema?
-from functional.initialization import gnt_init_wrapper
+from functional.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -176,7 +176,7 @@ def run_experiment(config: str):
             (backbone.fc1.weight, backbone.fc1.bias, backbone.fc2.weight, backbone.fc2.bias),
             (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None)
         ]
-        init_fn = gnt_init_wrapper(
+        init_fn = make_gnt_init(
             lambda t: nn.init.kaiming_uniform_(t, a=math.sqrt(5))
         )
     else:
@@ -253,28 +253,23 @@ def run_experiment(config: str):
             ).squeeze(0)
 
             # TODO: does this work with AutoStep alphas?
-            theta, v_next_for_td = true_online_td_update(
-                features=rep_t.detach(),
-                reward=reward,
-                next_features=rep_next.detach(),
+            theta = true_online_td_update(
+                error=error_td.detach(),
+                v_current=v_current.detach(),
                 v_old=v_old,
-                gamma=gamma,
+                features=rep_t.detach(),
                 weights=theta,
                 alpha=alphas_head,
                 trace=traces,
-                terminated=terminated,
             )
+            v_next_for_td = v_next_target.detach()
         else:
             # TD(0) update
             theta = semi_gradient_td_update(
-                features=rep_t.detach(),
-                reward=reward,
-                next_features=rep_next.detach(),
-                gamma=gamma,
+                error=error_td.detach(),
                 weights=theta,
                 alpha=alphas_head,
                 update_vector=rep_t.detach(),
-                terminated=terminated,
             )
             v_next_for_td = v_next_target
 

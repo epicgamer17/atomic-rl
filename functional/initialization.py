@@ -41,8 +41,7 @@ def _allocate_tensordict(
     return data
 
 
-# TODO: should i rename it to make_gnt_init?
-def gnt_init_wrapper(
+def make_gnt_init(
     init_fn: Callable[[torch.Tensor], None],
 ) -> Callable[[torch.Tensor], None]:
     """

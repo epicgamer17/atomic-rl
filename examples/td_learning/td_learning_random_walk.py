@@ -26,6 +26,7 @@ NOTE: This is a simple almost tabular example of TD(lambda).
 """
 
 # TODO: dont inline the env/ or state-space logic into the functions/scripts, use a proper env or put it elsewhere so it can be reused.
+# TODO: should we use the existing functions for computing td error for value and stuff?
 
 import torch
 import numpy as np
@@ -123,17 +124,17 @@ def random_walk_episode(
                 terminated=torch.tensor([False]),  # Only clear trace after episode
             ).squeeze(0)
 
-            # 3. Compute and Apply semi-gradient TD Update
+            # 3. Compute TD error and Apply semi-gradient Update
+            v_t = torch.dot(weights, phi_t)
+            v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
+            td_error = reward + 1.0 * v_next - v_t
+
             # weights = weights + alpha * delta * traces
             weights = semi_gradient_td_update(
-                features=phi_t,
-                reward=reward,
-                next_features=phi_next,
-                gamma=1.0,
+                error=td_error,
                 weights=weights,
                 alpha=alpha,
                 update_vector=traces,
-                terminated=terminated,
             )
 
             if terminated:

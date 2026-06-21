@@ -7,7 +7,7 @@ time (bit flips) and the target is more complex than the learner, the best
 approximation continually changes, requiring the learner to track it.
 """
 
-from functional.initialization import gnt_init_wrapper
+from functional.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -52,7 +52,7 @@ model_cbp = make_net()
 opt_adam = torch.optim.Adam(model_adam.parameters(), lr=LR)
 opt_cbp = torch.optim.Adam(model_cbp.parameters(), lr=LR)
 
-init_fn = gnt_init_wrapper(nn.init.kaiming_uniform_)
+init_fn = make_gnt_init(nn.init.kaiming_uniform_)
 cbp_states = {model_cbp[0].weight: init_cbp_state(model_cbp[0].weight)}
 layer_pairs = [
     (

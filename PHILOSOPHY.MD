@@ -37,15 +37,20 @@ Avoid OOP unless absolutely necessary, aim for a functional style of programming
 Break large functions into smaller, more manageable functions and compose them together to achieve the desired functionality. This is preferred over writing a single monolithic function and prevents combinatorial explosion. 
 In general follow PyTorch best practices and try and make sure things integrate well with PyTorch
 Minimize use of isinstance, hasattr, getattr, try-except blocks and other checks or retrievals like this when possible. It makes the code messy and harder to read. It can lead to hidden defaults, hidden value, and hidden behaviour. And it probably indicates bad design. It may be necessary sometimes, but should be limited when possible. 
+Try to avoid flags like is_zero_sum that alter behaviour drastically based on a flag. It may be necessary however to reduce boilerplate and increase compatability as done with the rnn_unrolling. But in general should be avoided whenever possible.
 Generally but not always, functional core, stateful wrapper (like PyTorch)
+Minimize dependencies where possible. Prefer using torch utilities over third party libraries, unless there is a clear advantage to the third party library. For example, this is the reason we don't want to use einops. It makes it more torch native, and decreases the learning curve, reduces boilerplate, and the einops benefit is small if not none. 
 Where possible we should not try and recreate the wheel and use existing torch utilities. Try to avoid making simple wrappers for things that are already implemented in torch, unless the wrapper provides clear semantic meaning or establishes a consistent interface for swappability (e.g., hard_update vs. soft_update).
+Attempt as much as possible to follow the Liskov Substitution Principle. If a user expects a classthey should be able to drop in any subclass and use it the exact same way
+Make the code as easy as possible to use for developers. Make it easy to read and easy to understand, but make it correct at all costs.
+In the vein of Fail Fast, add gaurd rails, assertions, and errors.
 
 Common solution methods: 
 Dependency injection
 Composability
-    
 Higher order functions
 Partial execution of functions
+Functional core, OOP wrapper
 (More to be added as I learn more) 
 
 

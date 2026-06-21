@@ -100,17 +100,14 @@ def get_proportional_pruning_mask(
     d = utilities.numel()
     kd = proportional_factor * d
 
-    num_pruned = int(kd)
-    dec_part = kd - num_pruned
+    num_pruned = torch.tensor(int(kd), device=utilities.device, dtype=torch.int)
+    dec_part = kd - int(kd)
 
-    import random
-
-    if dec_part > 0 and random.random() < dec_part:
+    if dec_part > 0:
         # Bernoulli sample the fractional remainder to get exact expected pruning rate
-        # TODO: should we do num_pruned += torch.bernoulli(torch.tensor(dec_part)).int().item(). Problem is this has a item() call which violates are rules to prevent GPU-CPU coupling.
-        num_pruned += 1
+        num_pruned += torch.bernoulli(torch.tensor(dec_part, device=utilities.device)).int()
 
-    num_pruned = min(num_pruned, d)
+    num_pruned = torch.clamp(num_pruned, max=d)
     mask = torch.zeros_like(utilities, dtype=torch.bool)
 
     if num_pruned > 0:
@@ -176,14 +173,14 @@ def apply_selective_weight_reinitialization(
         parameters: Iterable of parameters (e.g., model.parameters()).
         optimizer: The optimizer being used to train the parameters.
         init_fn: A function that applies the desired reinitialization (e.g., orthogonal init) to a tensor.
-            TIP: Use `functional.utils.gnt_init_wrapper` to ensure biases are correctly zeroed.
+            TIP: Use `functional.utils.make_gnt_init` to ensure biases are correctly zeroed.
         k: The reinitialization factor/threshold multiplier.
         utility_type: "gradient" or "magnitude".
         prune_type: "threshold" or "proportional".
 
     Example:
-        >>> from functional.utils import gnt_init_wrapper
-        >>> init_fn = gnt_init_wrapper(nn.init.orthogonal_)
+        >>> from functional.utils import make_gnt_init
+        >>> init_fn = make_gnt_init(nn.init.orthogonal_)
         >>> masks_applied = apply_selective_weight_reinitialization(model.parameters(), optimizer, init_fn)
     """
     masks_applied = {}
@@ -275,14 +272,12 @@ def get_cbp_replacement_mask(
     num_features = utilities.numel()
     kd = replacement_rate * num_features
 
-    num_replace = int(kd)
-    dec_part = kd - num_replace
+    num_replace = torch.tensor(int(kd), device=utilities.device, dtype=torch.int)
+    dec_part = kd - int(kd)
 
-    import random
-
-    if dec_part > 0 and random.random() < dec_part:
+    if dec_part > 0:
         # Bernoulli sample the fractional remainder to get exact expected replacement rate
-        num_replace += 1
+        num_replace += torch.bernoulli(torch.tensor(dec_part, device=utilities.device)).int()
 
     # We don't sum eligible_mask to avoid a CPU sync. We just take topk up to num_replace. TODO: is this functionally the same as summing eligible mask?
     # We will mask out the ineligible ones after topk.
@@ -293,7 +288,7 @@ def get_cbp_replacement_mask(
         # Give ineligible units a utility of infinity so they aren't chosen.
         masked_utils = torch.where(eligible_mask, utilities, torch.inf)
         # Ensure we don't request more than the total number of features
-        k = min(num_replace, num_features)
+        k = torch.clamp(num_replace, max=num_features)
         _, indices = torch.topk(masked_utils, k, largest=False)
 
         flat_mask = mask.view(-1)
@@ -338,14 +333,14 @@ def apply_continual_backprop(
         cbp_states: Dictionary mapping a layer's `weight` tensor to its state dictionary (from `init_cbp_state`).
         optimizer: The optimizer being used to train the parameters.
         init_fn: A function that applies the desired reinitialization to a tensor.
-            NOTE: Use `functional.utils.gnt_init_wrapper` to ensure biases are correctly zeroed. TODO can we do this automatically for the user or somehow enforce Fail Fast on this.
+            NOTE: Use `functional.utils.make_gnt_init` to ensure biases are correctly zeroed. TODO can we do this automatically for the user or somehow enforce Fail Fast on this.
         eta: Decay rate for running averages.
         maturity_threshold: Minimum age before a unit is eligible for replacement.
         replacement_rate: The fraction of units to replace per step (rho).
 
     Example:
-        >>> from functional.utils import gnt_init_wrapper
-        >>> init_fn = gnt_init_wrapper(nn.init.orthogonal_)
+        >>> from functional.utils import make_gnt_init
+        >>> init_fn = make_gnt_init(nn.init.orthogonal_)
         >>> apply_continual_backprop(layer_pairs, activations, cbp_states, optimizer, init_fn)
 
         NOTE: Corresponds to lines 8 onwards in the CBP paper pseudocode (the for each layer loop)

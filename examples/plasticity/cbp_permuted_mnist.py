@@ -3,7 +3,7 @@ Example: CBP vs Standard Adam on Online Permuted MNIST
 """
 
 # TODO: improve and make plots and stuff like SWR example
-from functional.initialization import gnt_init_wrapper
+from functional.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -40,7 +40,7 @@ model_cbp = make_mnist_net()
 
 opt_std = torch.optim.Adam(model_std.parameters(), lr=LR)
 opt_cbp = torch.optim.Adam(model_cbp.parameters(), lr=LR)
-init_fn = gnt_init_wrapper(nn.init.kaiming_uniform_)
+init_fn = make_gnt_init(nn.init.kaiming_uniform_)
 
 cbp_states = {
     model_cbp[0].weight: init_cbp_state(model_cbp[0].weight),
