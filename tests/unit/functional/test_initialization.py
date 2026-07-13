@@ -12,6 +12,8 @@ import torch
 import random
 import numpy as np
 
+pytestmark = pytest.mark.unit
+
 
 def test_layer_init():
     """Test orthogonal initialization of layers."""
