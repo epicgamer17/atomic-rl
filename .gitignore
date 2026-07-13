@@ -165,22 +165,22 @@ cython_debug/
 .gemini/
 .local_lib/
 .vscode/
-.idea/                          # In case you switch to PyCharm
-resources                       # Absolute symlink to venv
+.idea/                          
+resources                       
 
 # ------------------------------------------------------------------
 # Data & Generated Outputs (Root level)
 # ------------------------------------------------------------------
 data/
-*.png                           # Already exists, but keep it explicit
-*.json                          # Already exists, but keep it explicit
+*.png                           
+*.json                          
 *.mp4
 *.gif
 
 # ------------------------------------------------------------------
 # Misc build artifacts specific to this repo
 # ------------------------------------------------------------------
-rl_research.egg-info/           # Already covered, but double-down
+rl_research.egg-info/           
 
 # ------------------------------------------------------------------
 # 1. OS & Environment Specifics
@@ -222,6 +222,8 @@ pylint_output.txt
 *.patch                      
 
 # ------------------------------------------------------------------
-# 7. Legacy & Deprecated Code
+# 7. Other
 # ------------------------------------------------------------------
 */deprecated/*               
+/experiments
+/papers
