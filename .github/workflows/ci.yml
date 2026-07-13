@@ -48,7 +48,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[test]"
 
-    - name: Run MuZero Training Loops
+    - name: Run Slow Tests
       # Only runs the tests marked as slow
       run: pytest -m "slow" tests/ || test $? -eq 5
       
