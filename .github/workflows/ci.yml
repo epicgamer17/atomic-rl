@@ -85,7 +85,12 @@ jobs:
         pip install pytest-benchmark
         
     - name: Run Performance Benchmarks
-      run: pytest -m performance --benchmark-json=benchmark_results.json tests/ || test $? -eq 5
+      run: |
+        pytest -m performance --benchmark-json=benchmark_results.json tests/ || {
+          code=$?;
+          rm -f benchmark_results.json;
+          test $code -eq 5;
+        }
       
     - name: Publish to GitHub Pages Dashboard
       if: success() && hashFiles('benchmark_results.json') != ''
