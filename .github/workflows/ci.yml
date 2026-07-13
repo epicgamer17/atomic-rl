@@ -88,6 +88,7 @@ jobs:
       run: pytest -m performance --benchmark-json=benchmark_results.json tests/ || test $? -eq 5
       
     - name: Publish to GitHub Pages Dashboard
+      if: success() && hashFiles('benchmark_results.json') != ''
       uses: benchmark-action/github-action-benchmark@v1
       with:
         name: Modular RL Performance
