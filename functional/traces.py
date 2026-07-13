@@ -33,7 +33,7 @@ def update_accumulating_traces(
 
     NOTE: can be instable as the traces can grow arbitrarily large. A good update rule is needed.
     NOTE: Can be used for both value and policy traces.
-    NOTE: Entropy regularization for the policy case should be done with the gradient. (from Appendix E: log_prob + tau * sign(delta) * entropy)
+    NOTE: Entropy regularization for the policy case should be done by passing it in as the gradient argument, . (from Appendix E: log_prob + tau * sign(delta) * entropy). This does mean that the trace must be updated after the TD error is calculated.
     """
     assert traces.shape == gradients.shape, "Trace and gradient shapes must match"
 

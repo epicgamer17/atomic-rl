@@ -17,9 +17,9 @@ def ema_update(
     Calculates the exponential moving average (EMA).
     Formula: (1 - alpha) * old_ema + alpha * new_value
     """
-    assert old_ema.shape == new_value.shape, (
-        f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
-    )
+    assert (
+        old_ema.shape == new_value.shape
+    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
 
     return (1.0 - alpha) * old_ema + alpha * new_value
 
@@ -31,9 +31,9 @@ def ema_update_(
     In-place exponential moving average (EMA).
     Formula: (1 - alpha) * old_ema + alpha * new_value
     """
-    assert old_ema.shape == new_value.shape, (
-        f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
-    )
+    assert (
+        old_ema.shape == new_value.shape
+    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
 
     # Use optimized in-place kernels: old = old * (1-a) + new * a
     # This is rearranged for .add_ usage: old = old - a*old + a*new => old += a*(new - old)
@@ -201,14 +201,34 @@ def to_numpy_action(action_tensor: torch.Tensor) -> np.ndarray:
     return res
 
 
-# TODO: is this the same as ema?
+# TODO: should this be inplace?
+# TODO: there is a tension between Gym which uses numpy and training loops which use torch. If this is to be used in a wrapper for the environment, then it should probably be numpy, but if we want to use it in simple training loops, torch is nicer.
 def update_welford_stats(
-    mean: torch.Tensor, var: torch.Tensor, count: torch.Tensor, batch: torch.Tensor
+    mean: torch.Tensor, sq_diff: torch.Tensor, count: torch.Tensor, batch: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Pure mathematical update for running mean and variance using Welford's online algorithm.
+
+    Args:
+        mean: current running mean of the features. [*F]
+        sq_diff: current running sum of squared differences from the mean. [*F]
+        count: current number of samples seen. (1)
+        batch: the new batch of features to update with. (B, *F)
+
+    Returns:
+        new_mean, new_sq_diff, new_count
     """
-    assert batch.dim() == 2, f"Expected [Batch, Features], got {batch.shape}"
+
+    # Fail Fast: Strict layout validation to catch dimension errors immediately
+    assert batch.ndim > mean.ndim, (
+        f"Shape Mismatch: Incoming batch must contain an explicit leading batch dimension. "
+        f"Batch shape: {batch.shape}, Mean shape: {mean.shape}"
+    )
+    assert batch.shape[1:] == mean.shape == sq_diff.shape, (
+        f"Geometry mismatch. Batch features: {batch.shape[1:]}, "
+        f"Mean features: {mean.shape}, Sq_diff features: {sq_diff.shape}"
+    )
+
     batch_size = batch.size(0)
 
     new_count = count + batch_size
@@ -216,25 +236,42 @@ def update_welford_stats(
     new_mean = mean + delta.sum(dim=0) / new_count
 
     delta2 = batch - new_mean.unsqueeze(0)
-    new_var = var + (delta * delta2).sum(dim=0)
+    new_sq_diff = sq_diff + (delta * delta2).sum(dim=0)
 
-    return new_mean, new_var, new_count
+    return new_mean, new_sq_diff, new_count
 
 
+# TODO: should this be inplace?
+# TODO: there is a tension between Gym which uses numpy and training loops which use torch. If this is to be used in a wrapper for the environment, then it should probably be numpy, but if we want to use it in simple training loops, torch is nicer.
 def normalize_features(
     features: torch.Tensor,
     mean: torch.Tensor,
-    var: torch.Tensor,
+    sq_diff: torch.Tensor,
     count: torch.Tensor,
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """
     Applies running normalization to the features.
+
+    Args:
+        features: The features to normalize. (B, *F)
+        mean: The running mean of the features. (*F)
+        sq_diff: The running sum of squared differences from the mean. (*F)
+        count: The number of samples seen. (1)
+        eps: Small value to prevent division by zero.
     """
+    assert (
+        features.ndim > mean.ndim
+    ), "Features must contain an explicit leading Batch dimension."
+    assert features.shape[1:] == mean.shape == sq_diff.shape, (
+        f"Geometry mismatch. Feature dimensions {features.shape[1:]} do not match "
+        f"mean ({mean.shape}) or sq_diff ({sq_diff.shape})."
+    )
+
     # Use unbiased variance if we have more than 1 sample
-    unbiased_var = var / torch.clamp(count - 1, min=1.0)
+    unbiased_var = sq_diff / torch.clamp(count - 1, min=1.0)
     std = torch.sqrt(unbiased_var + eps)
-    return (features - mean) / std
+    return (features - mean.unsqueeze(0)) / std.unsqueeze(0)
 
 
 # TODO: where to put this?

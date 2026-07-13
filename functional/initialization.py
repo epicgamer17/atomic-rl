@@ -91,6 +91,7 @@ def sparse_init_weight_(tensor: torch.Tensor, sparsity: float) -> None:
     """
     Applies sparsity to a weight matrix based on the Stream RL pseudocode.
     Zeroes out a `sparsity` fraction of the input connections (fan_in) for ALL output neurons.
+    From the Stream RL Paper. LeCun initialization is recommended.
 
     Args:
         tensor: The weight tensor to modify in-place (assumes [out_features, in_features]).
@@ -130,6 +131,8 @@ def make_sparse_init(
     This factory allows you to inject your base initializer (Xavier, Kaiming, etc.)
     and the sparsity level, returning a standard interface that can be
     passed to model.apply().
+
+    From the Stream RL Paper. LeCun initialization is recommended.
     """
 
     def initialized_sparse_tensor(tensor: torch.Tensor) -> None:
