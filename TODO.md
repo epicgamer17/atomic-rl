@@ -8,6 +8,8 @@ implement models and functions from RLAX
 
 figure out my naming convention for functions. sometimes i say compute_xyz and other times i just say xyz
 
+Refactor functional folder. give it a rename to src or something. include the envs and network folder. and then split the files into individual folders themselves. 
+
 potentially consider making functions for getting log probs for distributions (trouble is when doing multi discrete or multi continuous envs which require summing log probs), is this needed though? I handle this in the action selectors but do not handle it in the re-eval step cleanly at the moment. the user is expected to handle it instead.
 
 Add examples on Atari for DQN and A2C
