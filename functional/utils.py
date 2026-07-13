@@ -17,9 +17,9 @@ def ema_update(
     Calculates the exponential moving average (EMA).
     Formula: (1 - alpha) * old_ema + alpha * new_value
     """
-    assert (
-        old_ema.shape == new_value.shape
-    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+    assert old_ema.shape == new_value.shape, (
+        f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+    )
 
     return (1.0 - alpha) * old_ema + alpha * new_value
 
@@ -31,9 +31,9 @@ def ema_update_(
     In-place exponential moving average (EMA).
     Formula: (1 - alpha) * old_ema + alpha * new_value
     """
-    assert (
-        old_ema.shape == new_value.shape
-    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+    assert old_ema.shape == new_value.shape, (
+        f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+    )
 
     # Use optimized in-place kernels: old = old * (1-a) + new * a
     # This is rearranged for .add_ usage: old = old - a*old + a*new => old += a*(new - old)
@@ -68,6 +68,10 @@ def extract_vector_env_final_obs(info) -> Tuple[np.ndarray, np.ndarray]:
     # Note: If `info` is not a dict (e.g. PufferLib lists), this will explicitly crash,
     # which is intended under the fail-fast philosophy unless handled explicitly.
     # TODO: implement correct behaviour for pufferlib
+
+    # Handle None or non-dict inputs gracefully
+    if not isinstance(info, dict):
+        return np.array([]), np.array([])
 
     # Vector envs only add this key if at least one environment ended
     if "final_observation" not in info:

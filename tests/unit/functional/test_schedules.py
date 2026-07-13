@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 def test_get_linear_schedule():
     start, end = 1.0, 0.1
     decay_steps = 100
-    
+
     # Start
     assert math.isclose(get_linear_schedule(0, start, end, decay_steps), 1.0)
     # Middle (step 50)
@@ -27,7 +27,7 @@ def test_get_linear_schedule():
 def test_get_exponential_schedule():
     start, end = 1.0, 0.1
     decay_rate = 100.0
-    
+
     # step 0: 0.1 + (1.0 - 0.1) * exp(0) = 0.1 + 0.9 = 1.0
     assert math.isclose(get_exponential_schedule(0, start, end, decay_rate), 1.0)
     # step 100: 0.1 + 0.9 * exp(-1) approx 0.1 + 0.9 * 0.367879 = 0.1 + 0.33109 = 0.43109
@@ -56,3 +56,25 @@ def test_ape_x_epsilon():
     # actor last should have base_eps ^ (1 + alpha)
     expected_last = 0.4 ** (1 + 7.0)
     assert math.isclose(get_ape_x_epsilon(4, 5, base_eps=0.4, alpha=7.0), expected_last)
+
+
+def test_linear_schedule():
+    """Test linear schedule decay."""
+    # start 1.0, end 0.1, decay_steps 10
+    assert math.isclose(get_linear_schedule(0, 1.0, 0.1, 10), 1.0)
+    assert math.isclose(
+        get_linear_schedule(5, 1.0, 0.1, 10), 0.55
+    )  # 1.0 + 0.5 * (-0.9)
+    assert math.isclose(get_linear_schedule(10, 1.0, 0.1, 10), 0.1)
+    assert math.isclose(
+        get_linear_schedule(20, 1.0, 0.1, 10), 0.1
+    )  # Capped at 1.0 fraction
+
+
+def test_exponential_schedule():
+    """Test exponential schedule decay."""
+    # start 1.0, end 0.1, decay_rate 10
+    # val = end + (start - end) * exp(-step/rate)
+    assert math.isclose(get_exponential_schedule(0, 1.0, 0.1, 10), 1.0)
+    expected_middle = 0.1 + 0.9 * math.exp(-5 / 10)
+    assert math.isclose(get_exponential_schedule(5, 1.0, 0.1, 10), expected_middle)

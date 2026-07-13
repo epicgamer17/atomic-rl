@@ -216,10 +216,25 @@ def with_sequence_mask(base_loss_fn: Callable, mask: torch.Tensor) -> Callable:
     def masked_loss_fn(
         predictions: torch.Tensor, targets: torch.Tensor
     ) -> Tuple[torch.Tensor, dict]:
+        # 1. Fail Fast: Check input volume matches mask volume
+        assert predictions.numel() == mask.numel(), (
+            f"Shape mismatch: predictions total elements ({predictions.numel()}) "
+            f"must match mask total elements ({mask.numel()})."
+        )
+        assert targets.numel() == mask.numel(), (
+            f"Shape mismatch: targets total elements ({targets.numel()}) "
+            f"must match mask total elements ({mask.numel()})."
+        )
         # predictions and targets are [B * T]
         raw_losses, info_dict = base_loss_fn(predictions, targets)
 
         flat_mask = mask.view(-1).float()
+
+        # 3. Fail Fast: Ensure base_loss_fn output matches the flattened mask shape
+        assert raw_losses.shape == flat_mask.shape, (
+            f"Loss geometry mismatch: base_loss_fn output shape {raw_losses.shape} "
+            f"does not match flattened mask shape {flat_mask.shape}. Ensure inputs are flattened"
+        )
         masked_losses = raw_losses * flat_mask
 
         # Mean over only valid transitions to avoid diluting the gradient
