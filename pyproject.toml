@@ -36,6 +36,7 @@ dependencies = [
     "easydict",
     "rlcard",
     "attrs",
+    "tensordict",
 ]
 
 [tool.setuptools.packages.find]

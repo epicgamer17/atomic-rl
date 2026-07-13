@@ -1,0 +1,10 @@
+just make buffer indices each a chunk. this matches R2D2 overlapping chunks. It also allows for reservoir sampling with chunks, it also allows for more reuse of per_sampler and uniform_sampler. downside is no hope of a pure recreation of DRQN (ie storing a transition at a time and retrieving them for the LSTM loss). more pros: $O(1)$ Sequence Sampling: Sampling is completely trivial. You just pick an index, and you are guaranteed a contiguous block of temporal data. No wrap-around bugs, no rejection sampling.Blazing Fast Data Loading: Because the sequence is stored contiguously in memory, PyTorch can load it onto the GPU much faster (excellent cache locality).Native Sequence-Level PER: R2D2 and MuZero prioritize sequences (usually by the max or mean TD-error of the chunk). This buffer natively maps one SumTree leaf to one Sequence.The "Reservoir Chunk" Idea: As you noted, you can easily apply reservoir sampling to chunks. If you treat a "chunk" as an entire episode (or a fixed segment), you can maintain a uniform distribution over trajectories. Cons:
+
+Storage Inefficiency (Padding): If an episode terminates at step 10, but your chunk_size is 40, you have 30 steps of "dead space" (zeros or absorbing states) taking up VRAM/RAM.
+
+Storage Inefficiency (Overlapping): If you use R2D2, you need "burn-in" steps. This usually requires saving overlapping chunks (e.g., Chunk 2 contains the last 10 steps of Chunk 1). This duplicates data in memory.
+
+
+Write Latency: The learner cannot train on Step 1 until Step 40 is completed and the chunk is written. (Usually negligible in highly vectorized setups, but problematic for single-env setups).
+
+even though it doesnt allow for exact recreation of DRQN writing a single observation at a time i should likely remove num_vector_envs and only support use of the sequence accumulator. this would mimic R2D2 and MuZero as opposed to DRQN (still valid). in short document and only support the contiguous buffer case (not the vectorized case).

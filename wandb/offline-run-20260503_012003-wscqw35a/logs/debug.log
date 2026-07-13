@@ -1,0 +1,9 @@
+2026-05-03 01:20:03,256 INFO    MainThread:45731 [wandb_setup.py:_flush():81] Current SDK version is 0.25.0
+2026-05-03 01:20:03,256 INFO    MainThread:45731 [wandb_setup.py:_flush():81] Configure stats pid to 45731
+2026-05-03 01:20:03,256 INFO    MainThread:45731 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2026-05-03 01:20:03,256 INFO    MainThread:45731 [wandb_init.py:setup_run_log_directory():717] Logging user logs to /Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff/wandb/offline-run-20260503_012003-wscqw35a/logs/debug.log
+2026-05-03 01:20:03,256 INFO    MainThread:45731 [wandb_init.py:setup_run_log_directory():718] Logging internal logs to /Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff/wandb/offline-run-20260503_012003-wscqw35a/logs/debug-internal.log
+2026-05-03 01:20:03,256 INFO    MainThread:45731 [wandb_init.py:init():844] calling init triggers
+2026-05-03 01:20:03,256 INFO    MainThread:45731 [wandb_init.py:init():849] wandb.init called with sweep_config: {}
+config: {'batch_size': 128, 'gamma': 0.99, 'learning_rate': 0.001, 'alpha': 0.6, '_wandb': {}}
+2026-05-03 01:20:03,256 INFO    MainThread:45731 [wandb_init.py:init():892] starting backend

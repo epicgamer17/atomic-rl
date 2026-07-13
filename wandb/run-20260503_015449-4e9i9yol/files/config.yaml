@@ -1,0 +1,93 @@
+_wandb:
+    value:
+        cli_version: 0.25.0
+        e:
+            9h6j7mbcz3s6duaa27sftl7b4yt3hcb9:
+                apple:
+                    ecpuCores: 4
+                    gpuCores: 8
+                    memoryGb: 16
+                    name: Apple M2
+                    pcpuCores: 4
+                    ramTotalBytes: "17179869184"
+                    swapTotalBytes: "10737418240"
+                codePath: examples/dqn/rainbow_dqn_cartpole.py
+                codePathLocal: examples/dqn/rainbow_dqn_cartpole.py
+                cpu_count: 8
+                cpu_count_logical: 8
+                disk:
+                    /:
+                        total: "494384795648"
+                        used: "460230803456"
+                email: jonathan.lamontagne.kratz@gmail.com
+                executable: /Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff/.venv/bin/python
+                git:
+                    commit: e12a8e6bd0b9d41109a6b5acad76045ea0384f02
+                    remote: https://github.com/epicgamer17/modular-rl.git
+                host: Jonathans-MacBook-Air.local
+                memory:
+                    total: "17179869184"
+                os: macOS-15.6-arm64-arm-64bit
+                program: /Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff/examples/dqn/rainbow_dqn_cartpole.py
+                python: CPython 3.12.3
+                root: /Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff
+                startedAt: "2026-05-03T05:54:49.660086Z"
+                writerId: 9h6j7mbcz3s6duaa27sftl7b4yt3hcb9
+        m: []
+        python_version: 3.12.3
+        t:
+            "1":
+                - 1
+                - 105
+            "2":
+                - 1
+                - 105
+            "3":
+                - 16
+                - 61
+            "4": 3.12.3
+            "5": 0.25.0
+            "12": 0.25.0
+            "13": darwin-arm64
+        visualize:
+            charts/atom_distribution:
+                panel_config:
+                    fieldSettings:
+                        label: Support
+                        value: Probability
+                    panelDefId: wandb/bar/v0
+                    stringSettings:
+                        title: Atom Distribution Step 119000
+                    transform:
+                        name: tableWithLeafColNames
+                    userQuery:
+                        queryFields:
+                            - args:
+                                - name: runSets
+                                  value: ${runSets}
+                              fields:
+                                - fields: []
+                                  name: id
+                                - fields: []
+                                  name: name
+                                - fields: []
+                                  name: _defaultColorIndex
+                                - args:
+                                    - name: tableKey
+                                      value: charts/atom_distribution_table
+                                  fields: []
+                                  name: summaryTable
+                              name: runSets
+                panel_type: Vega2
+atom_size:
+    value: 51
+batch_size:
+    value: 128
+buffer_capacity:
+    value: 50000
+gamma:
+    value: 0.99
+learning_rate:
+    value: 0.001
+n_steps:
+    value: 3
