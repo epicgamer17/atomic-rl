@@ -200,14 +200,11 @@ def puct_score(
     ), "Policy prior must be normalized (sum to 1) for PUCT calculation."
 
     pb_c = (
-        torch.log(
-            (q_values.new_tensor(total_visit_counts) + pb_c_base + 1)
-            / pb_c_base
-        )
+        torch.log((q_values.new_tensor(total_visit_counts) + pb_c_base + 1) / pb_c_base)
         + pb_c_init
     )
-    pb_c *= torch.sqrt(q_values.new_tensor(total_visit_counts)) / (
-        visit_counts + 1
+    pb_c = pb_c * (
+        torch.sqrt(q_values.new_tensor(total_visit_counts)) / (visit_counts + 1)
     )
 
     # MuZero: Normalize Q-values to [0, 1] before adding the PUCT term

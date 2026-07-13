@@ -85,6 +85,9 @@ def obgd_td_update_(
         theta.add_(trace, alpha=new_step_size * error)
 
 
+# TODO: should we update this to use foreach or is it already efficient.
+# TODO: not sure about the td_step API. brainstorming the idea of making a trace class. one for each of our different trace methods, and you call it before your optimizer step, after the backwards step. it sets a p.trace. that way we could have a standard step() api and not need td_step(). trouble is how does this work for optimizers that can do both TD and non TD learning (definitely ObGD and i think thats even IDBD which has a TD version but is not forced to do TD only? is that true?). The step function now performs two functions, either a TD step or a standard gradient step. how would it be clear to the user which behaviour is happening? Is the solution to have the trace class replace the p.grad instead? This has the benefit of allowing standard optimizers like Adam to also perform TD learning i think (though do we even want that)? Is that viable for ObGD or IDBD do they need both the gradient and TD error? think about this more.
+# NOTE: a benefit of the step and td_step api (among many): Preserves standard step(). If your agent has a separate auxiliary module (like a world model or an autoencoder) trained via standard supervised backpropagation, you can pass its parameters to the exact same optimizer and call optimizer.step() normally.
 class ObGD(Optimizer):
     """
     Observation-based Gradient Descent
