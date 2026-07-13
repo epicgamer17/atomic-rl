@@ -11,32 +11,43 @@ dependencies = [
     "torch",
     "numpy",
     "gymnasium",
-    "opencv-python-headless",
-    "matplotlib",
-    "pandas",
-    "scipy",
-    "scikit-learn",
-    "tqdm",
-    "tensorboard",
-    "pygame",
-    "imageio",
-    "moviepy",
-    "pyyaml",
-    "requests",
-    "typing_extensions",
-    "psutil",
-    "pytest",
-    "pytest-cov",
-    "hypothesis",
-    "pettingzoo",
-    "dill",
-    "hyperopt",
-    "catanatron",
-    "pillow",
-    "easydict",
-    "rlcard",
-    "attrs",
     "tensordict",
+    "matplotlib",
+    "pillow",
+    "imageio",
+    "einops",
+    "wandb",
+    "tqdm",
+    "pyyaml",
+    "typing_extensions",
+    "pandas",
+    "pygame",
+]
+
+[project.optional-dependencies]
+envs = [
+    "pettingzoo",
+    "catanatron",
+    "rlcard",
+    "easydict",
+]
+examples = [
+    "ray",
+    "torchvision",
+    "gym_microrts",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "pytest-rerunfailures",
+]
+plot = [
+    "SciencePlots>=2.1.0",
+    "catppuccin-matplotlib>=0.5",
+    "mplcyberpunk>=0.7.1",
+    "matplotx>=0.3.10",
+    "aquarel>=0.0.6",
+    "qbstyles>=0.1.4",
 ]
 
 [tool.setuptools.packages.find]
@@ -48,7 +59,7 @@ python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 
 [tool.coverage.run]
-source = ["agents", "modules", "search", "replay_buffers", "losses", "custom_gym_envs"]
+source = ["functional", "networks"]
 omit = [
     "**/deprecated/**",
     "tests/**",

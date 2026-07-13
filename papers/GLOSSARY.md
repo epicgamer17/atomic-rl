@@ -1,1 +1,0 @@
-Pareto Optimality: If two KPIs conflict (e.g., higher throughput causes higher stockout risk and requires costlier, larger stockpile equipment), a solution is "Pareto optimal" if you cannot improve throughput without worsening the required stockpile size. TODO: ADD THIS IN SOME WAY. OR THE WAY TO MAKE THE GRAPH!

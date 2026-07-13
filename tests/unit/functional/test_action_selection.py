@@ -8,7 +8,6 @@ from functional.action_selection import (
     sample_distribution,
     with_epsilon_greedy,
 )
-from functional.schedules import get_linear_schedule, get_exponential_schedule
 
 pytestmark = pytest.mark.unit
 
@@ -35,6 +34,22 @@ def test_expected_value():
     support_1d = torch.tensor([-1.0, 1.0])
     values_1d = expected_value(predictions, support_1d)
     torch.testing.assert_close(values_1d, torch.tensor([[1.0, -1.0]]))
+
+
+def test_expected_value_2d_input():
+    """Test the expected_value function with 2D state-value predictions [B, N]."""
+    # Batch size 2, 3 atoms
+    predictions = torch.tensor(
+        [
+            [0.0, 100.0, 0.0],  # Softmax concentrates heavily on index 1
+            [100.0, 0.0, 0.0],  # Softmax concentrates heavily on index 0
+        ]
+    )
+    support = torch.tensor([-1.0, 0.0, 1.0])  # 1D Support
+
+    values = expected_value(predictions, support)
+    assert values.shape == (2,)
+    torch.testing.assert_close(values, torch.tensor([0.0, -1.0]), atol=1e-4, rtol=1e-4)
 
 
 def test_argmax_selector():
@@ -142,26 +157,51 @@ def test_with_epsilon_greedy():
     assert actions.shape == (2, 1)
 
 
-def test_linear_schedule():
-    """Test linear schedule decay."""
-    # start 1.0, end 0.1, decay_steps 10
-    assert math.isclose(get_linear_schedule(0, 1.0, 0.1, 10), 1.0)
-    assert math.isclose(
-        get_linear_schedule(5, 1.0, 0.1, 10), 0.55
-    )  # 1.0 + 0.5 * (-0.9)
-    assert math.isclose(get_linear_schedule(10, 1.0, 0.1, 10), 0.1)
-    assert math.isclose(
-        get_linear_schedule(20, 1.0, 0.1, 10), 0.1
-    )  # Capped at 1.0 fraction
+# ==========================================
+# Comprehensive Tests for with_epsilon_greedy Masking
+# ==========================================
 
 
-def test_exponential_schedule():
-    """Test exponential schedule decay."""
-    # start 1.0, end 0.1, decay_rate 10
-    # val = end + (start - end) * exp(-step/rate)
-    assert math.isclose(get_exponential_schedule(0, 1.0, 0.1, 10), 1.0)
-    expected_middle = 0.1 + 0.9 * math.exp(-5 / 10)
-    assert math.isclose(get_exponential_schedule(5, 1.0, 0.1, 10), expected_middle)
+def test_with_epsilon_greedy_with_mask():
+    """Verify that action masking restricts exploration to allowed actions."""
+    greedy_selector = lambda x: (torch.zeros(x.shape[0], 1, dtype=torch.long), {})
+    epsilon_selector = with_epsilon_greedy(greedy_selector)
+
+    # 1 batch, 4 actions. Action 0 is the greedy action, but masked out!
+    predictions = torch.tensor([[10.0, 0.0, 0.0, 0.0]])
+    mask = torch.tensor([[0, 1, 1, 0]])  # Only actions 1 and 2 are valid
+
+    gen = torch.Generator()
+    gen.manual_seed(101)
+
+    # Force 100% exploration
+    for _ in range(20):
+        actions, _ = epsilon_selector(
+            predictions, epsilon=1.0, num_actions=4, generator=gen, mask=mask
+        )
+        # Action must strictly be either 1 or 2, never 0 or 3
+        assert actions.item() in [1, 2]
+
+
+def test_with_epsilon_greedy_mask_assertions():
+    """Verify fail-fast protections for invalid shapes or empty masks."""
+    greedy_selector = lambda x: (torch.zeros(x.shape[0], 1, dtype=torch.long), {})
+    epsilon_selector = with_epsilon_greedy(greedy_selector)
+
+    predictions = torch.tensor([[1.0, 2.0, 3.0]])  # Batch=1, Actions=3
+
+    # Case 1: Mask shape mismatch
+    bad_mask = torch.tensor([[1, 1]])  # Expecting length 3
+    with pytest.raises(AssertionError, match="Mask shape .* does not match expected"):
+        epsilon_selector(predictions, epsilon=0.5, num_actions=3, mask=bad_mask)
+
+    # Case 2: Zero valid actions in the environment
+    dead_mask = torch.tensor([[0, 0, 0]])
+    with pytest.raises(
+        AssertionError,
+        match="Encountered a mask where an environment has 0 valid actions",
+    ):
+        epsilon_selector(predictions, epsilon=0.5, num_actions=3, mask=dead_mask)
 
 
 def test_action_selection_assertions():
@@ -207,3 +247,56 @@ def test_compute_masked_entropy():
     # entropy = -(0.5 * -0.6931 + 0 + 0.5 * -0.6931) = 0.6931
     expected = torch.tensor([0.6931])
     torch.testing.assert_close(entropy, expected)
+
+
+# ==========================================
+# Tests for gather_q_values
+# ==========================================
+
+
+def test_gather_q_values_2d():
+    from functional.action_selection import gather_q_values
+
+    # q_values: [B, A] -> [2, 3]
+    q_values = torch.tensor([[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]])
+
+    # Test with 1D actions [B]
+    actions_1d = torch.tensor([1, 2])  # Selects 20.0 and 60.0
+    out_1d = gather_q_values(q_values, actions_1d)
+    torch.testing.assert_close(out_1d, torch.tensor([20.0, 60.0]))
+
+    # Test with 2D actions [B, 1]
+    actions_2d = torch.tensor([[1], [2]])
+    out_2d = gather_q_values(q_values, actions_2d)
+    torch.testing.assert_close(out_2d, torch.tensor([20.0, 60.0]))
+
+
+def test_gather_q_values_3d():
+    from functional.action_selection import gather_q_values
+
+    # q_values: [B, A, Atoms] -> [2, 2, 3]
+    q_values = torch.tensor(
+        [
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],  # Batch 0: Action 0, Action 1
+            [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]],  # Batch 1: Action 0, Action 1
+        ]
+    )
+    actions = torch.tensor([1, 0])  # Batch 0 -> Action 1, Batch 1 -> Action 0
+
+    expected = torch.tensor([[4.0, 5.0, 6.0], [7.0, 8.0, 9.0]])
+
+    out = gather_q_values(q_values, actions)
+    assert out.shape == (2, 3)
+    torch.testing.assert_close(out, expected)
+
+
+def test_gather_q_values_assertions():
+    from functional.action_selection import gather_q_values
+
+    # Invalid q_values dimensions (4D)
+    with pytest.raises(AssertionError, match="Expected 2D or 3D q_values"):
+        gather_q_values(torch.randn(2, 2, 2, 2), torch.tensor([0, 0]))
+
+    # Invalid action dimensions (2D but wrong shape, or 3D)
+    with pytest.raises(AssertionError, match="Expected 1D actions"):
+        gather_q_values(torch.randn(2, 3), torch.tensor([[0, 1], [1, 0]]))

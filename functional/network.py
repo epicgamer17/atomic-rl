@@ -64,15 +64,15 @@ def unroll_rnn(
             - outputs: [Batch, Time, HiddenSize]
             - final_state: Final recurrent state(s).
     """
-    # TODO what are all these different paths? what is the purpose of the reshaping?
     if dones is None:
         # Fast path for natively compiled unrolling (e.g., DRQN random updates)
         if batch_first:
-            return cell(inputs, initial_state)
+            out, state = cell(inputs, initial_state)
+            return out.contiguous(), state  # <--- Fix applied here
 
         # [B, T, F] -> [T, B, F]
         out, state = cell(inputs.transpose(0, 1), initial_state)
-        # .contiguous() is fundamentally required here because the transpose makes the sequence-major output non-contiguous. 
+        # .contiguous() is fundamentally required here because the transpose makes the sequence-major output non-contiguous.
         # If the caller attempts to .view() or flatten the sequence dimensions for MLP processing, it will trigger a RuntimeError.
         return out.transpose(0, 1).contiguous(), state
 

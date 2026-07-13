@@ -5,7 +5,7 @@ from tensordict import TensorDict
 from functional.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step_,
-    record_truncations,
+    record_truncations_,
     get_rollout_next_values,
     flatten_rollout_buffer,
     yield_shuffled_minibatches,
@@ -58,7 +58,7 @@ def test_record_truncations():
     truncated_envs = torch.tensor([1], dtype=torch.long)
     final_observations = torch.stack([final_obs_1])
 
-    record_truncations(
+    record_truncations_(
         buffer,
         step=2,
         truncated_envs=truncated_envs,
@@ -88,7 +88,7 @@ def test_get_rollout_next_values():
 
     # Value function for patching: returns 100 * sum(obs)
     def get_value_fn(obs):
-        return obs.sum(dim=-1, keepdim=True) * 100.0
+        return obs.sum(dim=-1) * 100.0
 
     # Case 1: No truncations
     next_vals = get_rollout_next_values(buffer, last_values, get_value_fn, "cpu")

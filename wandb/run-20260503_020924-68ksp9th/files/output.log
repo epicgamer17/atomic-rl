@@ -1,2 +1,0 @@
-/Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff/.venv/lib/python3.12/site-packages/wandb/analytics/sentry.py:279: DeprecationWarning: The `Scope.user` setter is deprecated in favor of `Scope.set_user()`.
-  self.scope.user = {"email": email}

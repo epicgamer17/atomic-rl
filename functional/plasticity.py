@@ -105,7 +105,9 @@ def get_proportional_pruning_mask(
 
     if dec_part > 0:
         # Bernoulli sample the fractional remainder to get exact expected pruning rate
-        num_pruned += torch.bernoulli(torch.tensor(dec_part, device=utilities.device)).int()
+        num_pruned += torch.bernoulli(
+            torch.tensor(dec_part, device=utilities.device)
+        ).int()
 
     num_pruned = torch.clamp(num_pruned, max=d)
     mask = torch.zeros_like(utilities, dtype=torch.bool)
@@ -152,6 +154,7 @@ def reset_optimizer_states_elementwise_(
 # --- High-Level Orchestration ---
 
 
+# TODO: should this have an _ since it is in place? (it uses an inplace function) I think this is true for other functions in the file too.
 def apply_selective_weight_reinitialization(
     parameters: Iterable[nn.Parameter],
     optimizer: torch.optim.Optimizer,
@@ -277,7 +280,9 @@ def get_cbp_replacement_mask(
 
     if dec_part > 0:
         # Bernoulli sample the fractional remainder to get exact expected replacement rate
-        num_replace += torch.bernoulli(torch.tensor(dec_part, device=utilities.device)).int()
+        num_replace += torch.bernoulli(
+            torch.tensor(dec_part, device=utilities.device)
+        ).int()
 
     # We don't sum eligible_mask to avoid a CPU sync. We just take topk up to num_replace. TODO: is this functionally the same as summing eligible mask?
     # We will mask out the ineligible ones after topk.
