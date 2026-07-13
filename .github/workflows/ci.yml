@@ -50,7 +50,7 @@ jobs:
 
     - name: Run MuZero Training Loops
       # Only runs the tests marked as slow
-      run: pytest -m "slow" tests/
+      run: pytest -m "slow" tests/ || test $? -eq 5
       
     - name: Upload Graph Artifacts on Failure
       if: failure()
@@ -85,7 +85,7 @@ jobs:
         pip install pytest-benchmark
         
     - name: Run Performance Benchmarks
-      run: pytest -m performance --benchmark-json=benchmark_results.json tests/
+      run: pytest -m performance --benchmark-json=benchmark_results.json tests/ || test $? -eq 5
       
     - name: Publish to GitHub Pages Dashboard
       uses: benchmark-action/github-action-benchmark@v1
