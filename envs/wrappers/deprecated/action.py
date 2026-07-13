@@ -6,7 +6,6 @@
 # from pettingzoo.utils.env import ActionType, AgentID, ObsType, AECEnv
 
 
-# TODO: this is from the old library
 # class InitialMovesWrapper(BaseWrapper):
 #     def __init__(self, env: AECEnv[AgentID, ObsType, ActionType], initial_moves: list):
 #         super().__init__(env)
@@ -26,7 +25,6 @@
 #         return self.env.state()
 
 
-# TODO: this is from the old library
 # class CatanatronWrapper(Wrapper):
 #     def __init__(self, env: gym.Env):
 #         super().__init__(env)

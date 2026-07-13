@@ -35,7 +35,7 @@ import random
 from typing import List, Tuple
 
 from envs.mdp.random_walk import RandomWalkEnv
-from functional.td import semi_gradient_td_update
+from functional.td import semi_gradient_td_update_
 from functional.traces import update_accumulating_traces
 
 # --- CONSTANTS ---
@@ -129,8 +129,7 @@ def random_walk_episode(
             v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
             td_error = reward + 1.0 * v_next - v_t
 
-            # weights = weights + alpha * delta * traces
-            weights = semi_gradient_td_update(
+            semi_gradient_td_update_(
                 error=td_error,
                 weights=weights,
                 alpha=alpha,

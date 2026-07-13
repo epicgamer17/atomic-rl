@@ -50,32 +50,41 @@ TODO: will need an ObGD for Adam and SGD seperately. Adam is in Appendix B of th
 """
 
 
+# TODO: the paper defines one obgd_update and just passes in the grad as a trace, is that a better approach?
 def obgd_update_(
-    params: List[torch.Tensor],
-    traces: List[
-        torch.Tensor
-    ],  # Add or document the trace used for supervised learning.
-    error: torch.Tensor,
-    base_lr: float,
+    theta: torch.Tensor,
+    grad: torch.Tensor,
+    lr: float,
     scaling_factor: float = 1.0,
-):
-    """ """
+) -> None:
+    """
+    Standard Observation-based Gradient Descent step (supervised).
+    """
+    with torch.no_grad():
+        norm_grad = torch.sum(torch.abs(grad))
+        M = lr * scaling_factor * norm_grad
+        new_step_size = lr / M.clamp(min=1.0)
+        theta.sub_(grad, alpha=new_step_size)
+
+
+def obgd_td_update_(
+    theta: torch.Tensor,
+    error: torch.Tensor,
+    trace: torch.Tensor,
+    lr: float,
+    scaling_factor: float = 1.0,
+) -> None:
+    """
+    Observation-based Gradient Descent driven by TD-error and eligibility traces.
+    """
     with torch.no_grad():
         effective_error = torch.abs(error).clamp(min=1.0)
-
-        for param, trace in zip(params, traces):
-            norm_trace = torch.sum(torch.abs(trace))
-
-            M = base_lr * scaling_factor * effective_error * norm_trace
-
-            # Clip step size
-            new_step_size = base_lr / M.clamp(min=1.0)
-
-            # Update weights
-            param.add_(new_step_size * error * trace)
+        norm_trace = torch.sum(torch.abs(trace))
+        M = lr * scaling_factor * effective_error * norm_trace
+        new_step_size = lr / M.clamp(min=1.0)
+        theta.add_(trace, alpha=new_step_size * error)
 
 
-# TODO: improve to make this work better with td learning and also have the standard step() api. brainstorm solutions. One possible solution is a new td_step API.
 class ObGD(Optimizer):
     """
     Observation-based Gradient Descent
@@ -87,20 +96,34 @@ class ObGD(Optimizer):
         defaults = dict(lr=lr, scaling_factor=scaling_factor)
         super().__init__(params, defaults)
 
-    # TODO: make error and traces optional?
     @torch.no_grad()
-    def step(
-        self, error: torch.Tensor, traces: List[torch.Tensor] = None, closure=None
-    ):
+    def step(self, closure=None):
         """
-        Performs a single optimization step.
-
-        Args:
-            error (torch.Tensor): The scalar TD error or supervised loss (δ).
-            traces (List[torch.Tensor], optional): The eligibility traces. If None, uses p.grad.
-            # TODO: should it be a list of torch.Tensor or just a torch.Tensor?
+        Performs a single optimization step (using p.grad).
         """
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
 
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                obgd_update_(
+                    theta=p,
+                    grad=p.grad,
+                    lr=group["lr"],
+                    scaling_factor=group["scaling_factor"],
+                )
+        return loss
+
+    # TODO: for now our solution. May want to better handle all TD methods, and its possible this is unecessary with some ways we pass gradients and stuff.
+    @torch.no_grad()
+    def td_step(self, error: torch.Tensor, traces: List[torch.Tensor], closure=None):
+        """
+        Performs a single temporal difference optimization step.
+        """
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -108,30 +131,16 @@ class ObGD(Optimizer):
 
         global_p_idx = 0
         for group in self.param_groups:
-            params_with_grad = []
-            grads_or_traces = []
-
             for p in group["params"]:
-                if traces is not None:
-                    trace = traces[global_p_idx]
-                else:
-                    trace = p.grad
-
+                trace = traces[global_p_idx]
                 global_p_idx += 1
-
                 if trace is None:
                     continue
-
-                params_with_grad.append(p)
-                grads_or_traces.append(trace)
-
-            # Delegate the actual math to our purely functional, stateless core!
-            obgd_update_(
-                params=params_with_grad,
-                traces=grads_or_traces,
-                error=error,
-                base_lr=group["lr"],
-                scaling_factor=group["scaling_factor"],
-            )
-
+                obgd_td_update_(
+                    theta=p,
+                    error=error,
+                    trace=trace,
+                    lr=group["lr"],
+                    scaling_factor=group["scaling_factor"],
+                )
         return loss

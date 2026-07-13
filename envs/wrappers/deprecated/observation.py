@@ -8,7 +8,6 @@
 # from pettingzoo.utils.wrappers.base import BaseWrapper
 
 
-# TODO: this is from the old library
 # class ChannelLastToFirstWrapper(BaseWrapper):
 #     def observation_space(self, agent: AgentID) -> gymnasium.spaces.Space:
 #         orig_space = self.env.observation_space(agent)
@@ -61,7 +60,6 @@
 #         return self.env.state()
 
 
-# TODO: this is from the old library
 # class AppendAgentSelectionWrapper(BaseWrapper):
 #     def observation_space(self, agent: AgentID) -> gym.spaces.Space:
 #         orig_space = self.env.observation_space(agent)
@@ -136,7 +134,6 @@
 #         return self.env.state()
 
 
-# TODO: this is from the old library
 # class TwoPlayerPlayerPlaneWrapper(BaseWrapper):
 #     def __init__(
 #         self, env: AECEnv[AgentID, ObsType, ActionType], channel_first: bool = True
@@ -199,7 +196,6 @@
 #         return self.env.state()
 
 
-# TODO: this is from the old library
 # class FrameStackWrapper(BaseWrapper):
 #     def __init__(
 #         self,

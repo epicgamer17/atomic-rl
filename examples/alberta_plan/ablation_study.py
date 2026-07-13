@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from pathlib import Path
 
-from functional.td import true_online_td_update, semi_gradient_td_update
+from functional.td import true_online_td_update_, semi_gradient_td_update_
 from functional.traces import update_true_online_traces
 from functional.meta_optimization import update_autostep_rates_, update_idbd_rates_
 from functional.plasticity import apply_continual_backprop, init_cbp_state
@@ -205,7 +205,6 @@ def run_experiment(config: str):
             v_old = v_current
 
         a1_t_grad, rep_t_grad = backbone.get_activations(features_t)
-        # TODO: detach theta or not?
         v_current_grad = torch.dot(theta, rep_t_grad)
 
         next_features, reward, terminated = env.step()
@@ -253,7 +252,7 @@ def run_experiment(config: str):
             ).squeeze(0)
 
             # TODO: does this work with AutoStep alphas?
-            theta = true_online_td_update(
+            true_online_td_update_(
                 error=error_td.detach(),
                 v_current=v_current.detach(),
                 v_old=v_old,
@@ -265,7 +264,7 @@ def run_experiment(config: str):
             v_next_for_td = v_next_target.detach()
         else:
             # TD(0) update
-            theta = semi_gradient_td_update(
+            semi_gradient_td_update_(
                 error=error_td.detach(),
                 weights=theta,
                 alpha=alphas_head,

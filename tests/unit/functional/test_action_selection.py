@@ -164,15 +164,16 @@ def test_exponential_schedule():
     assert math.isclose(get_exponential_schedule(5, 1.0, 0.1, 10), expected_middle)
 
 
-
-
 def test_action_selection_assertions():
     """Test that action selection functions raise assertions on invalid input shapes."""
     # expected_value
-    with pytest.raises(AssertionError, match="Expected 2D \[B, N\] or 3D \[B, A, N\] predictions"):
+    with pytest.raises(
+        AssertionError, match="Expected 2D \[B, N\] or 3D \[B, A, N\] predictions"
+    ):
         expected_value(torch.randn(2), torch.randn(2))
     with pytest.raises(
-        AssertionError, match="If support is not 1D, it must match predictions shape exactly."
+        AssertionError,
+        match="If support is not 1D, it must match predictions shape exactly.",
     ):
         expected_value(torch.randn(1, 2, 3), torch.randn(2, 3))
 
@@ -180,7 +181,7 @@ def test_action_selection_assertions():
 def test_sample_distribution_not_implemented():
     class DummyDist:
         pass
-    
+
     dist = DummyDist()
     with pytest.raises(NotImplementedError, match="Deterministic selection"):
         sample_distribution(dist, explore=False)
@@ -188,6 +189,7 @@ def test_sample_distribution_not_implemented():
 
 def test_apply_action_mask():
     from functional.action_selection import apply_action_mask
+
     logits = torch.tensor([[1.0, 2.0, 3.0]])
     mask = torch.tensor([[1, 0, 1]])
     masked = apply_action_mask(logits, mask)
@@ -197,6 +199,7 @@ def test_apply_action_mask():
 
 def test_compute_masked_entropy():
     from functional.action_selection import compute_masked_entropy
+
     logits = torch.tensor([[-0.6931, -1e8, -0.6931]])
     probs = torch.tensor([[0.5, 0.0, 0.5]])
     mask = torch.tensor([[1, 0, 1]])
@@ -204,4 +207,3 @@ def test_compute_masked_entropy():
     # entropy = -(0.5 * -0.6931 + 0 + 0.5 * -0.6931) = 0.6931
     expected = torch.tensor([0.6931])
     torch.testing.assert_close(entropy, expected)
-

@@ -40,8 +40,7 @@ def compute_v_td_target(
         gamma: Discount factors.
 
     Returns:
-        The TD target of shape [B].
-        Note: The returned tensor is not explicitly detached.
+        torch.Tensor: The detached TD target of shape [B]. Gradients will NOT flow through this tensor.
     """
     # Fail Fast: Ensure shape alignment
     assert (
@@ -51,7 +50,8 @@ def compute_v_td_target(
         rewards.shape == terminated.shape == next_values.shape
     ), f"Shape mismatch: rewards {rewards.shape}, terminated {terminated.shape}, next_values {next_values.shape}"
 
-    return rewards + gamma * next_values.detach() * (1 - terminated.float())
+    target = rewards + gamma * next_values * (1 - terminated.float())
+    return target.detach()
 
 
 def compute_q_td_target(
@@ -73,8 +73,7 @@ def compute_q_td_target(
         gamma: Discount factors.
 
     Returns:
-        The TD target of shape [B].
-        Note: The returned tensor is not explicitly detached.
+        torch.Tensor: The detached TD target of shape [B]. Gradients will NOT flow through this tensor.
     """
     assert (
         next_q_values.ndim == 2
@@ -87,7 +86,8 @@ def compute_q_td_target(
     next_values = torch.gather(next_q_values, 1, next_actions.unsqueeze(-1)).squeeze(-1)
 
     # 2. Compute standard V-target
-    return compute_v_td_target(next_values, rewards, terminated, gamma)
+    target = compute_v_td_target(next_values, rewards, terminated, gamma)
+    return target.detach()
 
 
 def compute_categorical_q_td_target(
@@ -120,8 +120,7 @@ def compute_categorical_q_td_target(
         atom_size: The number of atoms in the support.
 
     Returns:
-        The projected Categorical TD target distribution [B, Atoms].
-        Note: The returned tensor is not explicitly detached.
+        torch.Tensor: The detached projected Categorical TD target distribution [B, Atoms]. Gradients will NOT flow through this tensor.
     """
     assert (
         next_logits.ndim == 3
@@ -183,7 +182,7 @@ def compute_categorical_q_td_target(
     m_flat.index_add_(0, offset_l, prob_lower)
     m_flat.index_add_(0, offset_u, prob_upper)
 
-    return m
+    return m.detach()
 
 
 # GRADIENT TD METHODS
@@ -195,9 +194,8 @@ def compute_categorical_q_td_target(
 # TODO: is it possible to unify these?
 # TODO: there is an orginization and semantic issue arising here. not all interfaces are the same. and there are some stream TD methods that use gradients to update weights (as in stream RL works) some that work only on linear methods, some that get expanded to work on linear and non linear methods with backprop. So there is a like a mix of things going on here.
 # TODO: does this work with non linear weights/networks?
-# TODO: should this be inplace?
 # TODO: should this be a function since now that we passed error instead of computing it in the function its one line.
-def semi_gradient_td_update(
+def semi_gradient_td_update_(
     error: float | torch.Tensor,
     weights: torch.Tensor,
     alpha: float | torch.Tensor,
@@ -223,10 +221,11 @@ def semi_gradient_td_update(
 
     NOTE: Strictly linear function approximation.
     """
-    return weights + alpha * rho * error * update_vector
+    weights.add_(update_vector, alpha=alpha * rho * error)
+    return weights
 
 
-def gtd0_update(
+def gtd0_update_(
     error: float | torch.Tensor,
     features: torch.Tensor,
     next_features: torch.Tensor,
@@ -259,18 +258,21 @@ def gtd0_update(
     NOTE: This implementation is strictly TD(0). It does not yet support eligibility traces.
     NOTE: Strictly linear function approximation.
     """
+    u_dot_feat = torch.dot(features, u)
+
     # Update auxiliary weights (u)
-    u_new = u + beta * rho * (error * features - u)
+    u.add_(error * features - u, alpha=beta * rho)
 
     # Update primary weights (weights)
-    weights_new = weights + alpha * rho * (
-        features - gamma * next_features * (1.0 - float(terminated))
-    ) * torch.dot(features, u)
+    weights.add_(
+        (features - gamma * next_features * (1.0 - float(terminated))) * u_dot_feat,
+        alpha=alpha * rho,
+    )
 
-    return weights_new, u_new
+    return weights, u
 
 
-def tdc_update(
+def tdc_update_(
     error: float | torch.Tensor,
     features: torch.Tensor,
     next_features: torch.Tensor,
@@ -303,26 +305,23 @@ def tdc_update(
     NOTE: This implementation is strictly TD(0). It does not yet support eligibility traces.
     NOTE: Strictly linear function approximation.
     """
+    w_dot_feat = torch.dot(w, features)
+
     # Update auxiliary weights (w)
-    w_new = w + beta * rho * (error - torch.dot(w, features)) * features
+    w.add_(features, alpha=beta * rho * (error - w_dot_feat))
 
     # Update primary weights (weights) with gradient correction
-    weights_new = (
-        weights
-        + alpha * rho * error * features
-        - alpha
-        * rho
-        * gamma
-        * next_features
-        * (1.0 - float(terminated))
-        * torch.dot(w, features)
+    weights.add_(features, alpha=alpha * rho * error)
+    weights.sub_(
+        next_features,
+        alpha=alpha * rho * gamma * (1.0 - float(terminated)) * w_dot_feat,
     )
 
-    return weights_new, w_new
+    return weights, w
 
 
 # TODO: should v_next be handled here?
-def true_online_td_update(
+def true_online_td_update_(
     error: float | torch.Tensor,
     v_current: float | torch.Tensor,
     v_old: float | torch.Tensor,
@@ -344,7 +343,7 @@ def true_online_td_update(
         trace: The updated True Online eligibility trace for the current step (e_t) [features].
 
     Returns:
-        weights_new: The updated weight vector [features].
+        weights: The updated weight vector [features].
 
     NOTE: Strictly linear function approximation.
     NOTE: We implement True Online TD(lambda) weight update from Suttons Textbook (2nd Ed.) not from the True Online TD(lambda) paper.
@@ -357,6 +356,7 @@ def true_online_td_update(
 
     # w <- w + \alpha * (\delta + V - V_old) * z - \alpha * (V - V_old) * x
     v_diff = v_current - v_old
-    weights_new = weights + alpha * (error + v_diff) * trace - alpha * v_diff * features
+    weights.add_(trace, alpha=alpha * (error + v_diff))
+    weights.sub_(features, alpha=alpha * v_diff)
 
-    return weights_new
+    return weights

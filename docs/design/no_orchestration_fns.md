@@ -101,7 +101,7 @@ def compute_q_td_loss(
             next_preds,
             next_actions.squeeze(
                 -1
-            ),  # TODO: need to be careful with this reshaping stuff in functions
+            ),
             batch["reward"],
             batch["terminated"],
             batch["gamma"],

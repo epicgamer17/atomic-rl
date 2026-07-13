@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 import concurrent.futures
 from typing import Tuple
 
-from functional.td import true_online_td_update, semi_gradient_update
+from functional.td import true_online_td_update_, semi_gradient_td_update_
 from functional.traces import (
     update_true_online_traces,
     update_replacing_traces,
@@ -103,7 +103,7 @@ def true_online_sarsa_episode(
             v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
             td_error = torch.tensor(reward, dtype=torch.float64) + gamma * v_next - v_t
 
-            weights = true_online_td_update(
+            true_online_td_update_(
                 error=td_error,
                 v_current=v_t,
                 v_old=q_old,
@@ -215,7 +215,7 @@ def replacing_sarsa_episode(
             v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
             td_error = reward + gamma * v_next - v_t
 
-            weights = semi_gradient_update(
+            semi_gradient_td_update_(
                 error=td_error,
                 weights=weights,
                 alpha=alpha,
@@ -279,7 +279,7 @@ def accumulating_sarsa_episode(
             v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
             td_error = reward + gamma * v_next - v_t
 
-            weights = semi_gradient_update(
+            semi_gradient_td_update_(
                 error=td_error,
                 weights=weights,
                 alpha=alpha,

@@ -12,7 +12,7 @@ import random
 from typing import List, Tuple
 
 from envs.mdp.random_walk import RandomWalkEnv
-from functional.td import true_online_td_update
+from functional.td import true_online_td_update_
 from functional.traces import update_true_online_traces
 
 # --- CONSTANTS ---
@@ -70,7 +70,7 @@ def true_online_random_walk_episode(
             v_next = torch.dot(weights, phi_next) * (1.0 - float(terminated))
             td_error = torch.tensor(reward, dtype=torch.float32) + 1.0 * v_next - v_t
 
-            weights = true_online_td_update(
+            true_online_td_update_(
                 error=td_error,
                 v_current=v_t,
                 v_old=v_old,
