@@ -20,23 +20,22 @@ import torch.nn.functional as F
 import numpy as np
 import wandb
 
-from functional.action_selection import with_epsilon_greedy, argmax_selector
+from functional.action_selection import (
+    with_epsilon_greedy,
+    argmax_selector,
+    gather_q_values,
+)
 from functional.initialization import (
     set_seed,
     lecun_uniform_,
     make_sparse_init,
 )
-from functional.optimizer import ObGD
+from functional.optimizer import AdaptiveObGD
 from functional.traces import update_accumulating_traces
 from functional.utils import (
     to_tensor,
     to_numpy_action,
     update_welford_stats,
-)
-from functional.action_selection import (
-    with_epsilon_greedy,
-    argmax_selector,
-    gather_q_values,
 )
 from functional.schedules import get_linear_schedule
 from functional.td import compute_q_td_target
@@ -119,7 +118,7 @@ obs_shape = env.observation_space.shape
 num_actions = env.action_space.n
 
 model = LayerNormQNet(obs_shape[0], HIDDEN_SIZE, num_actions).to(device)
-optimizer = ObGD(model.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC)
+optimizer = AdaptiveObGD(model.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC)
 traces = {p: torch.zeros_like(p, device=device) for p in model.parameters()}
 
 action_selector = with_epsilon_greedy(argmax_selector)

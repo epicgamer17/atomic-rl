@@ -15,12 +15,9 @@ import matplotlib.pyplot as plt
 import wandb
 
 from tqdm import tqdm
-from functional.initialization import (
-    set_seed,
-    lecun_uniform_,
-    make_sparse_init,
-)
-from functional.optimizer import ObGD
+from functional.initialization import set_seed, lecun_uniform_, make_sparse_init
+from functional.optimizer import AdaptiveObGD, apply_gradients
+from functional.td import compute_v_td_target
 from functional.traces import update_accumulating_traces
 from functional.utils import to_tensor, update_welford_stats
 from envs.streams.ett import make_ettm2_stream
@@ -145,7 +142,7 @@ def run_full_pass(device: torch.device):
         classic_model = ValueNet(ClassicMLP(7, HIDDEN_SIZE), HIDDEN_SIZE).to(device)
 
         # Optimizers
-        stream_optimizer = ObGD(
+        stream_optimizer = AdaptiveObGD(
             stream_model.parameters(), lr=ALPHA, scaling_factor=KAPPA
         )
         # Classic TD Optimizer: Adam (Appendix F.1)

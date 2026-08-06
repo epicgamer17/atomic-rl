@@ -15,7 +15,7 @@ import wandb
 
 from functional.action_selection import sample_distribution
 from functional.initialization import set_seed, lecun_uniform_, make_sparse_init
-from functional.optimizer import ObGD
+from functional.optimizer import AdaptiveObGD
 from functional.td import compute_v_td_target
 from functional.traces import update_accumulating_traces
 from functional.utils import (
@@ -121,8 +121,8 @@ actor = CategoricalActor(
 ).to(device)
 critic = CriticNet(LayerNormMLP(obs_shape[0], HIDDEN_SIZE)).to(device)
 
-actor_optimizer = ObGD(actor.parameters(), lr=ALPHA, scaling_factor=KAPPA_ACTOR)
-critic_optimizer = ObGD(critic.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC)
+actor_optimizer = AdaptiveObGD(actor.parameters(), lr=ALPHA, scaling_factor=KAPPA_ACTOR)
+critic_optimizer = AdaptiveObGD(critic.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC)
 
 actor_traces = {p: torch.zeros_like(p, device=device) for p in actor.parameters()}
 critic_traces = {p: torch.zeros_like(p, device=device) for p in critic.parameters()}

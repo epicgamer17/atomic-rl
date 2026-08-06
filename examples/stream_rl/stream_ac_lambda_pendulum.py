@@ -7,7 +7,7 @@ Algorithm 7 from Elsayed, Vasan & Mahmood (2024):
 TODO: why does entropy go to a high value and stay high and like flatline (like around 3.4) instead of decreasing steadily? And why are our results generally pretty poor on pendulum (on this example and across other algorithms too)
 TODO: NOTE: the previous log_std clamp dead-zone (torch.clamp(log_std, -20, 2); std=exp(log_std)) was fixed by switching to std = softplus(pre_std) to match the reference. torch.clamp zeroes gradients outside the range, which froze the log_std head and pinned entropy at ~0.5*ln(2*pi*e*e^4) ~= 3.42 under the global ObGD step size.
 
-TODO: add hyper parameter sweeping a do a sweep. though the paper said their single set of parameters worked across several games so idk.
+TODO: create a Layerwise Adaptive ObGD. Uses the norm per layer instead of across the whole network for normalization. Each layer gets its own learning rate. AC Lambda seems to do much better with this, while DQN doesn't suffer.
 """
 
 import math
@@ -20,7 +20,7 @@ import wandb
 
 from functional.action_selection import sample_distribution
 from functional.initialization import set_seed, lecun_uniform_, make_sparse_init
-from functional.optimizer import ObGD
+from functional.optimizer import AdaptiveObGD
 from functional.td import compute_v_td_target
 from functional.traces import update_accumulating_traces
 from functional.utils import (
@@ -140,8 +140,8 @@ actor = GaussianActor(
 ).to(device)
 critic = CriticNet(LayerNormMLP(obs_shape[0], HIDDEN_SIZE)).to(device)
 
-actor_optimizer = ObGD(actor.parameters(), lr=ALPHA, scaling_factor=KAPPA_ACTOR)
-critic_optimizer = ObGD(critic.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC)
+actor_optimizer = AdaptiveObGD(actor.parameters(), lr=ALPHA, scaling_factor=KAPPA_ACTOR)
+critic_optimizer = AdaptiveObGD(critic.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC)
 
 actor_traces = {p: torch.zeros_like(p, device=device) for p in actor.parameters()}
 critic_traces = {p: torch.zeros_like(p, device=device) for p in critic.parameters()}

@@ -252,3 +252,63 @@ def test_obgd_step_no_grads_noop():
     opt.step()
     torch.testing.assert_close(p1, p1_before)
     torch.testing.assert_close(p2, p2_before)
+
+
+# ==========================================
+# AdaptiveObGD (Algorithm 11) Tests
+# ==========================================
+
+
+def test_adaptive_obgd_td_step_basic():
+    """Verify second-moment accumulation and adaptive step calculation in AdaptiveObGD.td_step."""
+    from functional.optimizer import AdaptiveObGD
+
+    p = nn.Parameter(torch.tensor([1.0, 2.0]))
+    opt = AdaptiveObGD([p], lr=1.0, scaling_factor=1.0, beta=0.9, eps=1e-8)
+
+    trace = torch.tensor([0.5, 1.0])
+    error = torch.tensor(2.0)
+
+    p_before = p.clone()
+    opt.td_step(error=error, traces={p: trace})
+
+    # 1. Check second moment v: (1 - 0.9) * ([0.5, 1.0])^2 = 0.1 * [0.25, 1.0] = [0.025, 0.1]
+    v_expected = torch.tensor([0.025, 0.1])
+    torch.testing.assert_close(opt.state[p]["v"], v_expected)
+
+    # 2. Adjusted trace: trace / (sqrt(v) + eps) = [0.5 / sqrt(0.025), 1.0 / sqrt(0.1)]
+    adj_trace = trace / (torch.sqrt(v_expected) + 1e-8)
+    norm = torch.sum(torch.abs(adj_trace))  # total_norm
+
+    # 3. Step calculation
+    M = 1.0 * 1.0 * 2.0 * norm  # lr * kappa * |error| * norm
+    step = 1.0 / max(1.0, M.item())
+
+    expected_p = p_before + step * error * adj_trace
+    torch.testing.assert_close(p, expected_p)
+
+
+def test_adaptive_obgd_step_supervised():
+    """Verify supervised AdaptiveObGD.step updating parameters via second moments."""
+    from functional.optimizer import AdaptiveObGD
+
+    p = nn.Parameter(torch.tensor([3.0, -1.0]))
+    opt = AdaptiveObGD([p], lr=0.5, scaling_factor=2.0, beta=0.9, eps=1e-8)
+
+    g = torch.tensor([1.0, -2.0])
+    p.grad = g.clone()
+
+    p_before = p.clone()
+    opt.step()
+
+    # Second moment v: 0.1 * [1.0, 4.0] = [0.1, 0.4]
+    v_expected = torch.tensor([0.1, 0.4])
+    torch.testing.assert_close(opt.state[p]["v"], v_expected)
+
+    adj_grad = g / (torch.sqrt(v_expected) + 1e-8)
+    norm = torch.sum(torch.abs(adj_grad))
+    M = 0.5 * 2.0 * norm
+    step = 0.5 / max(1.0, M.item())
+
+    expected_p = p_before - step * adj_grad
+    torch.testing.assert_close(p, expected_p)
