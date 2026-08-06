@@ -109,22 +109,19 @@ def test_set_seed_reproducibility():
 
 
 def test_sparse_init_weight_2d():
-    """Verify that exactly the requested fraction of columns (fan_in) is zeroed out uniformly."""
+    """Verify that exactly the requested fraction of incoming connections (fan_in) is zeroed out per neuron."""
     # Matrix shape [out_features=5, in_features=10] -> fan_in = 10
     tensor = torch.ones(5, 10)
-    sparsity = 0.4  # 40% of 10 = 4 columns should be zeroed out
+    sparsity = 0.4  # 40% of 10 = 4 incoming connections should be zeroed out per row
 
     sparse_init_weight_(tensor, sparsity)
 
-    # Columns are either fully zeroed out or fully untouched (all 1s)
-    # Check each column sum
-    col_sums = tensor.sum(dim=0)
+    # Check each row (output neuron) has exactly 4 zeroes
+    row_zero_counts = (tensor == 0.0).sum(dim=1)
+    row_active_counts = (tensor == 1.0).sum(dim=1)
 
-    zero_cols = (col_sums == 0.0).sum().item()
-    active_cols = (col_sums == 5.0).sum().item()
-
-    assert zero_cols == 4
-    assert active_cols == 6
+    assert torch.all(row_zero_counts == 4)
+    assert torch.all(row_active_counts == 6)
 
 
 def test_sparse_init_weight_high_dim():
@@ -132,21 +129,18 @@ def test_sparse_init_weight_high_dim():
     # Shape [out_channels=2, in_channels=3, kernel_h=2, kernel_w=2]
     # fan_in = 3 * 2 * 2 = 12 elements
     tensor = torch.ones(2, 3, 2, 2)
-    sparsity = 0.5  # 50% of 12 = 6 structural elements zeroed out
+    sparsity = 0.5  # 50% of 12 = 6 structural elements zeroed out per output channel
 
     sparse_init_weight_(tensor, sparsity)
 
     # Reshape to check output neuron profiles
     flat_view = tensor.view(2, -1)
 
-    # Elements must be identically zeroed across all output channels
     channel_0_zeros = (flat_view[0] == 0.0).sum().item()
     channel_1_zeros = (flat_view[1] == 0.0).sum().item()
 
     assert channel_0_zeros == 6
     assert channel_1_zeros == 6
-    # Ensure structural zero matching across channels
-    torch.testing.assert_close(flat_view[0] == 0.0, flat_view[1] == 0.0)
 
 
 def test_sparse_init_weight_edge_cases():
@@ -177,15 +171,14 @@ def test_make_sparse_init_factory():
     configured_init = make_sparse_init(mock_base_init, sparsity=0.5)
 
     # 1. Evaluate 2D Weight routing (base init runs, then sparse masking executes)
-    weight_matrix = torch.zeros(4, 6)  # fan_in = 6 -> 3 elements zeroed
+    weight_matrix = torch.zeros(4, 6)  # fan_in = 6 -> 3 elements zeroed per row
     configured_init(weight_matrix)
 
-    col_sums = weight_matrix.sum(dim=0)
-    zero_cols = (col_sums == 0.0).sum().item()
-    initialized_cols = (col_sums == (4 * 5.0)).sum().item()
+    row_zeros = (weight_matrix == 0.0).sum(dim=1)
+    row_active = (weight_matrix == 5.0).sum(dim=1)
 
-    assert zero_cols == 3
-    assert initialized_cols == 3
+    assert torch.all(row_zeros == 3)
+    assert torch.all(row_active == 3)
 
     # 2. Evaluate 1D Bias routing (forces zero initialization directly)
     bias_vector = torch.ones(4)

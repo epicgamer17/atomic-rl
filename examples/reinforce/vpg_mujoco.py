@@ -142,7 +142,7 @@ for episode in range(MAX_EPISODES):
 
         dist = torch.distributions.Normal(mu, std)
         action_tensor, info_dict = sample_distribution(dist, explore=True)
-        action_np = to_numpy_action(action_tensor)
+        action_np = to_numpy_action(action_tensor).flatten()
 
         # 2. Step Env
         next_obs, reward, terminated, truncated, info = env.step(action_np)

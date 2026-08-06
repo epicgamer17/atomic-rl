@@ -129,7 +129,7 @@ for episode in range(MAX_EPISODES):
         value = critic(obs_tensor)
 
         action_tensor, info_dict = gaussian_sampling_selector(mu, std, explore=True)
-        action = to_numpy_action(action_tensor)
+        action = to_numpy_action(action_tensor).flatten()  # remove batch dim of 1
         # Clip action to env bounds just in case, though mu is already scaled
         action = np.clip(action, -MAX_ACTION, MAX_ACTION)
 

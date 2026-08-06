@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Callable, List
+from typing import Callable, List, Dict, Union, Mapping
 from torch.optim.optimizer import Optimizer
 
 # TODO: CHANGE THE OPTIMIZER API HERE TO MATCH WITH IDBD, CBP, and ObGD for adam and SGD
@@ -55,16 +55,36 @@ def obgd_update_(
     theta: torch.Tensor,
     grad: torch.Tensor,
     lr: float,
+    total_norm: float | torch.Tensor,
     scaling_factor: float = 1.0,
 ) -> None:
     """
     Standard Observation-based Gradient Descent step (supervised).
+
+    Args:
+        theta (torch.Tensor): The weights of the network. # TODO: is this a single layer?
+        grad (torch.Tensor): The gradient.
+        lr (float): The learning rate.
+        total_norm (float | torch.Tensor): The L1 norm of the gradients of the
+            WHOLE network (Algorithm 3 of the Stream RL paper). This is a single
+            global norm shared by every parameter; there is intentionally no
+            per-tensor fallback.
+        scaling_factor (float): The scaling factor.
+
+    Returns:
+        None
+
+    NOTE:
+
+
     """
     # TODO: add shape assertions
 
     with torch.no_grad():
-        norm_grad = torch.sum(torch.abs(grad))
-        M = lr * scaling_factor * norm_grad
+        # Paper Algorithm 3 normalizes by the L1 norm of the whole (concatenated)
+        # gradient vector, giving the network a single shared step size.
+        norm = torch.as_tensor(total_norm, dtype=torch.float32, device=theta.device)
+        M = lr * scaling_factor * norm
         new_step_size = lr / M.clamp(min=1.0)
         theta.sub_(grad, alpha=new_step_size)
 
@@ -74,18 +94,32 @@ def obgd_td_update_(
     error: torch.Tensor,
     trace: torch.Tensor,
     lr: float,
+    total_norm: float | torch.Tensor,
     scaling_factor: float = 1.0,
 ) -> None:
     """
     Observation-based Gradient Descent driven by TD-error and eligibility traces.
+
+    Args:
+        theta (torch.Tensor): The weights of the network. # TODO: is this a single layer?
+        error (torch.Tensor): The TD-error. Scalar. # TODO: should we make the type of this float instead of torch.Tensor? Since i think it only works with scalars because of the add_ operation.
+        trace (torch.Tensor): The eligibility trace.
+        lr (float): The learning rate.
+        total_norm (float | torch.Tensor): The L1 norm of the eligibility traces of the WHOLE network (Algorithm 3 of the Stream RL paper). This is a single global norm shared by every parameter;
+        scaling_factor (float): The scaling factor.
+
+    Returns:
+        None
     """
 
     # TODO: add shape assertions
 
     with torch.no_grad():
+        # Paper Algorithm 3 normalizes by the L1 norm of the whole (concatenated)
+        # eligibility trace vector, giving the network a single shared step size.
         effective_error = torch.abs(error).clamp(min=1.0)
-        norm_trace = torch.sum(torch.abs(trace))
-        M = lr * scaling_factor * effective_error * norm_trace
+        norm = torch.as_tensor(total_norm, dtype=torch.float32, device=theta.device)
+        M = lr * scaling_factor * effective_error * norm
         new_step_size = lr / M.clamp(min=1.0)
         theta.add_(trace, alpha=new_step_size * error)
 
@@ -108,11 +142,38 @@ class ObGD(Optimizer):
     def step(self, closure=None):
         """
         Performs a single optimization step (using p.grad).
+
+        The step size is computed from the L1 norm of ALL gradients in the network (Algorithm 3 of the Stream RL paper): a single global norm and one shared step size, rather than one step size per parameter tensor.
         """
         loss = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
+
+        device = (
+            next(
+                p.device
+                for group in self.param_groups
+                for p in group["params"]
+                if p.grad is not None
+            )
+            if any(
+                p.grad is not None
+                for group in self.param_groups
+                for p in group["params"]
+            )
+            else None
+        )
+        total_norm = (
+            torch.tensor(0.0, device=device)
+            if device is not None
+            else torch.tensor(0.0)
+        )
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                total_norm += torch.sum(torch.abs(p.grad))
 
         for group in self.param_groups:
             for p in group["params"]:
@@ -123,25 +184,61 @@ class ObGD(Optimizer):
                     grad=p.grad,
                     lr=group["lr"],
                     scaling_factor=group["scaling_factor"],
+                    total_norm=total_norm,
                 )
         return loss
 
     # TODO: for now our solution. May want to better handle all TD methods, and its possible this is unecessary with some ways we pass gradients and stuff.
     @torch.no_grad()
-    def td_step(self, error: torch.Tensor, traces: List[torch.Tensor], closure=None):
+    def td_step(
+        self,
+        error: torch.Tensor,
+        traces: Union[List[torch.Tensor], Mapping[torch.Tensor, torch.Tensor]],
+        closure=None,
+    ):
         """
         Performs a single temporal difference optimization step.
+
+        The step size is computed from the L1 norm of ALL eligibility traces in
+        the network (Algorithm 3 of the Stream RL paper): a single global norm
+        and one shared step size, rather than one step size per parameter tensor.
         """
         loss = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
 
-        global_p_idx = 0
+        def resolve_trace(p: torch.Tensor, idx: int):
+            if isinstance(traces, Mapping):
+                if p not in traces:
+                    raise KeyError(
+                        f"Parameter trace not found in traces mapping for param: {p}"
+                    )
+                return traces[p], idx
+            return traces[idx], idx + 1
+
+        device = (
+            next(p.device for group in self.param_groups for p in group["params"])
+            if self.param_groups and self.param_groups[0]["params"]
+            else None
+        )
+        total_norm = (
+            torch.tensor(0.0, device=device)
+            if device is not None
+            else torch.tensor(0.0)
+        )
+        idx = 0
         for group in self.param_groups:
             for p in group["params"]:
-                trace = traces[global_p_idx]
-                global_p_idx += 1
+                trace, idx = resolve_trace(p, idx)
+                if trace is None:
+                    continue
+                total_norm += torch.sum(torch.abs(trace))
+
+        idx = 0
+        for group in self.param_groups:
+            for p in group["params"]:
+                trace, idx = resolve_trace(p, idx)
                 if trace is None:
                     continue
                 obgd_td_update_(
@@ -150,5 +247,6 @@ class ObGD(Optimizer):
                     trace=trace,
                     lr=group["lr"],
                     scaling_factor=group["scaling_factor"],
+                    total_norm=total_norm,
                 )
         return loss

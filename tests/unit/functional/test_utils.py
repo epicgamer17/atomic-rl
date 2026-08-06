@@ -9,7 +9,6 @@ from functional.utils import (
     to_tensor,
     to_numpy_action,
     update_welford_stats,
-    normalize_features,
     add_dirichlet_noise,
     compute_tile_coding_features,
 )
@@ -228,33 +227,28 @@ def test_to_numpy_action_continuous_preservation():
 # ==========================================
 
 
-def test_update_welford_stats_and_normalization():
-    """Verify running mean/variance updating math and downstream standardization transforms."""
+def test_update_welford_stats():
+    """Verify running mean/variance updating math."""
     # Initialize zero running statistics for a 2-feature vector space
     mean = torch.zeros(2)
-    var = torch.zeros(2)
+    sq_diff = torch.zeros(2)
     count = torch.tensor(0.0)
 
     # Pass a batch containing 2 instances
     batch = torch.tensor([[1.0, 10.0], [3.0, 20.0]])
 
-    mean, var, count = update_welford_stats(mean, var, count, batch)
+    mean, sq_diff, var, count = update_welford_stats(mean, sq_diff, count, batch)
 
     # Math Verification:
     # count = 0 + 2 = 2
     # mean = [ (1+3)/2, (10+20)/2 ] = [2.0, 15.0]
-    # var (M2 aggregate sum of squares) = (1-2)^2 + (3-2)^2 = 2.0 for feature 0
-    #                                  = (10-15)^2 + (20-15)^2 = 50.0 for feature 1
+    # sq_diff = (1-2)^2 + (3-2)^2 = 2.0 for feature 0
+    #         = (10-15)^2 + (20-15)^2 = 50.0 for feature 1
+    # var = sq_diff / (count - 1) = [2.0, 50.0]
     assert count.item() == 2.0
     torch.testing.assert_close(mean, torch.tensor([2.0, 15.0]))
+    torch.testing.assert_close(sq_diff, torch.tensor([2.0, 50.0]))
     torch.testing.assert_close(var, torch.tensor([2.0, 50.0]))
-
-    # Test feature normalization based on these running metrics
-    features = torch.tensor([[2.0, 15.0]])
-    # unbiased_var = var / (count - 1) = [2.0 / 1.0, 50.0 / 1.0] = [2.0, 50.0]
-    # normalized = (features - mean) / sqrt(unbiased_var) -> exactly 0 since inputs match the mean
-    normalized = normalize_features(features, mean, var, count)
-    torch.testing.assert_close(normalized, torch.zeros(1, 2))
 
 
 def test_update_welford_stats_assertion():

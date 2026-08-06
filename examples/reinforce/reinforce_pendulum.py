@@ -105,7 +105,7 @@ for episode in range(MAX_EPISODES):
         action_tensor, info_dict = sample_distribution(dist, explore=True)
 
         # Pendulum expects a numpy array for actions
-        action = to_numpy_action(action_tensor)
+        action = to_numpy_action(action_tensor).flatten()
         # Clip action to env bounds just in case, though mu is already scaled
         action = np.clip(action, -MAX_ACTION, MAX_ACTION)
 

@@ -75,6 +75,7 @@ These examples are meant to be illustrative and should be used as a reference fo
 These examples should be as CLEAN as possible, and should be well documented. They should be written in a way that is easy to understand, and they should be easy to modify.
 Each algorithm example should include notes on the paper its based off of. The notes should roughly cover the papers goal, what it is trying to solve, what it achieves, what the key ideas are, the reason those ideas/contributions help solve the problem/achieve the goal, and the math behind the algorithm (roughly). it should also include notes on what was done differently than the paper (if anything) and why. ie why its needed, why its wanted, and why it works, intuitively and mathematically (briefly).
 Should follow best practices of this library and ideally libraries it uses. Should include notes on on design decisions, different options/architectures, and design trade-offs. Things like "we use mc returns for this example but any XYZ could be used for the algorithm" or "we compute n step at ingestion instead of on rollout since..." 
+If running a single discrete action space actions should be cast to ints (otherwise they will have a batch dimension). If running a single continuous action space actions should be flattened (again to remove the batch dim). This is because our functions require a batch dimension, but gym internal logic can silently break with a single batch dim of 1.
 
 *networks/*
 This layer contains the neural network architectures used in the examples.
