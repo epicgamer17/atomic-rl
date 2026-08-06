@@ -4,6 +4,12 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import gymnasium as gym
 import numpy as np
+import torch
+
+from functional.utils import (
+    normalize_features,
+    update_welford_stats,
+)
 
 
 class RunningMeanStd:
@@ -259,3 +265,80 @@ class VecNormalizeObservation(VecNormalize):
 class VecNormalizeReward(VecNormalize):
     def __init__(self, venv: Any, **kwargs):
         super().__init__(venv, norm_obs=False, norm_reward=True, **kwargs)
+
+
+class WelfordNormalizeObservation(gym.ObservationWrapper):
+    """
+    Single-environment observation normalization using Welford's online algorithm.
+
+    Backed by ``update_welford_stats`` and ``normalize_features`` from
+    ``functional.utils`` so that examples share a single canonical implementation.
+    """
+
+    def __init__(
+        self,
+        env: gym.Env,
+        epsilon: float = 1e-8,
+        device: torch.device = torch.device("cpu"),
+    ):
+        super().__init__(env)
+        self.epsilon = epsilon
+        self.device = device
+        self.obs_mean = torch.zeros(*self.observation_space.shape, device=device)
+        self.obs_m2 = torch.zeros(*self.observation_space.shape, device=device)
+        self.obs_count = torch.tensor(0.0, device=device)
+
+    def observation(self, observation: np.ndarray) -> np.ndarray:
+        obs_t = torch.as_tensor(
+            observation, dtype=torch.float32, device=self.device
+        ).unsqueeze(0)
+        self.obs_mean, self.obs_m2, self.obs_count = update_welford_stats(
+            self.obs_mean, self.obs_m2, self.obs_count, obs_t
+        )
+        normalized = normalize_features(
+            obs_t, self.obs_mean, self.obs_m2, self.obs_count, self.epsilon
+        )
+        return normalized.squeeze(0).cpu().numpy()
+
+
+class WelfordNormalizeReward(gym.RewardWrapper):
+    """
+    Single-environment reward scaling via discounted trace + Welford (Algorithm 5).
+
+    Tracks ``rew_u = γ·(1 - t_mask)·rew_u + r``, maintains running statistics of
+    ``rew_u`` via ``update_welford_stats``, and returns ``r / σ(rew_u)``.
+    The termination mask ``t_mask`` zeros the trace on ``terminated or truncated``,
+    replacing the separate ``u.zero_()`` step.
+    """
+
+    def __init__(
+        self,
+        env: gym.Env,
+        gamma: float = 0.99,
+        epsilon: float = 1e-8,
+        device: torch.device = torch.device("cpu"),
+    ):
+        super().__init__(env)
+        self.gamma = gamma
+        self.epsilon = epsilon
+        self.device = device
+        self.rew_u = torch.tensor(0.0, device=device)
+        self.rew_mean = torch.tensor(0.0, device=device)
+        self.rew_sq_diff = torch.tensor(0.0, device=device)
+        self.rew_count = torch.tensor(0.0, device=device)
+
+    def step(self, action):
+        obs, raw_reward, terminated, truncated, info = self.env.step(action)
+
+        t_mask = 1.0 if (terminated or truncated) else 0.0
+        reward_t = torch.as_tensor(raw_reward, dtype=torch.float32, device=self.device)
+        self.rew_u = (self.gamma * (1.0 - t_mask) * self.rew_u) + reward_t
+
+        self.rew_mean, self.rew_sq_diff, self.rew_count = update_welford_stats(
+            self.rew_mean, self.rew_sq_diff, self.rew_count, self.rew_u.unsqueeze(0)
+        )
+
+        unbiased_var = self.rew_sq_diff / torch.clamp(self.rew_count - 1.0, min=1.0)
+        scaled_reward = reward_t / torch.sqrt(unbiased_var + self.epsilon)
+
+        return obs, scaled_reward.cpu().item(), terminated, truncated, info

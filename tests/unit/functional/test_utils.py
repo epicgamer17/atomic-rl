@@ -265,7 +265,7 @@ def test_update_welford_stats_assertion():
 
     # Passing a unbatched 1D tensor should trigger the layout validation check
     bad_batch = torch.tensor([1.0, 2.0])
-    with pytest.raises(AssertionError, match="Expected \\[Batch, Features\\]"):
+    with pytest.raises(AssertionError, match="Shape Mismatch"):
         update_welford_stats(mean, var, count, bad_batch)
 
 

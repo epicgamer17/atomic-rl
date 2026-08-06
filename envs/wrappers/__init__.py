@@ -15,6 +15,8 @@ from .normalization import (
     VecNormalizeReward,
     VecTransformObservation,
     VecTransformReward,
+    WelfordNormalizeObservation,
+    WelfordNormalizeReward,
 )
 from .pomdp import FlickeringObservation, VecFlickeringObservation
 
@@ -39,4 +41,6 @@ __all__ = [
     "VecNormalizeReward",
     "VecTransformObservation",
     "VecTransformReward",
+    "WelfordNormalizeObservation",
+    "WelfordNormalizeReward",
 ]

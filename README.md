@@ -1,3 +1,7 @@
+[![Interactive Research Labs](https://img.shields.io/badge/Live_Demos-Interactive_Research_Labs-blue?style=for-the-badge&logo=flask)](https://kratzj.vercel.app/labs)
+[![Website](https://img.shields.io/badge/Website-kratzj.vercel.app-10b981?style=for-the-badge&logo=vercel)](https://kratzj.vercel.app)
+
+
 # Modular RL (Functional)
 
 A high-performance, researcher-centric Reinforcement Learning library for PyTorch built on the **Functional Core, Imperative Shell** design pattern. Think of it as **RLax for PyTorch**—engineered to eliminate the rigidity of deep OOP frameworks and the chaos of monolithic single-file copy-pasting.

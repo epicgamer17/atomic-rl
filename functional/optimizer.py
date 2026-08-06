@@ -60,6 +60,8 @@ def obgd_update_(
     """
     Standard Observation-based Gradient Descent step (supervised).
     """
+    # TODO: add shape assertions
+
     with torch.no_grad():
         norm_grad = torch.sum(torch.abs(grad))
         M = lr * scaling_factor * norm_grad
@@ -77,6 +79,9 @@ def obgd_td_update_(
     """
     Observation-based Gradient Descent driven by TD-error and eligibility traces.
     """
+
+    # TODO: add shape assertions
+
     with torch.no_grad():
         effective_error = torch.abs(error).clamp(min=1.0)
         norm_trace = torch.sum(torch.abs(trace))
