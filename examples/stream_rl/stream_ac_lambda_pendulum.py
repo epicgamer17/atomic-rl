@@ -7,7 +7,7 @@ Algorithm 7 from Elsayed, Vasan & Mahmood (2024):
 TODO: why does entropy go to a high value and stay high and like flatline (like around 3.4) instead of decreasing steadily? And why are our results generally pretty poor on pendulum (on this example and across other algorithms too)
 TODO: NOTE: the previous log_std clamp dead-zone (torch.clamp(log_std, -20, 2); std=exp(log_std)) was fixed by switching to std = softplus(pre_std) to match the reference. torch.clamp zeroes gradients outside the range, which froze the log_std head and pinned entropy at ~0.5*ln(2*pi*e*e^4) ~= 3.42 under the global ObGD step size.
 
-TODO: create a Layerwise Adaptive ObGD. Uses the norm per layer instead of across the whole network for normalization. Each layer gets its own learning rate. AC Lambda seems to do much better with this, while DQN doesn't suffer.
+TODO: create a Layerwise Adaptive ObGD. Uses the norm per layer instead of across the whole network for normalization. Each layer gets its own learning rate. AC Lambda seems to do much better with this, while DQN doesn't suffer. Really weird how the layerwise does so much better, ask Doina about this when possible, or the other guy who was teaching the RL class.
 """
 
 import math
@@ -141,7 +141,9 @@ actor = GaussianActor(
 critic = CriticNet(LayerNormMLP(obs_shape[0], HIDDEN_SIZE)).to(device)
 
 actor_optimizer = AdaptiveObGD(actor.parameters(), lr=ALPHA, scaling_factor=KAPPA_ACTOR)
-critic_optimizer = AdaptiveObGD(critic.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC)
+critic_optimizer = AdaptiveObGD(
+    critic.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC
+)
 
 actor_traces = {p: torch.zeros_like(p, device=device) for p in actor.parameters()}
 critic_traces = {p: torch.zeros_like(p, device=device) for p in critic.parameters()}

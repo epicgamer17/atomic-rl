@@ -11,6 +11,7 @@ from functional.mcts import (
     select_leaf,
     expand_node,
     backpropagate,
+    get_mcts_visit_policy,
 )
 
 pytestmark = pytest.mark.unit
@@ -99,6 +100,20 @@ def test_puct_score_mathematical_correctness():
     torch.testing.assert_close(calculated_scores, expected_scores, atol=1e-6, rtol=1e-6)
 
 
+def test_puct_score_zero_prior_guard():
+    """Verify that actions with prior=0 (e.g. masked illegal actions) receive -1e9 penalty."""
+    q_values = torch.tensor([[10.0, 5.0]])
+    priors = torch.tensor([[0.0, 1.0]])  # Action 0 masked (prior=0)
+    visits = torch.tensor([[0, 0]])
+    total_visits = torch.tensor([0])
+    min_q = torch.tensor([0.0])
+    max_q = torch.tensor([10.0])
+
+    scores = puct_score(q_values, priors, visits, total_visits, min_q, max_q)
+    assert scores[0, 0].item() == -1e9
+    assert scores[0, 1].item() > 0.0
+
+
 # ==========================================
 # Tests for Tree Initialization
 # ==========================================
@@ -117,6 +132,7 @@ def test_init_mcts_tree_geometry():
 
     assert tree["embeddings"].shape == (batch_size, max_nodes, embedding_dim)
     assert tree["children_index"].shape == (batch_size, max_nodes, num_actions)
+    assert tree["is_terminal"].shape == (batch_size, max_nodes)
     assert torch.all(tree["children_index"] == -1)
     assert tree["node_counts"].tolist() == [1, 1]  # Only the root is occupied initially
     torch.testing.assert_close(tree["embeddings"][:, 0], root_embeddings)
@@ -142,6 +158,7 @@ def test_expand_node():
     rewards = torch.tensor([1.5])
     next_embeddings = torch.ones(batch_size, 4)
     next_to_play = torch.tensor([1])
+    is_terminal = torch.tensor([True])
 
     # Run expansion
     expand_node(
@@ -152,6 +169,7 @@ def test_expand_node():
         rewards,
         next_embeddings,
         next_to_play,
+        is_terminal=is_terminal,
     )
 
     # Assert structural mutations
@@ -160,7 +178,36 @@ def test_expand_node():
     torch.testing.assert_close(tree["embeddings"][0, 1], next_embeddings[0])
     assert tree["children_rewards"][0, 0, 1].item() == 1.5
     assert tree["to_play"][0, 1].item() == 1
+    assert tree["is_terminal"][0, 1].item() is True
     torch.testing.assert_close(tree["children_prior"][0, 1], torch.tensor([0.5, 0.5]))
+
+
+# ==========================================
+# Tests for Policy Extraction
+# ==========================================
+
+
+def test_get_mcts_visit_policy_temperature_1():
+    """Verify temperature tau=1.0 yields visit count proportional policy."""
+    visit_counts = torch.tensor([[10.0, 30.0, 60.0]])
+    policy = get_mcts_visit_policy(visit_counts, temperature=1.0)
+    expected = torch.tensor([[0.1, 0.3, 0.6]])
+    torch.testing.assert_close(policy, expected)
+
+
+def test_get_mcts_visit_policy_temperature_greedy():
+    """Verify temperature tau=0.0 yields greedy one-hot policy."""
+    visit_counts = torch.tensor([[10.0, 30.0, 60.0]])
+    policy = get_mcts_visit_policy(visit_counts, temperature=0.0)
+    expected = torch.tensor([[0.0, 0.0, 1.0]])
+    torch.testing.assert_close(policy, expected)
+
+
+def test_get_mcts_visit_policy_negative_temperature():
+    """Verify fail-fast assertion on negative temperature."""
+    visit_counts = torch.tensor([[10.0, 30.0]])
+    with pytest.raises(AssertionError, match="Temperature must be non-negative"):
+        get_mcts_visit_policy(visit_counts, temperature=-0.5)
 
 
 # ==========================================
