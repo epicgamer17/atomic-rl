@@ -13,6 +13,7 @@ while Gradient TD algorithms (GTD0, TDC) converge to V*(s) = 0.
 import torch
 
 
+# TODO: should this be a gym env?
 class BairdsCounterexampleEnv:
     """
     Baird's 7-state counterexample environment.
@@ -26,15 +27,17 @@ class BairdsCounterexampleEnv:
         self.state = 0
 
         # Feature Matrix Phi (7 x 8)
-        self.phi_matrix = torch.tensor([
-            [1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0],
-            [2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-        ])
+        self.phi_matrix = torch.tensor(
+            [
+                [1.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0],
+                [2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            ]
+        )
 
     def reset(self):
         self.state = torch.randint(0, 7, (1,)).item()
@@ -48,10 +51,10 @@ class BairdsCounterexampleEnv:
 
         if is_solid:
             self.state = 6
-            rho = 7.0 # pi(solid)/mu(solid) = 1.0 / (1/7) = 7.0
+            rho = 7.0  # pi(solid)/mu(solid) = 1.0 / (1/7) = 7.0
         else:
             self.state = torch.randint(0, 6, (1,)).item()
-            rho = 0.0 # pi(dashed)/mu(dashed) = 0.0 / (6/7) = 0.0
+            rho = 0.0  # pi(dashed)/mu(dashed) = 0.0 / (6/7) = 0.0
 
         reward = 0.0
         terminated = False
