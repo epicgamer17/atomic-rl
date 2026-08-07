@@ -39,6 +39,13 @@ from functional.replay_buffer import (
     uniform_sample,
     BufferState,
 )
+from envs.functions.tictactoe import (
+    check_tictactoe_winner,
+    tictactoe_dynamics_fn,
+    get_canonical_obs,
+    embeddings_to_canonical,
+    get_legal_actions_mask,
+)
 from pettingzoo.classic import tictactoe_v3
 
 
@@ -47,7 +54,7 @@ from pettingzoo.classic import tictactoe_v3
 # ---------------------------------------------------------------------------
 TOTAL_TRAINING_STEPS = 20000
 NUM_ACTORS = 3
-SEARCH_BATCH_SIZE = 5  # 5 parallel vectorized environments per actor
+ENVS_PER_ACTOR = 5  # 5 parallel vectorized environments per actor
 MIN_BUFFER_SIZE = 64
 EVAL_INTERVAL_STEPS = 500
 PARAM_SYNC_INTERVAL = 50
@@ -139,104 +146,6 @@ class TicTacToeNet(nn.Module):
 
 
 # ============================================================================
-# 2. Fast Board Dynamics & Canonical Helpers
-# ============================================================================
-
-
-def check_tictactoe_winner(board: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    device = board.device
-    batch_size = board.shape[0]
-
-    rows = board.sum(dim=2)
-    cols = board.sum(dim=1)
-    diag1 = torch.stack([board[:, 0, 0], board[:, 1, 1], board[:, 2, 2]], dim=1).sum(
-        dim=1, keepdim=True
-    )
-    diag2 = torch.stack([board[:, 0, 2], board[:, 1, 1], board[:, 2, 0]], dim=1).sum(
-        dim=1, keepdim=True
-    )
-
-    lines = torch.cat([rows, cols, diag1, diag2], dim=1)
-
-    p0_wins = (lines == 3).any(dim=1)
-    p1_wins = (lines == -3).any(dim=1)
-    board_full = (board != 0).all(dim=1).all(dim=1)
-
-    winner = torch.zeros(batch_size, device=device)
-    winner = torch.where(p0_wins, torch.tensor(1.0, device=device), winner)
-    winner = torch.where(p1_wins, torch.tensor(-1.0, device=device), winner)
-
-    is_terminal = p0_wins | p1_wins | board_full
-    return winner, is_terminal
-
-
-def tictactoe_dynamics_fn(
-    embeddings: torch.Tensor, actions_taken: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    batch_size = embeddings.shape[0]
-    device = embeddings.device
-    batch_range = torch.arange(batch_size, device=device)
-
-    board = embeddings[..., 0].clone()
-    current_player = embeddings[:, 0, 0, 1].long()
-
-    row = actions_taken // 3
-    col = actions_taken % 3
-
-    piece = torch.where(current_player == 0, 1.0, -1.0)
-    board[batch_range, row, col] = piece
-
-    winner, is_terminal = check_tictactoe_winner(board)
-
-    p0_win_reward = torch.where(current_player == 0, 1.0, -1.0)
-    p1_win_reward = torch.where(current_player == 1, 1.0, -1.0)
-
-    reward = torch.zeros(batch_size, device=device)
-    reward = torch.where(winner == 1.0, p0_win_reward, reward)
-    reward = torch.where(winner == -1.0, p1_win_reward, reward)
-
-    next_to_play = 1 - current_player
-
-    next_embeddings = torch.zeros_like(embeddings)
-    next_embeddings[..., 0] = board
-    next_embeddings[..., 1] = next_to_play.view(-1, 1, 1).expand(-1, 3, 3).float()
-
-    return next_embeddings, reward, next_to_play, is_terminal
-
-
-def get_canonical_obs(board_3x3: torch.Tensor, player: int) -> torch.Tensor:
-    device = board_3x3.device
-    my_piece = 1.0 if player == 0 else -1.0
-    opp_piece = -1.0 if player == 0 else 1.0
-
-    my_plane = (board_3x3 == my_piece).float()
-    opp_plane = (board_3x3 == opp_piece).float()
-    turn_plane = torch.full_like(my_plane, 1.0 if player == 0 else 0.0)
-
-    return torch.stack([my_plane, opp_plane, turn_plane], dim=0).unsqueeze(0).to(device)
-
-
-def embeddings_to_canonical(embeddings: torch.Tensor) -> torch.Tensor:
-    board = embeddings[..., 0]
-    player = embeddings[:, 0, 0, 1].long()
-
-    my_piece = torch.where(player == 0, 1.0, -1.0).view(-1, 1, 1)
-    opp_piece = torch.where(player == 0, -1.0, 1.0).view(-1, 1, 1)
-
-    my_plane = (board == my_piece).float()
-    opp_plane = (board == opp_piece).float()
-    turn_plane = (player == 0).float().view(-1, 1, 1).expand(-1, 3, 3)
-
-    return torch.stack([my_plane, opp_plane, turn_plane], dim=1)
-
-
-def get_legal_actions_mask(embeddings: torch.Tensor) -> torch.Tensor:
-    board = embeddings[..., 0]
-    flat_board = board.view(board.shape[0], -1)
-    return flat_board == 0
-
-
-# ============================================================================
 # 3. Thread & Process-Safe Shared Replay Buffer
 # ============================================================================
 
@@ -288,7 +197,7 @@ def actor_worker(
     model_creator: Callable[[], nn.Module],
     shared_model: nn.Module,
     buffer: SharedReplayBuffer,
-    search_batch_size: int = SEARCH_BATCH_SIZE,
+    envs_per_actor: int = ENVS_PER_ACTOR,
     num_simulations: int = NUM_MCTS_SIMULATIONS,
     device_str: str = "cpu",
 ):
@@ -302,10 +211,10 @@ def actor_worker(
     torch.manual_seed(worker_seed)
     random.seed(worker_seed)
 
-    boards = torch.zeros(search_batch_size, 3, 3, device=device)
-    players = torch.zeros(search_batch_size, dtype=torch.long, device=device)
-    move_counts = [0] * search_batch_size
-    trajectories = [[] for _ in range(search_batch_size)]
+    boards = torch.zeros(envs_per_actor, 3, 3, device=device)
+    players = torch.zeros(envs_per_actor, dtype=torch.long, device=device)
+    move_counts = [0] * envs_per_actor
+    trajectories = [[] for _ in range(envs_per_actor)]
 
     step_counter = 0
 
@@ -315,17 +224,16 @@ def actor_worker(
             local_model.load_state_dict(shared_model.state_dict())
 
         # Construct root embeddings for search batch size [B, 3, 3, 2]
-        root_embed = torch.zeros(search_batch_size, 3, 3, 2, device=device)
+        root_embed = boards.new_zeros(envs_per_actor, 3, 3, 2)
         root_embed[..., 0] = boards
         root_embed[..., 1] = players.view(-1, 1, 1).expand(-1, 3, 3).float()
+        root_legal_mask = (boards.view(envs_per_actor, -1) == 0)
 
         def expansion_fn(embeddings):
             with torch.no_grad():
                 canonical_x = embeddings_to_canonical(embeddings)
                 logits, value = local_model(canonical_x)
-                legal_mask = get_legal_actions_mask(embeddings)
-                masked_logits = torch.where(legal_mask, logits, -1e9)
-                return masked_logits, value.squeeze(-1)
+                return logits, value.squeeze(-1)
 
         tree = mcts_search(
             root_embeddings=root_embed,
@@ -334,6 +242,7 @@ def actor_worker(
             expansion_fn=expansion_fn,
             dynamics_fn=tictactoe_dynamics_fn,
             root_to_play=players,
+            root_legal_mask=root_legal_mask,
             pb_c_init=C_PUCT,
             dirichlet_epsilon=DIRICHLET_EPSILON,
             dirichlet_alpha=DIRICHLET_ALPHA,
@@ -342,7 +251,7 @@ def actor_worker(
         completed_samples = []
 
         # Step each env in the search batch forward
-        for b_idx in range(search_batch_size):
+        for b_idx in range(envs_per_actor):
             move_counts[b_idx] += 1
             curr_player = players[b_idx].item()
 
@@ -478,11 +387,9 @@ def evaluator_worker(
                         with torch.no_grad():
                             canonical_x = embeddings_to_canonical(embeddings)
                             logits, value = local_model(canonical_x)
-                            legal_mask = get_legal_actions_mask(embeddings)
-                            masked_logits = torch.where(legal_mask, logits, -1e9)
-                            return masked_logits, value.squeeze(-1)
+                            return logits, value.squeeze(-1)
 
-                    root_embed = torch.zeros(1, 3, 3, 2, device=device)
+                    root_embed = board_3x3.new_zeros(1, 3, 3, 2)
                     root_embed[0, ..., 0] = board_3x3
                     root_embed[0, ..., 1] = float(player)
 
@@ -492,7 +399,8 @@ def evaluator_worker(
                         num_actions=9,
                         expansion_fn=expansion_fn,
                         dynamics_fn=tictactoe_dynamics_fn,
-                        root_to_play=torch.tensor([player], device=device),
+                        root_to_play=board_3x3.new_tensor([player], dtype=torch.long),
+                        root_legal_mask=action_mask.unsqueeze(0),
                         pb_c_init=C_PUCT,
                         dirichlet_epsilon=0.0,
                     )
@@ -568,7 +476,7 @@ def learner_worker(
         config={
             "total_training_steps": max_steps,
             "num_actors": NUM_ACTORS,
-            "search_batch_size": SEARCH_BATCH_SIZE,
+            "envs_per_actor": ENVS_PER_ACTOR,
             "num_mcts_simulations": NUM_MCTS_SIMULATIONS,
             "c_puct": C_PUCT,
             "batch_size": batch_size,
@@ -700,7 +608,7 @@ def main():
     processes.append(eval_p)
 
     print(
-        f"Launched AlphaZero Multiprocessing Pipeline (1 Learner, {NUM_ACTORS} Actors with Search Batch Size {SEARCH_BATCH_SIZE}, 1 Evaluator)."
+        f"Launched AlphaZero Multiprocessing Pipeline (1 Learner, {NUM_ACTORS} Actors with {ENVS_PER_ACTOR} Envs per Actor, 1 Evaluator)."
     )
 
     learner_p.join()

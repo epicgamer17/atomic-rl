@@ -181,151 +181,13 @@ class TicTacToeNet(nn.Module):
         return policy_logits, value
 
 
-# ============================================================================
-# 3. Fast Inlined TicTacToe Board Simulator for MCTS Search
-# ============================================================================
-
-
-def check_tictactoe_winner(board: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Checks 3x3 board tensor (+1 for P0, -1 for P1, 0 for empty) for win or terminal draw.
-
-    Args:
-        board: [B, 3, 3] board tensor (+1 for P0, -1 for P1, 0 for empty).
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: (winner_tensor [B], is_terminal [B])
-            winner: +1 if P0 won, -1 if P1 won, 0 if draw or ongoing.
-    """
-    batch_size = board.shape[0]
-    device = board.device
-
-    rows = board.sum(dim=2)  # [B, 3]
-    cols = board.sum(dim=1)  # [B, 3]
-    diag1 = torch.stack([board[:, 0, 0], board[:, 1, 1], board[:, 2, 2]], dim=1).sum(
-        dim=1, keepdim=True
-    )
-    diag2 = torch.stack([board[:, 0, 2], board[:, 1, 1], board[:, 2, 0]], dim=1).sum(
-        dim=1, keepdim=True
-    )
-
-    lines = torch.cat([rows, cols, diag1, diag2], dim=1)  # [B, 8]
-
-    p0_wins = (lines == 3).any(dim=1)
-    p1_wins = (lines == -3).any(dim=1)
-    board_full = (board != 0).all(dim=1).all(dim=1)
-
-    winner = torch.zeros(batch_size, device=device)
-    winner = torch.where(p0_wins, torch.tensor(1.0, device=device), winner)
-    winner = torch.where(p1_wins, torch.tensor(-1.0, device=device), winner)
-
-    is_terminal = p0_wins | p1_wins | board_full
-    return winner, is_terminal
-
-
-def tictactoe_dynamics_fn(
-    embeddings: torch.Tensor, actions_taken: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """
-    Transition dynamics for MCTS simulation.
-
-    Args:
-        embeddings: State tensor [B, 3, 3, 2] (board, to_play)
-        actions_taken: Action indices [B] in 0..8.
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-            - next_embeddings: [B, 3, 3, 2]
-            - reward: [B] (terminal reward relative to current player)
-            - next_to_play: [B] (0 or 1)
-            - is_terminal: [B] (boolean mask)
-    """
-    batch_size = embeddings.shape[0]
-    device = embeddings.device
-    batch_range = torch.arange(batch_size, device=device)
-
-    board = embeddings[..., 0].clone()  # [B, 3, 3] (+1 for P0, -1 for P1)
-    current_player = embeddings[:, 0, 0, 1].long()  # [B] (0 or 1)
-
-    # Convert flat action 0..8 to (row, col)
-    row = actions_taken // 3
-    col = actions_taken % 3
-
-    piece = torch.where(current_player == 0, 1.0, -1.0)
-    board[batch_range, row, col] = piece
-
-    winner, is_terminal = check_tictactoe_winner(board)
-
-    # Reward relative to current player
-    # If game not over, reward is 0. If game over, player moving receives -outcome
-    # relative to the winner in that state? No, standard zero-sum:
-    # If I am player X, reward is +1 if I win, -1 if I lose, 0 if draw.
-    # The winner variable is +1 for P0 win, -1 for P1 win.
-    p0_win_reward = torch.where(current_player == 0, 1.0, -1.0)
-    p1_win_reward = torch.where(current_player == 1, 1.0, -1.0)
-
-    reward = torch.zeros(batch_size, device=device)
-    reward = torch.where(winner == 1.0, p0_win_reward, reward)
-    reward = torch.where(winner == -1.0, p1_win_reward, reward)
-
-    next_to_play = 1 - current_player
-
-    next_embeddings = torch.zeros_like(embeddings)
-    next_embeddings[..., 0] = board
-    next_embeddings[..., 1] = next_to_play.view(-1, 1, 1).expand(-1, 3, 3).float()
-
-    return next_embeddings, reward, next_to_play, is_terminal
-
-
-def get_canonical_obs(board_3x3: torch.Tensor, player: int) -> torch.Tensor:
-    """
-    Constructs 3-channel active-player canonical observation [1, 3, 3, 3]:
-        Channel 0: Active player pieces (1.0)
-        Channel 1: Opponent pieces (1.0)
-        Channel 2: Active player turn plane (1.0 if player == 0 / 'X', 0.0 if player == 1 / 'O')
-    """
-    device = board_3x3.device
-    my_piece = 1.0 if player == 0 else -1.0
-    opp_piece = -1.0 if player == 0 else 1.0
-
-    my_plane = (board_3x3 == my_piece).float()
-    opp_plane = (board_3x3 == opp_piece).float()
-    turn_plane = torch.full_like(my_plane, 1.0 if player == 0 else 0.0)
-
-    canonical = torch.stack([my_plane, opp_plane, turn_plane], dim=0).unsqueeze(
-        0
-    )  # [1, 3, 3, 3]
-    return canonical.to(device)
-
-
-def embeddings_to_canonical(embeddings: torch.Tensor) -> torch.Tensor:
-    """
-    Converts MCTS state embeddings [B, 3, 3, 2] into 3-channel canonical model input [B, 3, 3, 3]:
-        Channel 0: Active player pieces (1.0)
-        Channel 1: Opponent pieces (1.0)
-        Channel 2: Active player turn plane (1.0 for Player 0 / 'X', 0.0 for Player 1 / 'O')
-    """
-    board = embeddings[..., 0]  # [B, 3, 3]
-    player = embeddings[:, 0, 0, 1].long()  # [B]
-
-    my_piece = torch.where(player == 0, 1.0, -1.0).view(-1, 1, 1)
-    opp_piece = torch.where(player == 0, -1.0, 1.0).view(-1, 1, 1)
-
-    my_plane = (board == my_piece).float()
-    opp_plane = (board == opp_piece).float()
-    turn_plane = (player == 0).float().view(-1, 1, 1).expand(-1, 3, 3)
-
-    return torch.stack([my_plane, opp_plane, turn_plane], dim=1)  # [B, 3, 3, 3]
-
-
-def get_legal_actions_mask(embeddings: torch.Tensor) -> torch.Tensor:
-    """
-    Computes boolean legal action mask [B, 9] for MCTS embeddings.
-    Empty cells (board == 0) are legal actions.
-    """
-    board = embeddings[..., 0]  # [B, 3, 3]
-    flat_board = board.view(board.shape[0], -1)  # [B, 9]
-    return flat_board == 0
+from envs.functions.tictactoe import (
+    check_tictactoe_winner,
+    tictactoe_dynamics_fn,
+    get_canonical_obs,
+    embeddings_to_canonical,
+    get_legal_actions_mask,
+)
 
 
 # ============================================================================
@@ -340,43 +202,28 @@ def run_self_play_game(
 ) -> List[Dict[str, torch.Tensor]]:
     """
     Executes a single game of self-play using MCTS and active-player canonical observations.
-    Returns list of training tuples (state, target_policy, target_value).
+    Uses fast tensor board dynamics directly, eliminating environment dictionary and string parsing overhead.
     """
     model.eval()
-    env = tictactoe_v3.env()
-    env.reset()
-
-    board_3x3 = torch.zeros(3, 3, device=device)
-    trajectory = []
+    board = torch.zeros((3, 3), device=device)
+    player = 0
     move_count = 0
-    final_rewards = {}
+    trajectory = []
 
-    for agent in env.agent_iter():
-        obs, reward, termination, truncation, info = env.last()
-        if reward != 0:
-            final_rewards[agent] = reward
+    def expansion_fn(embeddings):
+        with torch.no_grad():
+            canonical_x = embeddings_to_canonical(embeddings)
+            logits, value = model(canonical_x)
+            return logits, value.squeeze(-1)
 
-        if termination or truncation:
-            env.step(None)
-            continue
-
+    while True:
         move_count += 1
-        player = 0 if agent == "player_1" else 1
-        action_mask = torch.tensor(obs["action_mask"], device=device, dtype=torch.bool)
+        action_mask = (board.view(-1) == 0)
 
-        canonical_obs = get_canonical_obs(board_3x3, player)
+        canonical_obs = get_canonical_obs(board, player)
 
-        def expansion_fn(embeddings):
-            with torch.no_grad():
-                canonical_x = embeddings_to_canonical(embeddings)
-                logits, value = model(canonical_x)
-                legal_mask = get_legal_actions_mask(embeddings)
-                masked_logits = torch.where(legal_mask, logits, -1e9)
-                return masked_logits, value.squeeze(-1)
-
-        # MCTS root embedding setup [1, 3, 3, 2]
-        root_embed = torch.zeros(1, 3, 3, 2, device=device)
-        root_embed[0, ..., 0] = board_3x3
+        root_embed = board.new_zeros(1, 3, 3, 2)
+        root_embed[0, ..., 0] = board
         root_embed[0, ..., 1] = float(player)
 
         # Run batched MCTS search
@@ -386,7 +233,8 @@ def run_self_play_game(
             num_actions=9,
             expansion_fn=expansion_fn,
             dynamics_fn=tictactoe_dynamics_fn,
-            root_to_play=torch.tensor([player], device=device),
+            root_to_play=board.new_tensor([player], dtype=torch.long),
+            root_legal_mask=action_mask.unsqueeze(0),
             pb_c_init=C_PUCT,
             dirichlet_epsilon=DIRICHLET_EPSILON,
             dirichlet_alpha=DIRICHLET_ALPHA,
@@ -426,36 +274,30 @@ def run_self_play_game(
             }
         )
 
-        # Update local board state
+        # Update local board state directly
         row, col = action_idx // 3, action_idx % 3
         piece = 1.0 if player == 0 else -1.0
-        board_3x3[row, col] = piece
+        board[row, col] = piece
 
-        env.step(action_idx)
+        winner, is_terminal = check_tictactoe_winner(board.unsqueeze(0))
 
-    # Determine final outcome z from captured PettingZoo rewards ('player_1' vs 'player_2')
-    p0_reward = 0.0
-    if "player_1" in final_rewards:
-        p0_reward = float(final_rewards["player_1"])
-    elif "player_2" in final_rewards:
-        p0_reward = -float(final_rewards["player_2"])
+        if is_terminal.item():
+            p0_reward = winner.item()
+            p1_reward = -p0_reward
+            samples = []
+            for step in trajectory:
+                pl = step["player"]
+                z = p0_reward if pl == 0 else p1_reward
+                samples.append(
+                    {
+                        "state": step["state"],
+                        "target_policy": step["target_policy"],
+                        "target_value": torch.tensor([z], dtype=torch.float32),
+                    }
+                )
+            return samples
 
-    p1_reward = -p0_reward
-
-    # Backfill target values z for each step relative to player at turn t
-    samples = []
-    for step in trajectory:
-        player = step["player"]
-        z = p0_reward if player == 0 else p1_reward
-        samples.append(
-            {
-                "state": step["state"],
-                "target_policy": step["target_policy"],
-                "target_value": torch.tensor([z], dtype=torch.float32),
-            }
-        )
-
-    return samples
+        player = 1 - player
 
 
 # ============================================================================
@@ -508,11 +350,9 @@ def evaluate_vs_random(
                     with torch.no_grad():
                         canonical_x = embeddings_to_canonical(embeddings)
                         logits, value = model(canonical_x)
-                        legal_mask = get_legal_actions_mask(embeddings)
-                        masked_logits = torch.where(legal_mask, logits, -1e9)
-                        return masked_logits, value.squeeze(-1)
+                        return logits, value.squeeze(-1)
 
-                root_embed = torch.zeros(1, 3, 3, 2, device=device)
+                root_embed = board_3x3.new_zeros(1, 3, 3, 2)
                 root_embed[0, ..., 0] = board_3x3
                 root_embed[0, ..., 1] = float(player)
 
@@ -522,7 +362,8 @@ def evaluate_vs_random(
                     num_actions=9,
                     expansion_fn=expansion_fn,
                     dynamics_fn=tictactoe_dynamics_fn,
-                    root_to_play=torch.tensor([player], device=device),
+                    root_to_play=board_3x3.new_tensor([player], dtype=torch.long),
+                    root_legal_mask=action_mask.unsqueeze(0),
                     pb_c_init=C_PUCT,
                     dirichlet_epsilon=0.0,
                 )

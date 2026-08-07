@@ -38,6 +38,7 @@ from functional.replay_buffer import (
     uniform_sample,
     BufferState,
 )
+from envs.functions.tictactoe import check_tictactoe_winner, get_canonical_obs
 from pettingzoo.classic import tictactoe_v3
 
 
@@ -46,7 +47,7 @@ from pettingzoo.classic import tictactoe_v3
 # ---------------------------------------------------------------------------
 TOTAL_TRAINING_STEPS = 20000
 NUM_ACTORS = 3
-SEARCH_BATCH_SIZE = 5  # 5 parallel vectorized environments per actor
+ENVS_PER_ACTOR = 5  # 5 parallel vectorized environments per actor
 UNROLL_STEPS_K = 5  # Number of hypothetical unroll steps K = 5
 MIN_BUFFER_SIZE = 64
 EVAL_INTERVAL_STEPS = 500
@@ -203,47 +204,8 @@ class MuZeroTicTacToeNet(nn.Module):
 
 
 # ============================================================================
-# 2. Dynamics & Canonical Helpers
+# 3. Thread & Process-Safe Shared Replay Buffer
 # ============================================================================
-
-
-def get_canonical_obs(board_3x3: torch.Tensor, player: int) -> torch.Tensor:
-    device = board_3x3.device
-    my_piece = 1.0 if player == 0 else -1.0
-    opp_piece = -1.0 if player == 0 else 1.0
-
-    my_plane = (board_3x3 == my_piece).float()
-    opp_plane = (board_3x3 == opp_piece).float()
-    turn_plane = torch.full_like(my_plane, 1.0 if player == 0 else 0.0)
-
-    return torch.stack([my_plane, opp_plane, turn_plane], dim=0).unsqueeze(0).to(device)
-
-
-def check_tictactoe_winner(board: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-    device = board.device
-    batch_size = board.shape[0]
-
-    rows = board.sum(dim=2)
-    cols = board.sum(dim=1)
-    diag1 = torch.stack([board[:, 0, 0], board[:, 1, 1], board[:, 2, 2]], dim=1).sum(
-        dim=1, keepdim=True
-    )
-    diag2 = torch.stack([board[:, 0, 2], board[:, 1, 1], board[:, 2, 0]], dim=1).sum(
-        dim=1, keepdim=True
-    )
-
-    lines = torch.cat([rows, cols, diag1, diag2], dim=1)
-
-    p0_wins = (lines == 3).any(dim=1)
-    p1_wins = (lines == -3).any(dim=1)
-    board_full = (board != 0).all(dim=1).all(dim=1)
-
-    winner = torch.zeros(batch_size, device=device)
-    winner = torch.where(p0_wins, torch.tensor(1.0, device=device), winner)
-    winner = torch.where(p1_wins, torch.tensor(-1.0, device=device), winner)
-
-    is_terminal = p0_wins | p1_wins | board_full
-    return winner, is_terminal
 
 
 # ============================================================================
@@ -298,7 +260,7 @@ def actor_worker(
     model_creator: Callable[[], nn.Module],
     shared_model: nn.Module,
     buffer: SharedReplayBuffer,
-    search_batch_size: int = SEARCH_BATCH_SIZE,
+    envs_per_actor: int = ENVS_PER_ACTOR,
     num_simulations: int = NUM_MCTS_SIMULATIONS,
     device_str: str = "cpu",
 ):
@@ -311,10 +273,10 @@ def actor_worker(
     torch.manual_seed(worker_seed)
     random.seed(worker_seed)
 
-    boards = torch.zeros(search_batch_size, 3, 3, device=device)
-    players = torch.zeros(search_batch_size, dtype=torch.long, device=device)
-    move_counts = [0] * search_batch_size
-    trajectories = [[] for _ in range(search_batch_size)]
+    boards = torch.zeros(envs_per_actor, 3, 3, device=device)
+    players = torch.zeros(envs_per_actor, dtype=torch.long, device=device)
+    move_counts = [0] * envs_per_actor
+    trajectories = [[] for _ in range(envs_per_actor)]
 
     step_counter = 0
 
@@ -327,10 +289,12 @@ def actor_worker(
         obs_batch = torch.stack(
             [
                 get_canonical_obs(boards[b], players[b].item()).squeeze(0)
-                for b in range(search_batch_size)
+                for b in range(envs_per_actor)
             ],
             dim=0,
         )
+
+        root_legal_mask = (boards.view(envs_per_actor, -1) == 0)
 
         with torch.no_grad():
             s0_batch, _, _ = local_model.initial_inference(obs_batch)
@@ -362,13 +326,14 @@ def actor_worker(
             expansion_fn=muzero_expansion_fn,
             dynamics_fn=muzero_dynamics_fn,
             root_to_play=players,
+            root_legal_mask=root_legal_mask,
             pb_c_base=C_PUCT_2,
             pb_c_init=C_PUCT_1,
             dirichlet_epsilon=DIRICHLET_EPSILON,
             dirichlet_alpha=DIRICHLET_ALPHA,
         )
 
-        for b_idx in range(search_batch_size):
+        for b_idx in range(envs_per_actor):
             move_counts[b_idx] += 1
             curr_player = players[b_idx].item()
             action_mask = (boards[b_idx] == 0).view(-1)
@@ -597,7 +562,7 @@ def learner_worker(
         config={
             "total_training_steps": max_steps,
             "num_actors": NUM_ACTORS,
-            "search_batch_size": SEARCH_BATCH_SIZE,
+            "envs_per_actor": ENVS_PER_ACTOR,
             "unroll_steps_k": unroll_steps_k,
             "num_mcts_simulations": NUM_MCTS_SIMULATIONS,
             "batch_size": batch_size,
@@ -748,7 +713,7 @@ def main():
     processes.append(eval_p)
 
     print(
-        f"Launched MuZero Multiprocessing Pipeline (1 Learner, {NUM_ACTORS} Actors with Search Batch Size {SEARCH_BATCH_SIZE}, 1 Evaluator)."
+        f"Launched MuZero Multiprocessing Pipeline (1 Learner, {NUM_ACTORS} Actors with {ENVS_PER_ACTOR} Envs per Actor, 1 Evaluator)."
     )
 
     learner_p.join()
