@@ -31,7 +31,7 @@ ALPHA = 1.0  # Step size for Stream TD (ObGD)
 KAPPA = 2.0  # Scaling factor κ for Stream TD (ObGD)
 SPARSITY = 0.9  # Sparsity ratio s for Stream TD (SparseInit)
 HIDDEN_SIZE = 128  # Hidden units for 128x128 network
-NUM_RUNS = 30  # 5 independent runs for confidence intervals
+NUM_RUNS = 5  # 5 independent runs for confidence intervals
 SEED_START = 42
 
 

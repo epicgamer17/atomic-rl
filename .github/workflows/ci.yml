@@ -1,4 +1,4 @@
-name: Modular RL CI Pipeline
+name: Atomic RL CI
 
 on:
   push:
