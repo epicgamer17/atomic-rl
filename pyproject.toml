@@ -73,6 +73,9 @@ plot = [
 [tool.setuptools.packages.find]
 include = ["functional", "networks", "envs", "envs.*"]
 
+[tool.setuptools]
+exclude-package-data = { envs = ["wrappers/deprecated/*", "custom/setup.py"] }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]

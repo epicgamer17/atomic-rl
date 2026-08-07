@@ -1,3 +1,4 @@
+# TODO: nested setup.py is excluded from the wheel; consider deleting.
 from setuptools import setup, find_packages
 
 setup(

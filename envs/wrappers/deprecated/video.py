@@ -1,3 +1,4 @@
+# TODO: consider deleting — deprecated, unimported, excluded from wheel.
 # import os
 # import imageio
 # from typing import Optional, Dict, Any, Callable
