@@ -12,10 +12,12 @@ This directory maintains a mapping between the research papers in this folder an
 - **Batch MCTS**: [batch_mcts.pdf](batch_mcts.pdf). Vectorized MCTS for efficient batched inference. Different than vectorized envs, about searching mutliple branches at once for one state. 
 - **Gumbel MuZero**: [gumbel_muzero.pdf](gumbel_muzero.pdf). Planned for `functional/mcts.py` to allow policy improvement without high simulation counts.
 - **Stochastic MuZero**: [stochastic_muzero.pdf](stochastic_muzero.pdf). Needed for handling environments with inherent randomness (like Catan).
-- **EfficientZero**: [efficient_zero.pdf](efficient_zero.pdf). Sample efficient offline MuZero variant. Possible improvements on MuZero.
-- **Efficient Zero V2**: [efficient_zero_v2.pdf](efficient_zero_v2.pdf). V2 of EfficientZero. 
+- **EfficientZero**: [efficientzero.pdf](efficientzero.pdf). Sample efficient offline MuZero variant. Possible improvements on MuZero.
+- **Efficient Zero V2**: [efficientzero_v2.pdf](efficientzero_v2.pdf). V2 of EfficientZero. 
 - **MuZero Unplugged**: [muzero_unplugged.pdf](muzero_unplugged.pdf). Offline MuZero.
 - **Sampled MuZero ** [sampled_muzero.pdf](sampled_muzero.pdf). MuZero for Continuous and complex action spaces.
+- **SkyNet**: MuZero on partially observable information and multi agent uncertainty 
+- **ROSMO**: better muzero unplugged (for stochastic games I think)
 - **AdaGain**: [adagain.pdf](adagain.pdf). An improvement on AutoStep (I think).
 - **MetaOptimize**: [metaoptimize.pdf](metaoptimize.pdf).
 - **ReDO**
