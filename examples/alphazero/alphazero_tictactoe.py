@@ -44,6 +44,14 @@ from typing import Tuple, List, Dict
 from tensordict import TensorDict
 import wandb
 from functional.mcts import mcts_search, get_mcts_visit_policy
+from functional.losses import cross_entropy_loss, mse_loss
+from functional.action_selection import argmax_selector, sample_distribution
+from functional.replay_buffer import (
+    init_buffer,
+    circular_write_strategy,
+    uniform_sample,
+    BufferState,
+)
 from pettingzoo.classic import tictactoe_v3
 
 
@@ -169,49 +177,6 @@ class TicTacToeNet(nn.Module):
         policy_logits = self.policy_head(features)
         value = self.value_head(features)
         return policy_logits, value
-
-
-# ============================================================================
-# 2. Inlined AlphaZero Composite Loss Function
-# ============================================================================
-
-
-def alphazero_loss(
-    policy_logits: torch.Tensor,
-    target_policy: torch.Tensor,
-    predicted_value: torch.Tensor,
-    target_value: torch.Tensor,
-) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-    """
-    AlphaZero composite loss function.
-
-    Formula:
-        L = MSE(predicted_value, target_value) - sum(target_policy * log_softmax(policy_logits))
-
-    Args:
-        policy_logits: Predicted action logits [B, 9].
-        target_policy: MCTS visit target policy distribution [B, 9].
-        predicted_value: Predicted value scalar [B, 1] or [B].
-        target_value: Game outcome z [B, 1] or [B] in [-1, +1].
-
-    Returns:
-        Tuple[torch.Tensor, Dict]: (total_loss, metrics_dict)
-    """
-    # Policy Cross-Entropy: - sum(pi * log(p))
-    log_probs = F.log_softmax(policy_logits, dim=-1)
-    policy_loss = -(target_policy * log_probs).sum(dim=-1).mean()
-
-    # Value MSE: (v - z)^2
-    value_loss = F.mse_loss(predicted_value.view(-1), target_value.view(-1))
-
-    total_loss = policy_loss + value_loss
-
-    info = {
-        "loss/total": total_loss.detach(),
-        "loss/policy": policy_loss.detach(),
-        "loss/value": value_loss.detach(),
-    }
-    return total_loss, info
 
 
 # ============================================================================
@@ -454,11 +419,14 @@ def run_self_play_game(
         else:
             action_policy = action_mask.float() / action_mask.float().sum()
 
-        # Sample action for self-play environment execution
+        # Sample action using functional.action_selection helpers
         if temp > 0.0:
-            action_idx = torch.multinomial(action_policy, num_samples=1).item()
+            dist = torch.distributions.Categorical(probs=action_policy)
+            action_idx_tensor, _ = sample_distribution(dist, explore=True)
+            action_idx = action_idx_tensor.item()
         else:
-            action_idx = action_policy.argmax().item()
+            action_idx_tensor, _ = argmax_selector(action_policy.unsqueeze(0))
+            action_idx = action_idx_tensor.squeeze().item()
 
         trajectory.append(
             {
@@ -500,21 +468,6 @@ def run_self_play_game(
     return samples
 
 
-def render_tictactoe_board(board_3x3: torch.Tensor) -> str:
-    """
-    Renders 3x3 board tensor into ASCII representation.
-        +1 -> 'X' (Player 1 / P0)
-        -1 -> 'O' (Player 2 / P1)
-         0 -> '.' (Empty)
-    """
-    symbols = {1.0: "X", -1.0: "O", 0.0: "."}
-    rows = []
-    for r in range(3):
-        row_str = " | ".join(symbols[board_3x3[r, c].item()] for c in range(3))
-        rows.append("  " + row_str)
-    return "\n  ---+---+---\n".join(rows)
-
-
 # ============================================================================
 # 5. Baseline Evaluator (AlphaZero vs. Random Player)
 # ============================================================================
@@ -525,17 +478,15 @@ def evaluate_vs_random(
     num_games: int = NUM_EVAL_GAMES,
     num_simulations: int = NUM_MCTS_SIMULATIONS,
     device: torch.device = torch.device("cpu"),
-    render_lost_games: bool = True,
 ) -> Dict[str, float]:
     """
     Evaluates trained AlphaZero model against a Random agent.
     Plays half games as Player 0 ('player_1'), half as Player 1 ('player_2').
-    Tracks separate P1 and P2 statistics, and ONLY prints step-by-step logs for lost games.
+    Tracks separate P1 and P2 statistics.
     """
     model.eval()
     p1_wins, p1_draws, p1_losses = 0, 0, 0
     p2_wins, p2_draws, p2_losses = 0, 0, 0
-    lost_games_printed = 0
 
     for game_i in range(num_games):
         az_player = 0 if game_i % 2 == 0 else 1
@@ -545,9 +496,6 @@ def evaluate_vs_random(
 
         board_3x3 = torch.zeros(3, 3, device=device)
         az_reward = 0.0
-        step_idx = 0
-        game_history = []
-        piece_sym = "X" if az_player == 0 else "O"
 
         for agent in env.agent_iter():
             obs, reward, termination, truncation, info = env.last()
@@ -558,7 +506,6 @@ def evaluate_vs_random(
                 env.step(None)
                 continue
 
-            step_idx += 1
             player = 0 if agent == "player_1" else 1
             action_mask = torch.tensor(
                 obs["action_mask"], device=device, dtype=torch.bool
@@ -566,15 +513,6 @@ def evaluate_vs_random(
             legal_actions = action_mask.nonzero(as_tuple=False).squeeze(-1).tolist()
 
             if player == az_player:
-                canonical_obs = get_canonical_obs(board_3x3, player)
-                with torch.no_grad():
-                    init_logits, init_val_tensor = model(canonical_obs)
-                    masked_init_logits = torch.where(
-                        action_mask.unsqueeze(0), init_logits, -1e9
-                    )
-                    initial_prior_p = F.softmax(masked_init_logits, dim=-1).squeeze(0)
-                    pred_v = init_val_tensor.squeeze().item()
-
                 def expansion_fn(embeddings):
                     with torch.no_grad():
                         canonical_x = embeddings_to_canonical(embeddings)
@@ -595,7 +533,7 @@ def evaluate_vs_random(
                     dynamics_fn=tictactoe_dynamics_fn,
                     root_to_play=torch.tensor([player], device=device),
                     pb_c_init=C_PUCT,
-                    dirichlet_epsilon=0.0,
+                    dirichlet_epsilon=DIRICHLET_EPSILON,
                 )
 
                 root_visits = tree["children_visits"][0, 0]
@@ -604,30 +542,10 @@ def evaluate_vs_random(
                 ).squeeze(0)
 
                 target_policy = torch.where(action_mask, raw_policy, 0.0)
-                action_idx = target_policy.argmax().item()
-
-                game_history.append(
-                    {
-                        "step": step_idx,
-                        "player_name": f"AlphaZero ('{piece_sym}')",
-                        "board": board_3x3.clone(),
-                        "pred_v": pred_v,
-                        "initial_prior": initial_prior_p.clone(),
-                        "raw_policy": raw_policy.clone(),
-                        "action_idx": action_idx,
-                    }
-                )
+                action_idx_tensor, _ = argmax_selector(target_policy.unsqueeze(0))
+                action_idx = action_idx_tensor.squeeze().item()
             else:
                 action_idx = random.choice(legal_actions)
-                opp_sym = "O" if az_player == 0 else "X"
-                game_history.append(
-                    {
-                        "step": step_idx,
-                        "player_name": f"Random ('{opp_sym}')",
-                        "board": board_3x3.clone(),
-                        "action_idx": action_idx,
-                    }
-                )
 
             row, col = action_idx // 3, action_idx % 3
             piece = 1.0 if player == 0 else -1.0
@@ -650,37 +568,6 @@ def evaluate_vs_random(
                 p2_losses += 1
             else:
                 p2_draws += 1
-
-        # Post-Mortem analysis ONLY if AlphaZero lost this game
-        if render_lost_games and (az_reward < 0) and (lost_games_printed < 2):
-            lost_games_printed += 1
-            print(
-                f"\n!!! [LOST GAME POST-MORTEM #{lost_games_printed} (Game {game_i}, AlphaZero as {'P1' if az_player==0 else 'P2'} ('{piece_sym}'))] !!!",
-                flush=True,
-            )
-            for h in game_history:
-                if "pred_v" in h:
-                    p_str = ", ".join(f"{p:.2f}" for p in h["initial_prior"].tolist())
-                    pi_str = ", ".join(f"{p:.2f}" for p in h["raw_policy"].tolist())
-                    print(f"\nMove Step {h['step']} | {h['player_name']}:", flush=True)
-                    print(render_tictactoe_board(h["board"]), flush=True)
-                    print(
-                        f"  Predicted Value (v_theta) : {h['pred_v']:+.3f}", flush=True
-                    )
-                    print(f"  Initial Model Prior (p)   : [{p_str}]", flush=True)
-                    print(f"  Final MCTS Search (pi)   : [{pi_str}]", flush=True)
-                    print(
-                        f"  Selected Action Index    : {h['action_idx']} (row {h['action_idx']//3}, col {h['action_idx']%3})",
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"\nMove Step {h['step']} | {h['player_name']} Action: {h['action_idx']} (row {h['action_idx']//3}, col {h['action_idx']%3})",
-                        flush=True,
-                    )
-            print(f"\nFinal Lost Board State:")
-            print(render_tictactoe_board(board_3x3))
-            print("=" * 60 + "\n", flush=True)
 
     model.train()
     total_p1 = max(1, p1_wins + p1_draws + p1_losses)
@@ -710,10 +597,10 @@ def train_alphazero_tictactoe():
     Main AlphaZero self-play training script.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[AlphaZero TicTacToe] Starting training on device: {device}", flush=True)
 
     # Set random seeds for reproducibility
-    torch.manual_seed(SEED)
+    rng_key = torch.Generator(device=device)
+    rng_key.manual_seed(SEED)
     random.seed(SEED)
 
     learner_model = TicTacToeNet(
@@ -725,8 +612,15 @@ def train_alphazero_tictactoe():
         learner_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
 
-    # Initialize Replay Buffer
-    replay_buffer = deque(maxlen=REPLAY_BUFFER_CAPACITY)
+    # Initialize Replay Buffer using functional.replay_buffer
+    buffer_shapes = {
+        "state": (3, 3, 3),
+        "target_policy": (9,),
+        "target_value": (1,),
+    }
+    replay_buffer_state = init_buffer(
+        REPLAY_BUFFER_CAPACITY, buffer_shapes, device=device
+    )
 
     # Initialize W&B tracking
     wandb.init(
@@ -755,20 +649,12 @@ def train_alphazero_tictactoe():
     )
     wandb.define_metric("*", step_metric="global_step")
 
-    print("\n--- Initial Evaluation (Random Weights) ---", flush=True)
     initial_eval = evaluate_vs_random(
         learner_model,
         num_games=NUM_EVAL_GAMES,
         num_simulations=NUM_MCTS_SIMULATIONS,
         device=device,
     )
-    print(
-        f"Initial vs Random -> Overall Win: {initial_eval['eval/win_rate']*100:.0f}% | "
-        f"P1 (Win: {initial_eval['eval/p1_win_rate']*100:.0f}%, Draw: {initial_eval['eval/p1_draw_rate']*100:.0f}%, Loss: {initial_eval['eval/p1_loss_rate']*100:.0f}%) | "
-        f"P2 (Win: {initial_eval['eval/p2_win_rate']*100:.0f}%, Draw: {initial_eval['eval/p2_draw_rate']*100:.0f}%, Loss: {initial_eval['eval/p2_loss_rate']*100:.0f}%)",
-        flush=True,
-    )
-    print("------------------------------------------\n", flush=True)
 
     wandb.log(
         {
@@ -794,27 +680,41 @@ def train_alphazero_tictactoe():
             )
             new_samples.extend(game_samples)
 
-        replay_buffer.extend(new_samples)
+        if len(new_samples) > 0:
+            batch_td = TensorDict(
+                {
+                    "state": torch.stack([s["state"] for s in new_samples]),
+                    "target_policy": torch.stack(
+                        [s["target_policy"] for s in new_samples]
+                    ),
+                    "target_value": torch.stack(
+                        [s["target_value"] for s in new_samples]
+                    ),
+                },
+                batch_size=[len(new_samples)],
+            ).to(device)
+            replay_buffer_state, _ = circular_write_strategy(
+                replay_buffer_state, batch_td
+            )
 
-        if len(replay_buffer) < MIN_BUFFER_SIZE:
+        if replay_buffer_state.size < MIN_BUFFER_SIZE:
             continue
 
-        # 2. Continuous 1-Step Network SGD Optimization on Learner Network
-        minibatch = random.sample(replay_buffer, BATCH_SIZE)
-        states = torch.stack([s["state"] for s in minibatch]).to(device)
-        target_policies = torch.stack([s["target_policy"] for s in minibatch]).to(
-            device
-        )
-        target_values = torch.stack([s["target_value"] for s in minibatch]).to(device)
+        # 2. Continuous 1-Step Network SGD Optimization using uniform_sample from functional.replay_buffer
+        minibatch = uniform_sample(replay_buffer_state, rng_key, BATCH_SIZE)
+        states = minibatch["state"]
+        target_policies = minibatch["target_policy"]
+        target_values = minibatch["target_value"]
 
         policy_logits, predicted_value = learner_model(states)
 
-        loss, info = alphazero_loss(
-            policy_logits=policy_logits,
-            target_policy=target_policies,
-            predicted_value=predicted_value,
-            target_value=target_values,
-        )
+        raw_p_loss, _ = cross_entropy_loss(policy_logits, target_policies)
+        policy_loss = raw_p_loss.mean()
+
+        raw_v_loss, _ = mse_loss(predicted_value.view(-1), target_values.view(-1))
+        value_loss = raw_v_loss.mean()
+
+        loss = policy_loss + value_loss
 
         optimizer.zero_grad()
         loss.backward()
@@ -827,10 +727,10 @@ def train_alphazero_tictactoe():
         # Log continuous step metrics to W&B
         log_dict = {
             "global_step": step,
-            "loss/total": info["loss/total"].item(),
-            "loss/policy": info["loss/policy"].item(),
-            "loss/value": info["loss/value"].item(),
-            "buffer/size": len(replay_buffer),
+            "loss/total": loss.item(),
+            "loss/policy": policy_loss.item(),
+            "loss/value": value_loss.item(),
+            "buffer/size": replay_buffer_state.size,
             "search/mcts_simulations": NUM_MCTS_SIMULATIONS,
             "search/c_puct": C_PUCT,
         }
@@ -842,15 +742,6 @@ def train_alphazero_tictactoe():
                 num_games=NUM_EVAL_GAMES,
                 num_simulations=NUM_MCTS_SIMULATIONS,
                 device=device,
-            )
-
-            print(
-                f"Step [{step:04d}/{TOTAL_TRAINING_STEPS}] | "
-                f"Loss: {info['loss/total'].item():.4f} (P: {info['loss/policy'].item():.4f}, V: {info['loss/value'].item():.4f}) | "
-                f"Overall Win: {eval_metrics['eval/win_rate']*100:.0f}% | "
-                f"P1 Win: {eval_metrics['eval/p1_win_rate']*100:.0f}% (L: {eval_metrics['eval/p1_loss_rate']*100:.0f}%) | "
-                f"P2 Win: {eval_metrics['eval/p2_win_rate']*100:.0f}% (L: {eval_metrics['eval/p2_loss_rate']*100:.0f}%)",
-                flush=True,
             )
 
             log_dict.update(
@@ -870,7 +761,6 @@ def train_alphazero_tictactoe():
         wandb.log(log_dict)
 
     wandb.finish()
-    print("\n[AlphaZero TicTacToe] Training Complete!", flush=True)
 
 
 if __name__ == "__main__":
