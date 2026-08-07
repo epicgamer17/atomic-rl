@@ -67,9 +67,9 @@ device = torch.device("cpu")
 
 
 # ---------------------------------------------------------------------------
-# Networks
-# ---------------------------------------------------------------------------
+# TODO/NOTE: figure out if we want to make a network component for these in networks/
 class LayerNormMLP(nn.Module):
+
     def __init__(self, input_dim: int, hidden_dim: int):
         super().__init__()
         self.l1 = nn.Linear(input_dim, hidden_dim)

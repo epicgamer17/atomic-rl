@@ -104,6 +104,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple, List, Dict
 from tensordict import TensorDict
+from networks import ResNetBlock
 import wandb
 
 from functional.mcts import mcts_search, get_mcts_visit_policy
@@ -152,26 +153,6 @@ SEED = 42
 # ============================================================================
 # 1. MuZero Neural Network Architecture (Representation, Dynamics, Prediction)
 # ============================================================================
-
-
-class ResNetBlock(nn.Module):
-    """
-    Standard Residual Block with skip-connection addition.
-    """
-
-    def __init__(self, num_filters: int = 24):
-        super().__init__()
-        self.conv1 = nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(num_filters)
-        self.conv2 = nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(num_filters)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += residual
-        return F.relu(out)
 
 
 class RepresentationNet(nn.Module):

@@ -88,22 +88,6 @@ SEED = 42
 # ============================================================================
 
 
-class ResNetBlock(nn.Module):
-    def __init__(self, num_filters: int = NUM_FILTERS):
-        super().__init__()
-        self.conv1 = nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(num_filters)
-        self.conv2 = nn.Conv2d(num_filters, num_filters, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(num_filters)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        residual = x
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out += residual
-        return F.relu(out)
-
-
 class TicTacToeNet(nn.Module):
     def __init__(
         self, num_filters: int = NUM_FILTERS, num_res_blocks: int = NUM_RES_BLOCKS

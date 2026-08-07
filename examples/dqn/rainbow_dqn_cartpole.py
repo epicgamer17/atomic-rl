@@ -72,10 +72,9 @@ SUPPORT = torch.linspace(V_MIN, V_MAX, ATOM_SIZE)
 N_STEPS = 3
 
 # Seeding for reproducibility
-set_seed(SEED)
-
-
+# TODO/NOTE: figure out if we want to make a network component for these in networks/
 class RainbowNetwork(nn.Module):
+
     """
     Rainbow DQN Network: Combines Dueling architecture, Noisy Nets, and Distributional RL.
     """

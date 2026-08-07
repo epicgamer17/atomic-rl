@@ -66,17 +66,6 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 
-class Transpose(nn.Module):
-    """Permutes tensor dimensions. Used to convert (B, H, W, C) to (B, C, H, W)."""
-
-    def __init__(self, permutation: Tuple[int, ...]):
-        super().__init__()
-        self.permutation = permutation
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.permute(self.permutation)
-
-
 class ActorCriticMicroRTS(nn.Module):
     def __init__(self, nvec: Tuple[int, ...]):
         super().__init__()

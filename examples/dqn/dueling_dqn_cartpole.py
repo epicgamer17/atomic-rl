@@ -9,6 +9,8 @@ This means for a state to have all high Q values, it must have a high V value, a
 The specific Dueling architecture is mostly unique to algorithms that estimate Q-values (like DQN and its variants). However, the underlying concept of separating Value from Advantage is a fundamental pillar of modern RL. Actor-Critic methods (like PPO, TRPO, or A3C) rely heavily on computing advantages (often via Generalized Advantage Estimation) to update the policy network (the Actor), using a state-value network (the Critic) as a baseline. What makes the Dueling architecture unique is how it forces a single network to bottleneck and separate these two concepts internally before squashing them back together into an action-value ($Q$) output
 
 Note this is implemented inline with common Rainbow Implementations and may not be in line with the original paper.
+
+TODO: Can this be applied to any feature prediction or only q values? Or is it only predicting tensors of features or something? Can this be expanded beyond q values to something more general?
 """
 
 from functional.initialization import layer_init
