@@ -12,6 +12,11 @@ This module is divided into two distinct paradigms:
    - STRICTLY for Linear Function Approximation (V(s) = theta^T phi).
    - Manually applies the mathematical gradient step and returns the new weight vector.
    - Typically used in pure online, streaming RL settings without standard PyTorch Optimizers.
+
+Reference: https://github.com/mohmdelsayed/streaming-drl
+   The authors' streaming algorithms (stream_td.py, stream_ac_continuous.py, stream_dqn.py)
+   compute TD targets and semi-gradient errors inline in the training loop; consult them
+   for the released behavior this module mirrors.
 """
 
 import torch
@@ -43,12 +48,12 @@ def compute_v_td_target(
         torch.Tensor: The detached TD target of shape [B]. Gradients will NOT flow through this tensor.
     """
     # Fail Fast: Ensure shape alignment
-    assert (
-        next_values.ndim == 1
-    ), f"Expected 1D next_values [B], got {next_values.shape}"
-    assert (
-        rewards.shape == terminated.shape == next_values.shape
-    ), f"Shape mismatch: rewards {rewards.shape}, terminated {terminated.shape}, next_values {next_values.shape}"
+    assert next_values.ndim == 1, (
+        f"Expected 1D next_values [B], got {next_values.shape}"
+    )
+    assert rewards.shape == terminated.shape == next_values.shape, (
+        f"Shape mismatch: rewards {rewards.shape}, terminated {terminated.shape}, next_values {next_values.shape}"
+    )
 
     target = rewards + gamma * next_values * (1 - terminated.float())
     return target.detach()
@@ -75,12 +80,12 @@ def compute_q_td_target(
     Returns:
         torch.Tensor: The detached TD target of shape [B]. Gradients will NOT flow through this tensor.
     """
-    assert (
-        next_q_values.ndim == 2
-    ), f"Expected 2D next_q_values [B, A], got {next_q_values.shape}"
-    assert (
-        next_actions.ndim == 1
-    ), f"Expected [B] next_actions, got {next_actions.shape}"
+    assert next_q_values.ndim == 2, (
+        f"Expected 2D next_q_values [B, A], got {next_q_values.shape}"
+    )
+    assert next_actions.ndim == 1, (
+        f"Expected [B] next_actions, got {next_actions.shape}"
+    )
 
     # 1. Extract the Q-value of the selected next action -> This IS V(s')
     next_values = torch.gather(next_q_values, 1, next_actions.unsqueeze(-1)).squeeze(-1)
@@ -122,12 +127,12 @@ def compute_categorical_q_td_target(
     Returns:
         torch.Tensor: The detached projected Categorical TD target distribution [B, Atoms]. Gradients will NOT flow through this tensor.
     """
-    assert (
-        next_logits.ndim == 3
-    ), f"Expected 3D next_logits [B, A, Atoms], got {next_logits.shape}"
-    assert (
-        next_actions.ndim == 1
-    ), f"Expected [B] next_actions, got {next_actions.shape}"
+    assert next_logits.ndim == 3, (
+        f"Expected 3D next_logits [B, A, Atoms], got {next_logits.shape}"
+    )
+    assert next_actions.ndim == 1, (
+        f"Expected [B] next_actions, got {next_actions.shape}"
+    )
 
     # 1. Get probabilities of the next states
     next_probs = F.softmax(next_logits, dim=-1)
@@ -350,9 +355,9 @@ def true_online_td_update_(
     """
     # Fail Fast: Ensure shape alignment
     assert features.ndim == 1, f"Expected 1D features [features], got {features.shape}"
-    assert (
-        weights.shape == features.shape
-    ), f"Shape mismatch: weights {weights.shape}, features {features.shape}"
+    assert weights.shape == features.shape, (
+        f"Shape mismatch: weights {weights.shape}, features {features.shape}"
+    )
 
     # w <- w + \alpha * (\delta + V - V_old) * z - \alpha * (V - V_old) * x
     v_diff = v_current - v_old

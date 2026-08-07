@@ -8,6 +8,10 @@ From Stream RL Paper:
 
 # TODO: should these be in my returns.py or something? what about td.py?
 # TODO: should we add alphas here?
+# Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/optim.py
+#   The authors keep eligibility traces INTERNAL to their optimizers (state["eligibility_trace"],
+#   updated in .td_step() as e.mul_(gamma*lambda).add_(grad)). We split trace management out
+#   into these functional helpers; consult their optim.py to verify the trace update.
 def update_accumulating_traces(
     traces: torch.Tensor,  # [batch, num_features]
     gradients: torch.Tensor,  # [batch, num_features]
@@ -106,12 +110,12 @@ def update_true_online_traces(
     NOTE: We implement True Online TD(lambda) trace update from Suttons Textbook (2nd Ed.) not from the True Online TD(lambda) paper.
     """
     # Fail Fast: Ensure shape alignment
-    assert (
-        traces.shape == features.shape
-    ), f"Trace {traces.shape} and feature {features.shape} shapes must match"
-    assert (
-        terminated.ndim == 1
-    ), f"Expected 1D terminated tensor [B], got {terminated.shape}"
+    assert traces.shape == features.shape, (
+        f"Trace {traces.shape} and feature {features.shape} shapes must match"
+    )
+    assert terminated.ndim == 1, (
+        f"Expected 1D terminated tensor [B], got {terminated.shape}"
+    )
 
     term_mask = terminated.unsqueeze(-1).float()
 

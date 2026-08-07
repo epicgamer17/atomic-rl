@@ -92,6 +92,10 @@ def layer_init(
 def lecun_uniform_(tensor: torch.Tensor) -> None:
     """
     Applies LeCun uniform initialization to the weight tensor.
+
+    Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/sparse_init.py
+        The authors' SparseMLP layers use a LeCun-style init + sparse mask; see their
+        `sparse_init.py` (and `layer.py`) for the canonical implementation.
     """
     fan_in = nn.init._calculate_fan_in_and_fan_out(tensor)[0]
     bound = 1.0 / math.sqrt(fan_in)
@@ -103,6 +107,10 @@ def sparse_init_weight_(tensor: torch.Tensor, sparsity: float) -> None:
     Applies sparsity to a weight matrix based on the Stream RL pseudocode.
     Zeroes out a `sparsity` fraction of incoming connections (fan_in) independently for EACH output neuron.
     From the Stream RL Paper (Section 4). LeCun initialization is recommended.
+
+    Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/sparse_init.py
+        The authors' `sparse_init.py` implements the exact SparseInit scheme used in
+        the paper (see also `layer.py` for the SparseMLP that applies it).
 
     Args:
         tensor: The weight tensor to modify in-place (assumes [out_features, in_features]).
@@ -126,9 +134,11 @@ def sparse_init_weight_(tensor: torch.Tensor, sparsity: float) -> None:
         view = tensor if tensor.dim() == 2 else tensor.view(out_features, -1)
 
         # For each output neuron (row), sample n random incoming weight indices (columns) to set to 0.0
-        mask_indices = torch.rand(
-            out_features, in_features, device=tensor.device
-        ).topk(n, dim=1).indices
+        mask_indices = (
+            torch.rand(out_features, in_features, device=tensor.device)
+            .topk(n, dim=1)
+            .indices
+        )
 
         view.scatter_(1, mask_indices, 0.0)
 
@@ -144,6 +154,9 @@ def make_sparse_init(
     passed to model.apply().
 
     From the Stream RL Paper. LeCun initialization is recommended.
+
+    Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/sparse_init.py
+        See the authors' `sparse_init.py` for the exact sparse-initialization routine.
     """
 
     def initialized_sparse_tensor(tensor: torch.Tensor) -> None:

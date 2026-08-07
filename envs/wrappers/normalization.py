@@ -8,6 +8,11 @@ import torch
 
 from functional.utils import update_welford_stats
 
+# Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
+#   The authors' wrappers (NormalizeObservation, ScaleReward, ObservationTraces,
+#   AddTimeInfo, SampleMeanStd) are the canonical implementation of the normalization
+#   used in the Stream RL paper — consult them when aligning behavior with the released code.
+
 
 class RunningMeanStd:
     """
@@ -270,6 +275,9 @@ class WelfordNormalizeObservation(gym.ObservationWrapper):
 
     Backed by ``update_welford_stats`` from
     ``functional.utils`` so that examples share a single canonical implementation.
+
+    Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
+        See the authors' `NormalizeObservation` for their equivalent.
     """
 
     def __init__(
@@ -308,6 +316,10 @@ class WelfordNormalizeReward(gym.RewardWrapper):
     ``rew_u`` via ``update_welford_stats``, and returns ``r / σ(rew_u)``.
     The termination mask ``t_mask`` zeros the trace on ``terminated or truncated``,
     replacing the separate ``u.zero_()`` step.
+
+    Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
+        See the authors' `ScaleReward` (which composes a discounted trace `u` with
+        `SampleMeanStd`) for their released version of this wrapper.
     """
 
     def __init__(

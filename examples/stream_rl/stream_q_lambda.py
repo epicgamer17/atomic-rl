@@ -81,6 +81,8 @@ device = torch.device("cpu")
 # ---------------------------------------------------------------------------
 # TODO/NOTE: figure out if we want to make a network component for these in networks/
 class LayerNormMLP(nn.Module):
+    # Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/layer.py
+    #   The authors' LayerNormMLP (hidden_size=128) with sparse init is in layer.py.
     def __init__(self, input_dim: int, hidden_dim: int):
         super().__init__()
         self.l1 = nn.Linear(input_dim, hidden_dim)

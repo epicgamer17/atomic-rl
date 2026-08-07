@@ -7,6 +7,10 @@ from torch.optim.optimizer import Optimizer
 # TODO: Modern PyTorch actually implements its optimizers using a functional core (available via torch.optim._functional or by directly using the stateless operations). You can create lightweight functional wrappers for Adam and SGD that perfectly match the signature of your adaptive_obgd_update_ without sacrificing PyTorch's C++ speed.
 # TODO: Because functional optimizers require explicit state initialization (which torch.optim.Adam hides from you), you can create a single helper function in functional/initialization.py or functional/utils.py to instantiate these states, ensuring you don't violate the "Minimize the amount of code a person has to write" rule.
 
+# The authors' official implementation of ObGD / AdaptiveObGD is in
+# https://github.com/mohmdelsayed/streaming-drl/blob/main/src/optim.py — use it as a
+# reference when verifying these update rules against the released code.
+
 
 def apply_gradients(
     optimizer: Optimizer,
@@ -34,6 +38,9 @@ def apply_gradients(
 
 
 # TODO: ObGD, should it be a torch.optim.Optimizer subclass? or a functional approach? If we make it an Optimizer subclass should we try and do the same for the IDBD stuff? or the CBP?
+# Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/optim.py
+#   The authors' ObGD and AdaptiveObGD classes (with .step() and .td_step()) are the
+#   canonical implementation of this pseudocode — consult them for the exact update.
 """
 ObGD
 
@@ -333,8 +340,6 @@ class AdaptiveObGD(Optimizer):
       - The reference optim.py applies a bias correction v_hat = v / (1 - beta^step) when
         normalizing; this is NOT in paper Algorithm 11, so we follow the paper (no bias
         correction). Optionally match the reference.
-      - Our default beta is 0.99; the reference uses 0.999. TODO: match the reference for
-        parity.
       - API design: the reference keeps eligibility traces internally (constructor takes
         gamma, lamda, kappa) and exposes a single .step(); we intentionally split trace
         management into functional.traces + td_step(error, traces).
@@ -345,7 +350,7 @@ class AdaptiveObGD(Optimizer):
         params,
         lr: float = 1.0,
         scaling_factor: float = 1.0,
-        beta: float = 0.99,
+        beta: float = 0.999,
         eps: float = 1e-8,
     ):
         if lr < 0.0:

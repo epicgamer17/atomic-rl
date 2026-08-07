@@ -5,6 +5,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/action_selection.py
+#   The authors' action selection (argmax / epsilon-greedy / distribution sampling) is
+#   implemented there — consult it when aligning behavior with the released code.
+
+
 def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
     """
     Calculate expected values from a categorical distribution over a support.
@@ -31,9 +36,9 @@ def expected_value(predictions: torch.Tensor, support: torch.Tensor) -> torch.Te
         # Support is [N], broadcast to match [..., N]
         support = support.expand_as(probs)
     else:
-        assert (
-            support.shape == probs.shape
-        ), f"If support is not 1D, it must match predictions shape exactly. Got {support.shape}"
+        assert support.shape == probs.shape, (
+            f"If support is not 1D, it must match predictions shape exactly. Got {support.shape}"
+        )
 
     # Dot product over the atoms dimension
     values = (probs * support).sum(dim=-1)
@@ -86,6 +91,9 @@ def sample_distribution(
         A tuple containing:
             - The selected actions.
             - An info dictionary containing "log_prob".
+
+    Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/action_selection.py
+        See the authors' `sample_distribution` for their equivalent implementation.
     """
     if not explore:
         # Note: This is one of the rare cases where isinstance/hasattr is unavoidable.
@@ -120,6 +128,9 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
     Args:
         selector_fn (Callable): The function to use for action selection.
             Must return (actions [B, 1], info_dict).
+
+    Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/action_selection.py
+        See the authors' `argmax_selector` / epsilon-greedy for the reference behavior.
     """
 
     def epsilon_greedy_selector(
@@ -142,12 +153,14 @@ def with_epsilon_greedy(selector_fn: Callable) -> Callable:
             assert mask.shape == (
                 batch_size,
                 num_actions,
-            ), f"Mask shape {mask.shape} does not match expected ({batch_size}, {num_actions})"
+            ), (
+                f"Mask shape {mask.shape} does not match expected ({batch_size}, {num_actions})"
+            )
 
             # Fail Fast: Ensure no environment has zero valid actions
-            assert (
-                mask.sum(dim=-1) > 0
-            ).all(), "Encountered a mask where an environment has 0 valid actions."
+            assert (mask.sum(dim=-1) > 0).all(), (
+                "Encountered a mask where an environment has 0 valid actions."
+            )
 
             # Convert bool mask to probability weights (1.0 for valid, 0.0 for invalid)
             valid_weights = mask.to(predictions.dtype)

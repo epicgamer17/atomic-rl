@@ -17,9 +17,9 @@ def ema_update(
     Calculates the exponential moving average (EMA).
     Formula: (1 - alpha) * old_ema + alpha * new_value
     """
-    assert (
-        old_ema.shape == new_value.shape
-    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+    assert old_ema.shape == new_value.shape, (
+        f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+    )
 
     return (1.0 - alpha) * old_ema + alpha * new_value
 
@@ -31,9 +31,9 @@ def ema_update_(
     In-place exponential moving average (EMA).
     Formula: (1 - alpha) * old_ema + alpha * new_value
     """
-    assert (
-        old_ema.shape == new_value.shape
-    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+    assert old_ema.shape == new_value.shape, (
+        f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
+    )
 
     # Use optimized in-place kernels: old = old * (1-a) + new * a
     # This is rearranged for .add_ usage: old = old - a*old + a*new => old += a*(new - old)
@@ -204,6 +204,9 @@ def to_numpy_action(action_tensor: torch.Tensor) -> np.ndarray:
 # TODO: should this be inplace?
 # TODO: there is a tension between Gym which uses numpy and training loops which use torch. If this is to be used in a wrapper for the environment, then it should probably be numpy, but if we want to use it in simple training loops, torch is nicer.
 # TODO: Rename to sample mean var?
+# Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
+#   The authors' `SampleMeanVar` / `SampleMeanStd` implement the same running statistics
+#   used by the paper (Algorithm 5); consult them to verify this Welford update.
 def update_welford_stats(
     mean: torch.Tensor, sq_diff: torch.Tensor, count: torch.Tensor, batch: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
