@@ -33,6 +33,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import random
 from typing import List, Tuple
+from pathlib import Path
 
 from envs.mdp.random_walk import RandomWalkEnv
 from functional.td import semi_gradient_td_update_
@@ -265,7 +266,7 @@ def plot_results(
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    plot_path = f"/Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff/{filename}"
+    plot_path = str(Path(__file__).parent / filename)
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
     plt.show()

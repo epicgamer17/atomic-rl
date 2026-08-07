@@ -1,3 +1,4 @@
+# TODO: consider deleting — deprecated, unimported, excluded from wheel.
 # import numpy as np
 # from typing import Any, Tuple, Dict, SupportsFloat as float_t
 # import gymnasium as gym

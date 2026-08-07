@@ -20,7 +20,17 @@ import numpy as np
 import torch
 
 ETTM2_URL = "https://github.com/zhouhaoyi/ETDataset/raw/main/ETT-small/ETTm2.csv"
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "env_data")
+
+
+def _default_data_dir() -> str:
+    """Return a user cache dir for downloaded data (never inside the package)."""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache"
+    )
+    return os.path.join(base, "atomic-rl", "env_data")
+
+
+DATA_DIR = _default_data_dir()
 LOCAL_PATH = os.path.join(DATA_DIR, "ETTm2.csv")
 
 NUM_FEATURES = 7  # HUFL, HULL, MUFL, MULL, LUFL, LULL, OT

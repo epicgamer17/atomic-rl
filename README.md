@@ -9,6 +9,52 @@ A high-performance, researcher-centric Reinforcement Learning library for PyTorc
 
 ---
 
+## 📦 Installation
+
+```bash
+pip install atomic-rl
+```
+
+Or, to run the examples and experiments directly from a clone of this repository:
+
+```bash
+git clone https://github.com/epicgamer17/modular-rl.git
+cd modular-rl
+pip install -e ".[envs,examples,plot,test]"
+```
+
+## 🚀 Quickstart
+
+The library ships as three flat, top-level import packages: `functional` (pure mathematical primitives), `networks` (network building blocks), and `envs` (environments, streams, and wrappers).
+
+```python
+import torch
+from functional.initialization import layer_init, set_seed
+from functional.action_selection import argmax_selector, with_epsilon_greedy
+from functional.td import compute_v_td_target
+from networks.resnet import ResNetBlock
+
+set_seed(42)
+
+# One-step TD value targets: r + gamma * V(s') * (1 - done)
+next_values = torch.tensor([3.0, 4.0])
+rewards = torch.tensor([0.5, 1.0])
+terminated = torch.tensor([0.0, 1.0])
+gamma = torch.tensor([0.9, 0.9])
+targets = compute_v_td_target(next_values, rewards, terminated, gamma)
+# -> tensor([3.2, 1.0])
+
+# Greedy action selection with epsilon-greedy wrapper over Q-values [B, A]
+select = with_epsilon_greedy(argmax_selector)
+q_values = torch.randn(1, 4)
+actions, _ = select(predictions=q_values, epsilon=0.1, num_actions=4,
+                    generator=torch.Generator().manual_seed(0))
+```
+
+Complete, runnable algorithms (DQN, PPO, A2C, AlphaZero, MuZero, TD-learning, and more) live in the [`examples/`](examples/) directory.
+
+---
+
 ## 💡 The Philosophy: Resolving the RL Paradigm War
 
 Developing Reinforcement Learning algorithms typically forces researchers to choose between three flawed paradigms:

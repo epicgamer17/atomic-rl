@@ -1,3 +1,4 @@
+# TODO: consider deleting — deprecated, unimported, excluded from wheel.
 # from __future__ import annotations
 # from typing import Any
 # from collections import deque
