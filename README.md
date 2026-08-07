@@ -1,6 +1,7 @@
 [![Interactive Research Labs](https://img.shields.io/badge/Live_Demos-Interactive_Research_Labs-blue?style=for-the-badge&logo=flask)](https://kratzj.vercel.app/labs)
 [![Website](https://img.shields.io/badge/Website-kratzj.vercel.app-10b981?style=for-the-badge&logo=vercel)](https://kratzj.vercel.app)
-
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy_Me_A_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/epicgamer17)
+[![Patreon](https://img.shields.io/badge/Patreon-F1465A?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/epicgamer17)
 
 # Modular RL (Functional)
 
