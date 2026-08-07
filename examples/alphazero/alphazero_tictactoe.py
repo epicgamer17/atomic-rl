@@ -30,6 +30,8 @@ Differences in this Implementation:
       self-play collector, replay buffer, and baseline evaluation harness.
 
 NOTE: Focus of the library (when it comes to search based algos) is not on AlphaZero-like algorithms, but MuZero-like ones. This is here as a stepping stone for people looking to understand MuZero better, but in general I encourage you to look into model learned algorithms (like Dreamerv3, MuZero, etc.) over model given ones.
+
+TODO: some hyperparameter tuning. it works well, but still loses sometimes to a random bot, which i remember when i had muzero working on the older library never happened. I imagine alphazero should be better.
 """
 
 import copy
@@ -50,11 +52,14 @@ from pettingzoo.classic import tictactoe_v3
 # ---------------------------------------------------------------------------
 # Self-Play & MCTS Simulation Parameters
 TOTAL_TRAINING_STEPS = (
-    1000  # Total continuous training steps (1 SGD step per training loop)
+    10000  # Total continuous training steps (1 SGD step per training loop)
 )
-GAMES_PER_STEP = 1  # Self-play games generated per training step
+NUM_VECTOR_ENVS = 4  # Number of parallel vectorized self-play environments per step
 MIN_BUFFER_SIZE = 64  # Warmup buffer size before SGD optimization begins
-EVAL_INTERVAL = 50  # Evaluate vs Random agent every N training steps
+EVAL_INTERVAL = 100  # Evaluate vs Random agent every N training steps
+PARAM_SYNC_INTERVAL = (
+    100  # Sync actor network weights from learner network every N steps
+)
 NUM_MCTS_SIMULATIONS = 25
 
 # MCTS PUCT Search Constants (Silver et al., 2017/2018)
@@ -70,15 +75,15 @@ TEMPERATURE_EXPLOITATION = 0.0  # Temperature tau = 0.0 (greedy) for remaining m
 TEMPERATURE_EVAL = 0.0  # Temperature tau = 0.0 (greedy) for evaluation games
 
 # Optimization & Architecture Parameters
-BATCH_SIZE = 64
-REPLAY_BUFFER_CAPACITY = 5000
+BATCH_SIZE = 48
+REPLAY_BUFFER_CAPACITY = 10000
 LEARNING_RATE = 1e-3
 WEIGHT_DECAY = 1e-4  # L2 regularization weight decay c = 10^-4
-NUM_FILTERS = 16  # 16 filters per ResNet block
+NUM_FILTERS = 24  # 16 filters per ResNet block
 NUM_RES_BLOCKS = 6
 
 # Evaluation & Seed
-NUM_EVAL_GAMES = 50
+NUM_EVAL_GAMES = 100
 SEED = 42
 
 
@@ -711,11 +716,13 @@ def train_alphazero_tictactoe():
     torch.manual_seed(SEED)
     random.seed(SEED)
 
-    model = TicTacToeNet(num_filters=NUM_FILTERS, num_res_blocks=NUM_RES_BLOCKS).to(
-        device
-    )
+    learner_model = TicTacToeNet(
+        num_filters=NUM_FILTERS, num_res_blocks=NUM_RES_BLOCKS
+    ).to(device)
+    actor_model = copy.deepcopy(learner_model).to(device)
+
     optimizer = torch.optim.Adam(
-        model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+        learner_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
 
     # Initialize Replay Buffer
@@ -724,12 +731,13 @@ def train_alphazero_tictactoe():
     # Initialize W&B tracking
     wandb.init(
         project="alphazero-tictactoe",
-        name=f"alphazero_continuous_res{NUM_RES_BLOCKS}_f{NUM_FILTERS}_sims{NUM_MCTS_SIMULATIONS}",
+        name=f"alphazero_continuous_res{NUM_RES_BLOCKS}_f{NUM_FILTERS}_sims{NUM_MCTS_SIMULATIONS}_envs{NUM_VECTOR_ENVS}",
         config={
             "total_training_steps": TOTAL_TRAINING_STEPS,
-            "games_per_step": GAMES_PER_STEP,
+            "num_vector_envs": NUM_VECTOR_ENVS,
             "min_buffer_size": MIN_BUFFER_SIZE,
             "eval_interval": EVAL_INTERVAL,
+            "param_sync_interval": PARAM_SYNC_INTERVAL,
             "num_mcts_simulations": NUM_MCTS_SIMULATIONS,
             "c_puct": C_PUCT,
             "dirichlet_alpha": DIRICHLET_ALPHA,
@@ -749,7 +757,7 @@ def train_alphazero_tictactoe():
 
     print("\n--- Initial Evaluation (Random Weights) ---", flush=True)
     initial_eval = evaluate_vs_random(
-        model,
+        learner_model,
         num_games=NUM_EVAL_GAMES,
         num_simulations=NUM_MCTS_SIMULATIONS,
         device=device,
@@ -778,11 +786,11 @@ def train_alphazero_tictactoe():
     )
 
     for step in range(1, TOTAL_TRAINING_STEPS + 1):
-        # 1. Continuous Self-Play Data Collection (Paper-Faithful Asynchronous Flow)
+        # 1. Continuous Self-Play Data Collection using Actor Network
         new_samples = []
-        for _ in range(GAMES_PER_STEP):
+        for _ in range(NUM_VECTOR_ENVS):
             game_samples = run_self_play_game(
-                model, num_simulations=NUM_MCTS_SIMULATIONS, device=device
+                actor_model, num_simulations=NUM_MCTS_SIMULATIONS, device=device
             )
             new_samples.extend(game_samples)
 
@@ -791,7 +799,7 @@ def train_alphazero_tictactoe():
         if len(replay_buffer) < MIN_BUFFER_SIZE:
             continue
 
-        # 2. Continuous 1-Step Network SGD Optimization (Paper-Faithful)
+        # 2. Continuous 1-Step Network SGD Optimization on Learner Network
         minibatch = random.sample(replay_buffer, BATCH_SIZE)
         states = torch.stack([s["state"] for s in minibatch]).to(device)
         target_policies = torch.stack([s["target_policy"] for s in minibatch]).to(
@@ -799,7 +807,7 @@ def train_alphazero_tictactoe():
         )
         target_values = torch.stack([s["target_value"] for s in minibatch]).to(device)
 
-        policy_logits, predicted_value = model(states)
+        policy_logits, predicted_value = learner_model(states)
 
         loss, info = alphazero_loss(
             policy_logits=policy_logits,
@@ -811,6 +819,10 @@ def train_alphazero_tictactoe():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        # 3. Synchronize Actor Network weights from Learner Network periodically
+        if step % PARAM_SYNC_INTERVAL == 0:
+            actor_model.load_state_dict(learner_model.state_dict())
 
         # Log continuous step metrics to W&B
         log_dict = {
@@ -826,7 +838,7 @@ def train_alphazero_tictactoe():
         # 3. Periodic Evaluation against Random Baseline
         if step % EVAL_INTERVAL == 0 or step == TOTAL_TRAINING_STEPS:
             eval_metrics = evaluate_vs_random(
-                model,
+                learner_model,
                 num_games=NUM_EVAL_GAMES,
                 num_simulations=NUM_MCTS_SIMULATIONS,
                 device=device,
