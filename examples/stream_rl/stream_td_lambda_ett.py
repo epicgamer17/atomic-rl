@@ -9,14 +9,17 @@ The paper's ETT setup (Appendix F.1) and the reference code use plain ObGD
 (alpha=1, kappa=2); we deliberately keep AdaptiveObGD here so the update is
 scale-invariant via its EMA second moment.
 
-TODO (reference vs. paper):
-  - The reference implementation (github.com/mohmdelsayed/streaming-drl) uses plain
-    ObGD in stream_td.py; we match the paper's plain-ObGD ETT experiment only in the
-    hyperparameters (ALPHA=1, KAPPA=2) while using AdaptiveObGD for the update.
-  - The reference ETT environment min-max normalizes the cumulant (observation traces)
-    to [0, 1] before scaling the reward (see envs/streams/ett.py); the paper defines
-    the trace without that normalization and we follow the paper.
-  - Reference uses HIDDEN_SIZE=128 (we do too here); the other stream examples use 256.
+NOTE (reference vs. paper): We intentionally match the authors' released code
+(github.com/mohmdelsayed/streaming-drl) rather than the paper algorithms — a conscious
+and intentional decision.
+  - The reference ETT environment min-max normalizes the cumulant to [0, 1] and applies
+    a bias-corrected EMA trace before scaling the reward; we match that (see
+    envs/streams/ett.py).
+  - The reward scaling below mirrors the reference `SampleMeanStd` centered variance,
+    matching `envs/wrappers/normalization.py` `WelfordNormalizeReward`.
+  - Reference uses HIDDEN_SIZE=128 (we do too).
+  - Intentional divergence: the reference uses plain ObGD (alpha=1, kappa=2) in
+    stream_td.py; we deliberately keep AdaptiveObGD for the update.
 """
 
 import math
@@ -184,6 +187,7 @@ def run_full_pass(device: torch.device):
         obs_count = torch.tensor(0.0, device=device)
 
         rew_u = torch.tensor(0.0, device=device)
+        rew_mean = torch.tensor(0.0, device=device)
         rew_sq_diff = torch.tensor(1.0, device=device)
         rew_var = torch.tensor(1.0, device=device)
         rew_count = torch.tensor(0.0, device=device)
@@ -211,11 +215,12 @@ def run_full_pass(device: torch.device):
             )
             norm_next_obs = (next_obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
 
-            # 2. Scale reward via discounted Welford trace
+            # 2. Scale reward via discounted Welford trace (centered variance, matching
+            # the reference SampleMeanStd; see envs/wrappers/normalization.py)
             term_val = 1.0 if terminated else 0.0
             rew_u = GAMMA * (1.0 - term_val) * rew_u + reward
-            _, rew_sq_diff, rew_var, rew_count = update_welford_stats(
-                torch.zeros_like(rew_u),
+            rew_mean, rew_sq_diff, rew_var, rew_count = update_welford_stats(
+                rew_mean,
                 rew_sq_diff,
                 rew_count,
                 rew_u.unsqueeze(0),

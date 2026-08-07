@@ -30,13 +30,11 @@ dependencies = [
     "tensordict",
     "matplotlib",
     "pillow",
-    "imageio",
     "einops",
     "wandb",
     "tqdm",
     "pyyaml",
     "typing_extensions",
-    "pandas",
     "pygame",
 ]
 

@@ -2,19 +2,27 @@
 ETTm2 streaming prediction environment (Zhou et al. 2021).
 
 Yields (obs, target_cumulant) pairs where:
-  - obs is a 7-D tensor (6 load features + OT at t-1) with EMA memory traces
-  - target_cumulant is the oil temperature at the current timestep
+  - obs is a 7-D tensor (6 load features + raw OT at t-1) with bias-corrected EMA
+    memory traces
+  - target_cumulant is the min-max normalized oil temperature at the current timestep
 
-EMA memory traces: S_t = beta * S_{t-1} + (1 - beta) * O_t   (beta=0.999)
+EMA memory traces: S_t = beta * S_{t-1} + (1 - beta) * O_t   (beta=0.999),
+yielded as S_t / (1 - beta^count) (bias-corrected, matching the reference).
 GVF with gamma ~ 0.99 gives a ~100-step / 25-hour prediction horizon.
 
-TODO (reference vs. paper):
-  - The reference ETT environment (github.com/mohmdelsayed/streaming-drl, stream_td.py)
-    min-max normalizes the cumulant to [0, 1] before applying ScaleReward. We follow
-    the paper and yield the raw cumulant. Optionally match the reference for parity.
+NOTE (reference vs. paper): We intentionally match the authors' released code
+(https://github.com/mohmdelsayed/streaming-drl, stream_td.py) rather than the paper
+algorithms — a conscious and intentional decision.
+  - The reference ETT environment min-max normalizes the cumulant (oil temperature) to
+    [0, 1] before reward scaling; the paper defines the target on the raw cumulant
+    scale. We follow the reference. Note that the observation still carries the RAW OT
+    feature (column 6): the reference normalizes a copy of the last column
+    (original_cumulant) and leaves the OT column in the observation untouched, so we do
+    the same.
   - The reference ObservationTraces wrapper applies a bias-corrected EMA
-    (mean / (1 - beta^count)) when yielding the trace. The paper (Section 4.5) defines
-    the plain EMA trace S_t = beta * S_{t-1} + (1 - beta) * O_t, which we follow here.
+    (mean / (1 - beta^count)) when yielding the trace; the paper (Section 4.5) defines
+    the plain EMA trace S_t = beta * S_{t-1} + (1 - beta) * O_t. We follow the
+    reference's bias-corrected version.
 
 Data source: https://github.com/zhouhaoyi/ETDataset
 """
@@ -78,9 +86,10 @@ def make_ettm2_stream(
     """
     Yield (obs, cumulant) pairs from the ETTm2 dataset.
 
-    Each observation is a 7-D tensor of EMA memory traces.  The cumulant is the
-    raw OT (oil temperature) at the current step, which the agent should learn
-    to predict via a GVF with discount ``gamma``.
+    Each observation is a 7-D tensor of bias-corrected EMA memory traces over the raw
+    features (including the raw OT column).  The cumulant is the min-max normalized OT
+    (oil temperature) at the current step, which the agent should learn to predict via a
+    GVF with discount ``gamma``.
 
     Parameters
     ----------
@@ -102,18 +111,30 @@ def make_ettm2_stream(
     if stop is None:
         stop = data.shape[0]
 
+    # Min-max normalization of the cumulant (reference stream_td.py ETTEnvironment).
+    # The min/max are computed over the WHOLE series, matching the reference.
+    cum_raw = data[:, 6]
+    scaling_value = max(float(cum_raw.max() - cum_raw.min()), 1e-8)
+    add_value = float(cum_raw.min())
+
     # EMA memory traces (initialised to zero = first observation is just (1-beta)*O)
     traces = np.zeros(NUM_FEATURES, dtype=np.float64)
+    count = 0
 
     for t in range(start, stop):
         obs_t = data[t]  # [7]
         # Update EMA: S_t = beta * S_{t-1} + (1 - beta) * O_t
         traces = beta * traces + (1.0 - beta) * obs_t
 
-        # Cumulant = current oil temperature (column 6)
-        cumulant = obs_t[6]
+        # Bias-corrected EMA trace (reference ObservationTraces / Trace):
+        # yield S_t / (1 - beta^count).
+        count += 1
+        trace_out = traces / (1.0 - beta**count)
+
+        # Cumulant = min-max normalized oil temperature (column 6)
+        cumulant = (obs_t[6] - add_value) / scaling_value
 
         yield (
-            torch.as_tensor(traces, dtype=torch.float32, device=device),
+            torch.as_tensor(trace_out, dtype=torch.float32, device=device),
             torch.as_tensor(cumulant, dtype=torch.float32, device=device),
         )

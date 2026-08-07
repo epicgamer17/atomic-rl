@@ -266,7 +266,9 @@ def adaptive_obgd_update_(
     Args:
         theta (torch.Tensor): A parameter tensor of the network (modified in-place).
         grad (torch.Tensor): The gradient tensor for theta.
-        v (torch.Tensor): Second moment vector for theta.
+        v (torch.Tensor): Second moment vector for theta used for normalization.
+            To match the reference implementation, pass the bias-corrected
+            v_hat = v / (1 - beta^step) here.
         lr (float): Base step size (alpha).
         total_norm (float | torch.Tensor): The global L1 norm of normalized gradients ||g / sqrt(v + eps)||_1
             summed across the ENTIRE network.
@@ -304,7 +306,9 @@ def adaptive_obgd_td_update_(
         theta (torch.Tensor): A parameter tensor of the network (modified in-place).
         error (torch.Tensor): Scalar TD error (delta).
         trace (torch.Tensor): Eligibility trace tensor for theta (z_w).
-        v (torch.Tensor): Second moment vector for theta.
+        v (torch.Tensor): Second moment vector for theta used for normalization.
+            To match the reference implementation, pass the bias-corrected
+            v_hat = v / (1 - beta^step) here.
         lr (float): Base step size (alpha).
         total_norm (float | torch.Tensor): The global L1 norm of normalized traces ||z_w / sqrt(v + eps)||_1
             summed across the ENTIRE network.
@@ -331,18 +335,9 @@ class AdaptiveObGD(Optimizer):
     Adaptive Overshooting-bounded Gradient Descent (ObGD Adam).
     Implementation of Algorithm 11 (Appendix B) from Elsayed et al. (2024).
 
-    NOTE: The stream examples deliberately use this optimizer (AdaptiveObGD) over the
-    standard ObGD. The paper's ETT/AC setups (Appendix F.1) and the reference code use
-    plain ObGD (alpha=1, kappa=2); we chose AdaptiveObGD to keep the weight update
-    scale-invariant via the EMA second moment.
+    NOTE (reference vs. paper): We intentionally match the authors' released code (https://github.com/mohmdelsayed/streaming-drl/blob/main/src/optim.py) rather than the algorithm as written in the paper. The reference `AdaptiveObGD.step` applies a bias correction v_hat = v / (1 - beta^step) to the EMA second moment before normalizing; this correction is NOT in paper Algorithm 11. We follow the reference and apply it — a conscious and intentional decision for parity.
 
-    TODO (reference vs. paper):
-      - The reference optim.py applies a bias correction v_hat = v / (1 - beta^step) when
-        normalizing; this is NOT in paper Algorithm 11, so we follow the paper (no bias
-        correction). Optionally match the reference.
-      - API design: the reference keeps eligibility traces internally (constructor takes
-        gamma, lamda, kappa) and exposes a single .step(); we intentionally split trace
-        management into functional.traces + td_step(error, traces).
+    NOTE (intentional divergence from the reference): The reference keeps eligibility traces internally (constructor takes gamma, lamda, kappa) and exposes a single .step(); we intentionally split trace management into functional.traces + td_step(error, traces).
     """
 
     def __init__(
@@ -362,6 +357,9 @@ class AdaptiveObGD(Optimizer):
 
         defaults = dict(lr=lr, scaling_factor=scaling_factor, beta=beta, eps=eps)
         super().__init__(params, defaults)
+        self.counter = (
+            0  # bias-correction step counter (reference optim.py self.counter)
+        )
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -372,6 +370,8 @@ class AdaptiveObGD(Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
+
+        self.counter += 1
 
         device = next(
             (
@@ -402,8 +402,11 @@ class AdaptiveObGD(Optimizer):
                 # v <- beta * v + (1 - beta) * (grad)^2
                 v.mul_(beta).addcmul_(p.grad, p.grad, value=1.0 - beta)
 
-                # || grad / sqrt(v + eps) ||_1
-                adj_grad = p.grad / torch.sqrt(v + eps)
+                # Bias correction (reference optim.py): v_hat = v / (1 - beta^step).
+                v_hat = v / (1.0 - beta**self.counter)
+
+                # || grad / sqrt(v_hat + eps) ||_1
+                adj_grad = p.grad / torch.sqrt(v_hat + eps)
                 total_norm += torch.sum(torch.abs(adj_grad))
 
         for group in self.param_groups:
@@ -411,10 +414,12 @@ class AdaptiveObGD(Optimizer):
                 if p.grad is None:
                     continue
                 state = self.state[p]
+                beta = group["beta"]
+                v_hat = state["v"] / (1.0 - beta**self.counter)
                 adaptive_obgd_update_(
                     theta=p,
                     grad=p.grad,
-                    v=state["v"],
+                    v=v_hat,
                     lr=group["lr"],
                     scaling_factor=group["scaling_factor"],
                     total_norm=total_norm,
@@ -437,6 +442,8 @@ class AdaptiveObGD(Optimizer):
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
+
+        self.counter += 1
 
         def resolve_trace(p: torch.Tensor, idx: int):
             if isinstance(traces, Mapping):
@@ -474,8 +481,11 @@ class AdaptiveObGD(Optimizer):
                 semi_grad = error * trace
                 v.mul_(beta).addcmul_(semi_grad, semi_grad, value=1.0 - beta)
 
-                # || trace / sqrt(v + eps) ||_1
-                adj_trace = trace / torch.sqrt(v + eps)
+                # Bias correction (reference optim.py): v_hat = v / (1 - beta^step).
+                v_hat = v / (1.0 - beta**self.counter)
+
+                # || trace / sqrt(v_hat + eps) ||_1
+                adj_trace = trace / torch.sqrt(v_hat + eps)
                 total_norm += torch.sum(torch.abs(adj_trace))
 
         idx = 0
@@ -485,11 +495,13 @@ class AdaptiveObGD(Optimizer):
                 if trace is None:
                     continue
                 state = self.state[p]
+                beta = group["beta"]
+                v_hat = state["v"] / (1.0 - beta**self.counter)
                 adaptive_obgd_td_update_(
                     theta=p,
                     error=error,
                     trace=trace,
-                    v=state["v"],
+                    v=v_hat,
                     lr=group["lr"],
                     scaling_factor=group["scaling_factor"],
                     total_norm=total_norm,

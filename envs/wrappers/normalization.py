@@ -310,12 +310,16 @@ class WelfordNormalizeObservation(gym.ObservationWrapper):
 
 class WelfordNormalizeReward(gym.RewardWrapper):
     """
-    Single-environment reward scaling via discounted trace + Welford (Algorithm 5).
+    Single-environment reward scaling via discounted trace + Welford.
 
     Tracks ``rew_u = γ·(1 - t_mask)·rew_u + r``, maintains running statistics of
     ``rew_u`` via ``update_welford_stats``, and returns ``r / σ(rew_u)``.
     The termination mask ``t_mask`` zeros the trace on ``terminated or truncated``,
     replacing the separate ``u.zero_()`` step.
+
+    NOTE (reference vs. paper): We intentionally match the authors' released code
+    (streaming-drl normalization_wrappers.py `ScaleReward` + `SampleMeanStd`) rather
+    than paper Algorithm 5. See the note in ``step`` for how they differ.
 
     Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
         See the authors' `ScaleReward` (which composes a discounted trace `u` with
@@ -334,6 +338,7 @@ class WelfordNormalizeReward(gym.RewardWrapper):
         self.epsilon = epsilon
         self.device = device
         self.rew_u = torch.tensor(0.0, device=device)
+        self.rew_mean = torch.tensor(0.0, device=device)
         self.rew_sq_diff = torch.tensor(1.0, device=device)
         self.rew_var = torch.tensor(1.0, device=device)
         self.rew_count = torch.tensor(0.0, device=device)
@@ -345,30 +350,22 @@ class WelfordNormalizeReward(gym.RewardWrapper):
         reward_t = torch.as_tensor(raw_reward, dtype=torch.float32, device=self.device)
         self.rew_u = (self.gamma * (1.0 - t_mask) * self.rew_u) + reward_t
 
-        # NOTE: Paper Algorithm 5 (ScaleReward) hardcodes a zero mean when calling
-        # SampleMeanVar: SampleMeanVar(u, 0, p, n). So this wrapper computes a
-        # mean-zero second-moment scale (≈ sqrt(E[u^2])) for the discounted reward
-        # trace u, NOT a centered variance.
-        #
-        # TODO: The authors' released code (streaming-drl normalization_wrappers.py
-        # `SampleMeanStd`) instead tracks the true running mean and computes the
-        # centered variance Var(u) = E[(u - mean)^2] (still scaling only, not
-        # mean-centering the reward). This is a deliberate paper-vs-reference
-        # deviation: we follow paper Algorithm 5 (mean-zero second moment), while the
-        # reference uses the centered variance. The two differ whenever the reward
-        # trace has nonzero mean (e.g. Pendulum's all-negative rewards), where
-        # E[u^2] > Var(u) over-shrinks rewards. To match the reference behavior, track
-        # a persistent running mean (self.rew_mean) and pass it here instead of
-        # torch.zeros_like(...), e.g.:
-        #   self.rew_mean, self.rew_sq_diff, self.rew_var, self.rew_count = (
-        #       update_welford_stats(self.rew_mean, self.rew_sq_diff,
-        #                            self.rew_count, self.rew_u.unsqueeze(0))
-        #   )
-        _, self.rew_sq_diff, self.rew_var, self.rew_count = update_welford_stats(
-            torch.zeros_like(self.rew_u),
-            self.rew_sq_diff,
-            self.rew_count,
-            self.rew_u.unsqueeze(0),
+        # NOTE (reference vs. paper): We intentionally match the authors' released code
+        # (normalization_wrappers.py `SampleMeanStd`) rather than paper Algorithm 5.
+        # Paper Algorithm 5 hardcodes a zero mean — SampleMeanVar(u, 0, p, n) — giving a
+        # mean-zero second-moment scale (≈ sqrt(E[u^2])); the reference instead tracks
+        # the true running mean and computes the CENTERED variance Var(u) = E[(u-m)^2]
+        # (still scaling only, never mean-centering the reward). We follow the reference
+        # — a conscious and intentional decision. The two differ whenever the reward
+        # trace has a nonzero mean (e.g. Pendulum's all-negative rewards), where
+        # E[u^2] > Var(u) would otherwise over-shrink rewards.
+        self.rew_mean, self.rew_sq_diff, self.rew_var, self.rew_count = (
+            update_welford_stats(
+                self.rew_mean,
+                self.rew_sq_diff,
+                self.rew_count,
+                self.rew_u.unsqueeze(0),
+            )
         )
 
         scaled_reward = reward_t / torch.sqrt(self.rew_var + self.epsilon)

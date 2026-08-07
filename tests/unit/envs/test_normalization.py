@@ -124,3 +124,25 @@ def test_welford_normalize_reward_scales_by_sqrt_of_variance():
 
     expected = 2.0 / math.sqrt(env.rew_var.item() + env.epsilon)
     assert scaled == pytest.approx(expected)
+
+
+def test_welford_normalize_reward_tracks_running_mean():
+    """The wrapper tracks a persistent running mean of the discounted trace.
+
+    This matches the reference SampleMeanStd (centered variance), NOT paper
+    Algorithm 5's mean-zero second moment: a running mean is maintained instead of
+    hardcoding zero.
+    """
+    raw_env = DummySingleEnv()
+    env = WelfordNormalizeReward(raw_env, gamma=0.99, epsilon=1e-8)
+
+    raw_env.reward = 2.0
+    env.step(0.0)
+    assert env.rew_mean.item() == pytest.approx(2.0)  # first sample: mean = sample
+
+    raw_env.reward = 4.0
+    env.step(0.0)
+    u2 = 0.99 * 2.0 + 4.0  # 5.98
+    assert env.rew_u.item() == pytest.approx(u2)
+    # Running mean of [2.0, 5.98] == 3.99 (mean is NOT hardcoded to zero).
+    assert env.rew_mean.item() == pytest.approx(3.99, abs=1e-6)

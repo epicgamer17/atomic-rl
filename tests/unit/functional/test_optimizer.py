@@ -260,7 +260,7 @@ def test_obgd_step_no_grads_noop():
 
 
 def test_adaptive_obgd_td_step_basic():
-    """Verify second-moment accumulation and adaptive step calculation in AdaptiveObGD.td_step."""
+    """Verify second-moment accumulation, bias correction, and adaptive step in AdaptiveObGD.td_step."""
     from functional.optimizer import AdaptiveObGD
 
     p = nn.Parameter(torch.tensor([1.0, 2.0]))
@@ -276,11 +276,14 @@ def test_adaptive_obgd_td_step_basic():
     v_expected = torch.tensor([0.1, 0.4])
     torch.testing.assert_close(opt.state[p]["v"], v_expected)
 
-    # 2. Adjusted trace: trace / sqrt(v + eps)
-    adj_trace = trace / torch.sqrt(v_expected + 1e-8)
+    # 2. Bias correction (reference optim.py): v_hat = v / (1 - beta^step), step = 1 here.
+    v_hat = v_expected / (1.0 - 0.9**1)  # [1.0, 4.0]
+
+    # 3. Adjusted trace: trace / sqrt(v_hat + eps)
+    adj_trace = trace / torch.sqrt(v_hat + 1e-8)
     norm = torch.sum(torch.abs(adj_trace))  # total_norm
 
-    # 3. Step calculation
+    # 4. Step calculation
     M = 1.0 * 1.0 * 2.0 * norm  # lr * kappa * |error| * norm
     step = 1.0 / max(1.0, M.item())
 
@@ -289,7 +292,7 @@ def test_adaptive_obgd_td_step_basic():
 
 
 def test_adaptive_obgd_step_supervised():
-    """Verify supervised AdaptiveObGD.step updating parameters via second moments."""
+    """Verify supervised AdaptiveObGD.step updates parameters via bias-corrected second moments."""
     from functional.optimizer import AdaptiveObGD
 
     p = nn.Parameter(torch.tensor([3.0, -1.0]))
@@ -305,7 +308,10 @@ def test_adaptive_obgd_step_supervised():
     v_expected = torch.tensor([0.1, 0.4])
     torch.testing.assert_close(opt.state[p]["v"], v_expected)
 
-    adj_grad = g / torch.sqrt(v_expected + 1e-8)
+    # Bias correction (reference optim.py): v_hat = v / (1 - beta^step), step = 1 here.
+    v_hat = v_expected / (1.0 - 0.9**1)  # [1.0, 4.0]
+
+    adj_grad = g / torch.sqrt(v_hat + 1e-8)
     norm = torch.sum(torch.abs(adj_grad))
     M = 0.5 * 2.0 * norm
     step = 0.5 / max(1.0, M.item())

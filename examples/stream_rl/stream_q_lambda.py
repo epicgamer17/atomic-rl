@@ -15,13 +15,15 @@ NOTE: We chose to use AdaptiveObGD over the standard ObGD. The reference code
 (github.com/mohmdelsayed/streaming-drl) uses plain ObGD for all released stream
 algorithms, and the paper's DQN setup (Appendix F.1) uses plain ObGD as well.
 
-TODO (reference vs. paper):
-  - Reference stream_dqn.py uses plain ObGD (alpha=1, kappa=2); we use AdaptiveObGD
-    here by deliberate choice.
-  - Reference uses HIDDEN_SIZE=128; we use 256.
-  - Reward scaling: we follow paper Algorithm 5 (mean-zero second moment via
-    WelfordNormalizeReward); the reference SampleMeanStd uses the centered variance
-    (see envs/wrappers/normalization.py).
+NOTE (reference vs. paper): We intentionally match the authors' released code
+(github.com/mohmdelsayed/streaming-drl) rather than the paper algorithms — a conscious
+and intentional decision.
+  - HIDDEN_SIZE matches the reference (128).
+  - Reward scaling matches the reference `SampleMeanStd` centered variance via
+    `WelfordNormalizeReward` (see envs/wrappers/normalization.py); this differs from
+    paper Algorithm 5's mean-zero second moment.
+  - Intentional divergence from the reference: we use AdaptiveObGD (the reference
+    stream_dqn.py uses plain ObGD, alpha=1, kappa=2).
 """
 
 import math
@@ -65,7 +67,7 @@ LAMBDA = 0.8
 ALPHA = 1.0
 KAPPA_CRITIC = 2.0
 SPARSITY = 0.9
-HIDDEN_SIZE = 256
+HIDDEN_SIZE = 128  # matches the reference implementation
 MAX_STEPS = 200_000
 SEED = 42
 LOG_INTERVAL = 100

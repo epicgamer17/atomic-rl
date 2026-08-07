@@ -17,9 +17,9 @@ def ema_update(
     Calculates the exponential moving average (EMA).
     Formula: (1 - alpha) * old_ema + alpha * new_value
     """
-    assert old_ema.shape == new_value.shape, (
-        f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
-    )
+    assert (
+        old_ema.shape == new_value.shape
+    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
 
     return (1.0 - alpha) * old_ema + alpha * new_value
 
@@ -31,9 +31,9 @@ def ema_update_(
     In-place exponential moving average (EMA).
     Formula: (1 - alpha) * old_ema + alpha * new_value
     """
-    assert old_ema.shape == new_value.shape, (
-        f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
-    )
+    assert (
+        old_ema.shape == new_value.shape
+    ), f"EMA shape mismatch: {old_ema.shape} vs {new_value.shape}"
 
     # Use optimized in-place kernels: old = old * (1-a) + new * a
     # This is rearranged for .add_ usage: old = old - a*old + a*new => old += a*(new - old)
@@ -209,7 +209,7 @@ def to_numpy_action(action_tensor: torch.Tensor) -> np.ndarray:
 #   used by the paper (Algorithm 5); consult them to verify this Welford update.
 def update_welford_stats(
     mean: torch.Tensor, sq_diff: torch.Tensor, count: torch.Tensor, batch: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Pure mathematical update for running mean and variance using Welford's online algorithm.
 
@@ -250,6 +250,7 @@ def update_welford_stats(
 
 # TODO: where to put this?
 # TODO: kind of messy, untested, and very mountaincar specific (in respect to defaults and dimensionality)
+# TODO: does this belong as an env util function or something?
 def compute_tile_coding_features(
     state: np.ndarray,
     action: int,
@@ -261,7 +262,6 @@ def compute_tile_coding_features(
 ) -> torch.Tensor:
     """
     Computes a sparse binary feature vector phi(s, a) using tile coding.
-    Follows 'Documentation by Signature' and 'Fail Fast' by strictly enforcing shapes.
 
     According to the Stream RL paper, tile coding has been shown to reduce forgetting, as a form of "sparse initialization" but really sparse representation.
     """
