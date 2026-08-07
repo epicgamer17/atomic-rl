@@ -276,8 +276,8 @@ def test_adaptive_obgd_td_step_basic():
     v_expected = torch.tensor([0.1, 0.4])
     torch.testing.assert_close(opt.state[p]["v"], v_expected)
 
-    # 2. Adjusted trace: trace / (sqrt(v) + eps)
-    adj_trace = trace / (torch.sqrt(v_expected) + 1e-8)
+    # 2. Adjusted trace: trace / sqrt(v + eps)
+    adj_trace = trace / torch.sqrt(v_expected + 1e-8)
     norm = torch.sum(torch.abs(adj_trace))  # total_norm
 
     # 3. Step calculation
@@ -305,7 +305,7 @@ def test_adaptive_obgd_step_supervised():
     v_expected = torch.tensor([0.1, 0.4])
     torch.testing.assert_close(opt.state[p]["v"], v_expected)
 
-    adj_grad = g / (torch.sqrt(v_expected) + 1e-8)
+    adj_grad = g / torch.sqrt(v_expected + 1e-8)
     norm = torch.sum(torch.abs(adj_grad))
     M = 0.5 * 2.0 * norm
     step = 0.5 / max(1.0, M.item())

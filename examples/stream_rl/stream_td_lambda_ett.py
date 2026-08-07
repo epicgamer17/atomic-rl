@@ -3,6 +3,20 @@ Stream TD(λ) — streaming temporal-difference learning on the ETTm2 dataset.
 
 Recreates the prediction results of Elsayed, Vasan & Mahmood (2024):
 "Streaming Deep Reinforcement Learning Finally Works" (arXiv:2410.14606).
+
+NOTE: We chose to use AdaptiveObGD over the standard ObGD for the weight update.
+The paper's ETT setup (Appendix F.1) and the reference code use plain ObGD
+(alpha=1, kappa=2); we deliberately keep AdaptiveObGD here so the update is
+scale-invariant via its EMA second moment.
+
+TODO (reference vs. paper):
+  - The reference implementation (github.com/mohmdelsayed/streaming-drl) uses plain
+    ObGD in stream_td.py; we match the paper's plain-ObGD ETT experiment only in the
+    hyperparameters (ALPHA=1, KAPPA=2) while using AdaptiveObGD for the update.
+  - The reference ETT environment min-max normalizes the cumulant (observation traces)
+    to [0, 1] before scaling the reward (see envs/streams/ett.py); the paper defines
+    the trace without that normalization and we follow the paper.
+  - Reference uses HIDDEN_SIZE=128 (we do too here); the other stream examples use 256.
 """
 
 import math
@@ -180,7 +194,9 @@ def run_full_pass(device: torch.device):
         norm_obs = (obs_0 - obs_mean) / torch.sqrt(obs_var + 1e-8)
 
         # Run through the sequence step-by-step
-        for t in tqdm(range(T - 1), desc=f"Trial {run_idx+1}/{NUM_RUNS}", leave=False):
+        for t in tqdm(
+            range(T - 1), desc=f"Trial {run_idx + 1}/{NUM_RUNS}", leave=False
+        ):
             obs = obs_tensor[t]
             next_obs = obs_tensor[t + 1]
             reward = cum_tensor[t + 1]
