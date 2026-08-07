@@ -32,6 +32,8 @@ Differences in this Implementation:
 NOTE: Focus of the library (when it comes to search based algos) is not on AlphaZero-like algorithms, but MuZero-like ones. This is here as a stepping stone for people looking to understand MuZero better, but in general I encourage you to look into model learned algorithms (like Dreamerv3, MuZero, etc.) over model given ones.
 
 TODO: some hyperparameter tuning. it works well, but still loses sometimes to a random bot, which i remember when i had muzero working on the older library never happened. I imagine alphazero should be better.
+
+TODO: training on a similarly sized model takes way longer than it did before. figure out why and how the current system can be improved and optimized to run faster. a training run used to take about 20 minutes for 20k steps on MuZero with 3 Resnet blocks per component and 24 filters each, batch size 8, 25 simulations, 3 torch mp actor processes, and batched mcts with a search batch size of 5, also unroll of 5. now its well over an hour, probably over 2 with the alphazero params which should be faster in terms of wall clock time. on mac on cpu
 """
 
 import copy
@@ -393,15 +395,9 @@ def run_self_play_game(
         root_visits = tree["children_visits"][0, 0]  # [9]
 
         # Target policy for Neural Network loss is ALWAYS regular visit count distribution (tau = 1.0)
-        raw_target_policy = get_mcts_visit_policy(
+        target_policy = get_mcts_visit_policy(
             root_visits.unsqueeze(0), temperature=1.0
         ).squeeze(0)
-        target_policy = torch.where(action_mask, raw_target_policy, 0.0)
-        policy_sum = target_policy.sum()
-        if policy_sum > 0:
-            target_policy = target_policy / policy_sum
-        else:
-            target_policy = action_mask.float() / action_mask.float().sum()
 
         # Action selection temperature schedule (tau = 1.0 for first N moves, tau = 0.0 thereafter)
         temp = (
@@ -412,12 +408,6 @@ def run_self_play_game(
         action_policy = get_mcts_visit_policy(
             root_visits.unsqueeze(0), temperature=temp
         ).squeeze(0)
-        action_policy = torch.where(action_mask, action_policy, 0.0)
-        action_sum = action_policy.sum()
-        if action_sum > 0:
-            action_policy = action_policy / action_sum
-        else:
-            action_policy = action_mask.float() / action_mask.float().sum()
 
         # Sample action using functional.action_selection helpers
         if temp > 0.0:
@@ -513,6 +503,7 @@ def evaluate_vs_random(
             legal_actions = action_mask.nonzero(as_tuple=False).squeeze(-1).tolist()
 
             if player == az_player:
+
                 def expansion_fn(embeddings):
                     with torch.no_grad():
                         canonical_x = embeddings_to_canonical(embeddings)
@@ -533,16 +524,14 @@ def evaluate_vs_random(
                     dynamics_fn=tictactoe_dynamics_fn,
                     root_to_play=torch.tensor([player], device=device),
                     pb_c_init=C_PUCT,
-                    dirichlet_epsilon=DIRICHLET_EPSILON,
+                    dirichlet_epsilon=0.0,
                 )
 
                 root_visits = tree["children_visits"][0, 0]
-                raw_policy = get_mcts_visit_policy(
+                action_policy = get_mcts_visit_policy(
                     root_visits.unsqueeze(0), temperature=TEMPERATURE_EVAL
                 ).squeeze(0)
-
-                target_policy = torch.where(action_mask, raw_policy, 0.0)
-                action_idx_tensor, _ = argmax_selector(target_policy.unsqueeze(0))
+                action_idx_tensor, _ = argmax_selector(action_policy.unsqueeze(0))
                 action_idx = action_idx_tensor.squeeze().item()
             else:
                 action_idx = random.choice(legal_actions)

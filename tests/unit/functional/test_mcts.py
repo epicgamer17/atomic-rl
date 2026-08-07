@@ -53,7 +53,7 @@ def test_puct_score_assertion():
     q_values = torch.tensor([[1.0, 2.0]])
     priors_invalid = torch.tensor([[0.5, 0.8]])  # Sums to 1.3
     visits = torch.tensor([[0, 0]])
-    total_visits = 0
+    total_visits = torch.tensor([[0]])
     min_q = torch.tensor([0.0])
     max_q = torch.tensor([2.0])
 
@@ -71,7 +71,7 @@ def test_puct_score_mathematical_correctness():
     q_values = torch.tensor([[2.0, 6.0]])
     priors = torch.tensor([[0.4, 0.6]])
     visits = torch.tensor([[1.0, 3.0]])
-    total_visits = torch.tensor([4.0])
+    total_visits = torch.tensor([[4.0]])
 
     # Static min/max to ensure predictable normalization output:
     # Action 0: (2.0 - 0.0) / 8.0 = 0.25
@@ -105,7 +105,7 @@ def test_puct_score_zero_prior_guard():
     q_values = torch.tensor([[10.0, 5.0]])
     priors = torch.tensor([[0.0, 1.0]])  # Action 0 masked (prior=0)
     visits = torch.tensor([[0, 0]])
-    total_visits = torch.tensor([0])
+    total_visits = torch.tensor([[0]])
     min_q = torch.tensor([0.0])
     max_q = torch.tensor([10.0])
 
@@ -350,3 +350,39 @@ def test_select_leaf_deterministic_path():
     assert node_step_2.item() == 2
     assert action_step_2.item() == 0
     assert mask_step_2.item() is True
+
+
+def test_mcts_search_dirichlet_noise_illegal_move_masking():
+    """Verify that root Dirichlet noise does not leak prior probability into illegal actions."""
+    root_embed = torch.zeros(1, 4)
+
+    # expansion_fn masks action 1 as illegal (logit -1e9)
+    def expansion_fn(embeds):
+        logits = torch.tensor([[2.0, -1e9, 1.0]])
+        values = torch.tensor([0.5])
+        return logits, values
+
+    def dummy_dynamics_fn(embeds, actions):
+        next_embeds = torch.zeros_like(embeds)
+        rewards = torch.zeros(1)
+        next_to_play = torch.zeros(1, dtype=torch.long)
+        is_terminal = torch.zeros(1, dtype=torch.bool)
+        return next_embeds, rewards, next_to_play, is_terminal
+
+    tree = mcts_search(
+        root_embeddings=root_embed,
+        num_simulations=20,
+        num_actions=3,
+        expansion_fn=expansion_fn,
+        dynamics_fn=dummy_dynamics_fn,
+        dirichlet_epsilon=0.5,
+        dirichlet_alpha=0.3,
+    )
+
+    # 1. Action 1 prior at root must be strictly 0.0 (masked Dirichlet noise)
+    assert tree["children_prior"][0, 0, 1].item() == 0.0
+
+    # 2. Action 1 must have received 0 visits during search
+    assert tree["children_visits"][0, 0, 1].item() == 0.0
+    assert tree["children_visits"][0, 0, 0].item() + tree["children_visits"][0, 0, 2].item() == 20
+

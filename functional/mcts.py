@@ -7,6 +7,7 @@ from .utils import add_dirichlet_noise
 # TODO: remember we eventually want gumbel sequential halving and possibly other search methods too.
 # TODO: dont hard code dirichlet params, pass em in as optional arguments
 # TODO: avoid flags like is_zero_sum
+# TODO: is there a better way to do masking than what we are doing, which is somewhat heuristic based.
 def mcts_search(
     root_embeddings: torch.Tensor,
     num_simulations: int,
@@ -49,9 +50,12 @@ def mcts_search(
     policy_logits, _ = expansion_fn(root_embeddings)
     priors = torch.softmax(policy_logits, dim=-1)
 
-    # 3. Add Dirichlet Noise (Root exploration)
+    # 3. Add Dirichlet Noise (Root exploration, masked to legal actions only)
     if dirichlet_epsilon > 0:
-        priors = add_dirichlet_noise(priors, dirichlet_epsilon, dirichlet_alpha)
+        root_legal_mask = priors > 1e-8
+        priors = add_dirichlet_noise(
+            priors, dirichlet_epsilon, dirichlet_alpha, mask=root_legal_mask
+        )
 
     tree["children_prior"][:, 0] = priors
 
@@ -204,7 +208,18 @@ def puct_score(
         pb_c_base: Base constant for PUCT.
         pb_c_init: Additive constant for PUCT (used for virtual exploration).
     """
-    # 1. Fail Fast: Ensure policy prior is normalized (sums to 1)
+    # 1. Fail Fast: Ensure shape contracts match expected [B, num_actions] and [B, 1] dimensions
+    assert (
+        q_values.shape == policy_prior.shape
+    ), f"q_values shape {q_values.shape} must match policy_prior shape {policy_prior.shape}"
+    assert (
+        q_values.shape == visit_counts.shape
+    ), f"q_values shape {q_values.shape} must match visit_counts shape {visit_counts.shape}"
+    assert (
+        total_visit_counts.shape[:-1] == q_values.shape[:-1]
+    ), f"total_visit_counts batch shape {total_visit_counts.shape[:-1]} must match q_values batch shape {q_values.shape[:-1]}"
+
+    # Ensure policy prior is normalized (sums to 1)
     assert torch.allclose(
         policy_prior.sum(dim=-1),
         torch.ones_like(policy_prior.sum(dim=-1)),
@@ -214,6 +229,7 @@ def puct_score(
     tot_visits_t = torch.as_tensor(
         total_visit_counts, dtype=q_values.dtype, device=q_values.device
     )
+
     pb_c = torch.log((tot_visits_t + pb_c_base + 1) / pb_c_base) + pb_c_init
     pb_c = pb_c * (torch.sqrt(tot_visits_t) / (visit_counts + 1))
 
@@ -263,7 +279,7 @@ def select_leaf(
         q_values = tree["children_q_values"][batch_range, current_node]
         priors = tree["children_prior"][batch_range, current_node]
         visits = tree["children_visits"][batch_range, current_node]
-        total_visits = visits.sum(dim=-1)
+        total_visits = visits.sum(dim=-1, keepdim=True)
 
         # 2. Calculate PUCT scores
         scores = puct_score(

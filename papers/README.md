@@ -4,7 +4,7 @@ This directory maintains a mapping between the research papers in this folder an
 
 ### Missing / Future Work:
 - **Distributional Rainbow (IQN/QR-DQN)**: While C51 is implemented, modern distributional methods like Implicit Quantile Networks (IQN) or Quantile Regression DQN (QR-DQN) are currently missing.
-- **R2D2**: While the core building blocks (recurrent unrolling, burn-in) are available in `functional/network.py` and DRQN is implemented, a full R2D2 agent with prioritized sequences and overlapping burn-in is still pending.
+- **R2D2**: [r2d2.pdf](r2d2.pdf). While the core building blocks (recurrent unrolling, burn-in) are available in `functional/network.py` and DRQN is implemented, a full R2D2 agent with prioritized sequences and overlapping burn-in is still pending.
 - **NGU / Agent 57**: Never Give Up and Agent 57.
 - **IMPALA**: High-throughput distributed AC.
 - **TRPO** (Schulman et al., 2015): Folder exists in `examples/trpo/` but is currently empty.
@@ -15,9 +15,10 @@ This directory maintains a mapping between the research papers in this folder an
 - **EfficientZero**: [efficientzero.pdf](efficientzero.pdf). Sample efficient offline MuZero variant. Possible improvements on MuZero.
 - **Efficient Zero V2**: [efficientzero_v2.pdf](efficientzero_v2.pdf). V2 of EfficientZero. 
 - **MuZero Unplugged**: [muzero_unplugged.pdf](muzero_unplugged.pdf). Offline MuZero.
-- **Sampled MuZero ** [sampled_muzero.pdf](sampled_muzero.pdf). MuZero for Continuous and complex action spaces.
+- **Sampled MuZero**: [sampled_muzero.pdf](sampled_muzero.pdf). MuZero for Continuous and complex action spaces.
 - **SkyNet**: MuZero on partially observable information and multi agent uncertainty 
-- **ROSMO**: better muzero unplugged (for stochastic games I think)
+- **ROSMO**: [rosmo.pdf](rosmo.pdf). better muzero unplugged (for stochastic games I think)
+- **Muesli**: Combining improvements in policy gradient methods.
 - **AdaGain**: [adagain.pdf](adagain.pdf). An improvement on AutoStep (I think).
 - **MetaOptimize**: [metaoptimize.pdf](metaoptimize.pdf).
 - **ReDO**
@@ -26,7 +27,6 @@ This directory maintains a mapping between the research papers in this folder an
 - **Horde**: [AlbertaPlan.pdf](AlbertaPlan.pdf) related.
 - **NFSP**: Implementation exists in `experiments/rainbow-nfsp/` but is not yet a standardized example.
 - **Related Work From Stream RL Paper**: TODO: go through the related work section and add them to the list here. Then implement them. They discuss relevant IDBD methods, loss of plasticity methods, sparse representation methods, other stream RL related papers, etc. All useful to stream RL and the Alberta Plan.
-
 - **Tuning Free Step Size Adaptation**: introduces TIDBD
 - **JEPA** (Maybe)
 - **GNN** 
@@ -77,7 +77,7 @@ This directory maintains a mapping between the research papers in this folder an
 - **Divide and Conquer Monte Carlo Tree Search for Goal Directed Planning**
 - **Plan2Explore** 
 - **Player of Games**
-- **Stream Deep RL Finally Works** (Mohamed Elsayed 2024)
+- **Stream Deep RL Finally Works** (Mohamed Elsayed 2024): [stream_rl.pdf](stream_rl.pdf). Implemented in `examples/stream_rl/` and `functional/optimizer.py`.
 - **Emphatic TD**
 - **Temporal Abstraction in TD Networks** 
 - **Between MDPs and Semi-MDPs: Learning, Planning, and Representing Knowledge at Multiple Temporal Scales** (Maybe read more) (LONG)
@@ -110,9 +110,6 @@ This directory maintains a mapping between the research papers in this folder an
 
     - Section 16.1 to 16.8: Applications and Case-Studies
     - Section 17.1 to 17.6: Frontiers 
-    
-
-
 
 ### Missing Features (TODO Find Papers):
 For Agent 57, we are missing:
@@ -148,6 +145,8 @@ For Agent 57, we are missing:
 - Hindsight Experience Replay (Against Alberta Plan)
 - Online Normalization like alberta plan ( $\tilde{x}_{t}^{i}\doteq\frac{x_{t}^{i}-\mu_{t}^{i}}{\sigma_{t}^{i}}$) $\mu_t^i$ and $\sigma_t^i$ must be tracking estimates—like an Exponential Moving Average (EMA)—that heavily discount the distant past so the normalization adapts quickly to new distributions
 
+---
+
 ## DQN & Extensions
 
 | Paper | PDF | Implementation | Location | Notes |
@@ -178,23 +177,24 @@ For Agent 57, we are missing:
 
 ---
 
-## MuZero / AlphaZero
+## MuZero & AlphaZero
 
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **AlphaZero** (Silver et al., 2017) | [alphazero.pdf](alphazero.pdf) | Partial | `functional/mcts.py` | Core MCTS logic is implemented and vectorized. |
-| **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Partial | `functional/mcts.py` | Core MCTS logic implemented; dynamics/representation examples pending. |
+| **AlphaZero** (Silver et al., 2017) | [alphazero.pdf](alphazero.pdf) | Done | `examples/alphazero/alphazero_tictactoe.py`, `functional/mcts.py` | Vectorized MCTS with PUCT action selection, Dirichlet noise, and policy-value head joint learning. |
+| **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Done | `examples/muzero/muzero_tictactoe.py`, `examples/muzero/muzero_cartpole.py`, `functional/mcts.py` | Model-based RL using learned representation, dynamics, and prediction networks with recurrent MCTS unrolling. Work in progress at the moment, some details pending. |
 
 ---
 
-## Continual Learning & Meta-Optimization (The Alberta Plan)
+## Stream RL, Continual Learning & Meta-Optimization (The Alberta Plan)
 
-This repo heavily focuses on the **Alberta Plan** (Sutton et al., 2022) and the building blocks of continual, online learning.
+This repository heavily focuses on the **Alberta Plan** (Sutton et al., 2022) and streaming, non-stationary online reinforcement learning.
 
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **Alberta Plan** (Sutton et al., 2022) | [AlbertaPlan.pdf](AlbertaPlan.pdf) / [Report](AlbertaPlanReport.pdf) | Building Blocks | `functional/plasticity.py` | Serves as the philosophical guide for the `functional/` module. |
 Step 1: ___ ?
+| **Stream Deep RL** (Elsayed et al., 2024) | [stream_rl.pdf](stream_rl.pdf) | Done | `examples/stream_rl/`, `functional/optimizer.py` | Implements Stream AC(λ), Stream Q(λ), and Early Temporal Termination (ETT) with Adaptive ObGD optimizers. |
 | **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [autostep.pdf](autostep.pdf) | Done | `functional/meta_optimization.py` | Meta-gradient learning rates. Reproduced in `examples/meta_optimization/`. |
 | **K1 / K2 Algorithms** | [idbd_b.pdf](idbd_b.pdf) | Done | `functional/meta_optimization.py` | O(n) approximations of the Kalman Filter for adaptive step-sizes. |
 Step 2: ___ ?
@@ -206,7 +206,7 @@ Step 2: ___ ?
 
 ## Temporal Difference Learning & Gradient TD
 
-Core temporal credit assignment and gradient-based TD methods for linear function approximation.
+Core temporal credit assignment and gradient-based TD methods for linear and function approximation settings.
 
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
@@ -222,7 +222,6 @@ Core temporal credit assignment and gradient-based TD methods for linear functio
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **Ape-X** (Horgan et al., 2018) | [ape-x.pdf](ape-x.pdf) | Done | `examples/dqn/ape_x/` | Parallel actors with central prioritized buffer using Ray. |
-| **MuZero Unplugged** (2021) | [muzero_unplugged.pdf](muzero_unplugged.pdf) | Partial | `experiments/catan/` | Data collection and offline training patterns. |
 
 ---
 
@@ -237,11 +236,12 @@ Core temporal credit assignment and gradient-based TD methods for linear functio
 | **True Online Traces** | [true_online_td.pdf](true_online_td.pdf) | Sutton & van Seijen (2014) | `functional/traces.py` |
 | **Loss Functions** | - | Various | `functional/losses.py` |
 | **Replay Buffers** | - | Various | `functional/replay_buffer.py` |
+| **Optimizers (ObGD)** | [stream_rl.pdf](stream_rl.pdf) | Elsayed et al. (2024) | `functional/optimizer.py` |
 
-
+---
 
 ### PRUNED (Not planned but were before)
 - **MAML** - I think its episodic so not very applicable to Alberta Plan. Trying to make my Meta Learning many Alberta Plan based 
 - **ANIL** - I think its episodic so not very applicable to Alberta Plan. Trying to make my Meta Learning many Alberta Plan based 
 - **GoExplore** - Requires saving simulator states and teleporting back to them to explore. Again against Alberta Plan and my general philosophy.
-- **Oﬀ-Policy Temporal-Diﬀerence Learning with Function Approximation** - Not technically implemented. Generally speaking n step importance sampling not used, and only 1 step is used along with TDC which is what we have.
+- **Off-Policy Temporal-Difference Learning with Function Approximation** - Not technically implemented. Generally speaking n step importance sampling not used, and only 1 step is used along with TDC which is what we have.
