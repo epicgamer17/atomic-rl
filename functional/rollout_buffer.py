@@ -4,7 +4,6 @@ from tensordict import TensorDict
 from typing import Tuple, Callable, List, Optional, Union
 from dataclasses import dataclass, field
 import numpy as np
-from einops import rearrange
 
 
 @dataclass
@@ -75,8 +74,7 @@ def get_rollout_next_values(
         truncated_steps = buffer.data["truncated"].bool().nonzero(as_tuple=False)
         if truncated_steps.numel() > 0:
             expected_records = {
-                (int(step), int(env_idx))
-                for env_idx, step in truncated_steps
+                (int(step), int(env_idx)) for env_idx, step in truncated_steps
             }
             actual_records = {
                 (int(step), int(env_idx))
@@ -94,13 +92,13 @@ def get_rollout_next_values(
 
     # Explicitly add the time dimension (dim=1) since last_values represents a single timestep
     last_values = last_values.unsqueeze(1)
-    
-    assert (
-        last_values.ndim == values.ndim
-    ), f"Shape mismatch: last_values.ndim ({last_values.ndim}) != values.ndim ({values.ndim}). Ensure last_values matches the feature dimensions of values."
-    assert (
-        last_values.shape[2:] == values.shape[2:]
-    ), f"Feature dimensions mismatch: last_values {last_values.shape[2:]} vs values {values.shape[2:]}"
+
+    assert last_values.ndim == values.ndim, (
+        f"Shape mismatch: last_values.ndim ({last_values.ndim}) != values.ndim ({values.ndim}). Ensure last_values matches the feature dimensions of values."
+    )
+    assert last_values.shape[2:] == values.shape[2:], (
+        f"Feature dimensions mismatch: last_values {last_values.shape[2:]} vs values {values.shape[2:]}"
+    )
 
     # next_values[b, t] should be values[b, t+1] for t < T-1, and last_values[b] for t = T-1
     next_values = torch.cat([values[:, 1:], last_values], dim=1)
@@ -110,9 +108,9 @@ def get_rollout_next_values(
         with torch.inference_mode():
             # get_value_fn must return a tensor shaped [N, *FeatureDims]
             v_patch = get_value_fn(obs_batch)
-            assert (
-                v_patch.shape[1:] == values.shape[2:]
-            ), f"v_patch feature shape {v_patch.shape[1:]} does not match values feature shape {values.shape[2:]}"
+            assert v_patch.shape[1:] == values.shape[2:], (
+                f"v_patch feature shape {v_patch.shape[1:]} does not match values feature shape {values.shape[2:]}"
+            )
 
         for i, (step, env_idx, _) in enumerate(buffer.truncation_records):
             next_values[env_idx, step] = v_patch[i]
@@ -133,9 +131,9 @@ def yield_shuffled_minibatches(
     Yields shuffled minibatches from a flattened TensorDict.
     Used in PPO, SAC, Behaviour Cloning, and Offline RL (Efficient Zero, MuZero Unplugged, etc).
     """
-    assert (
-        len(batch.batch_size) == 1
-    ), f"Expected 1D batched data, got {batch.batch_size}. Call flatten() first."
+    assert len(batch.batch_size) == 1, (
+        f"Expected 1D batched data, got {batch.batch_size}. Call flatten() first."
+    )
 
     total_size = batch.batch_size[0]
     indices = torch.randperm(total_size, generator=generator, device=batch.device)
@@ -171,12 +169,12 @@ def yield_sequential_minibatches(
         mb_flat: Flattened TensorDict of shape [steps * envs_per_batch, ...]
         (mb_initial_h, mb_initial_c): Initial LSTM states for the selected environments.
     """
-    assert (
-        num_envs % num_minibatches == 0
-    ), f"num_envs ({num_envs}) must be divisible by num_minibatches ({num_minibatches}) for LSTM PPO"
-    assert (
-        len(buffer_data.batch_size) == 2
-    ), f"Expected [envs, steps] data, got {buffer_data.batch_size}."
+    assert num_envs % num_minibatches == 0, (
+        f"num_envs ({num_envs}) must be divisible by num_minibatches ({num_minibatches}) for LSTM PPO"
+    )
+    assert len(buffer_data.batch_size) == 2, (
+        f"Expected [envs, steps] data, got {buffer_data.batch_size}."
+    )
 
     envs_per_batch = num_envs // num_minibatches
 
@@ -201,11 +199,10 @@ def yield_sequential_minibatches(
         steps = mb_data.batch_size[1]
 
         # 3. Flatten the sequence and environment dimensions to [steps * envs_per_batch, ...]
-        # We use "b t ... -> (t b) ..." so that when reshaped to (T, B), it stays sequential
+        # We use time-major order (t b) so that when reshaped to (T, B), it stays sequential
         # Output shape: [T * B_per_batch, ...]
-        # NOTE: einops doesn't support TensorDict directly, so we use .apply()
         mb_flat = mb_data.apply(
-            lambda x: rearrange(x, "b t ... -> (t b) ..."),
+            lambda x: x.transpose(0, 1).reshape(steps * envs_per_batch, *x.shape[2:]),
             batch_size=[steps * envs_per_batch],
         )
 

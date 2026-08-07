@@ -11,7 +11,6 @@ from typing import Tuple
 import numpy as np
 import random
 import wandb
-from einops import rearrange
 
 from functional.action_selection import sample_distribution
 from functional.optimizer import apply_gradients
@@ -103,10 +102,11 @@ class ActorCriticLSTM(nn.Module):
 
         # Recover Sequence and Batch dimensions
         batch_size = lstm_state[0].shape[1]
+        T = hidden.shape[0] // batch_size
 
         # [seq_len * batch, features] -> [batch, seq_len, features]
-        hidden = rearrange(hidden, "(t b) f -> b t f", b=batch_size)
-        dones = rearrange(dones, "(t b) -> b t", b=batch_size)
+        hidden = hidden.reshape(T, batch_size, -1).transpose(0, 1)
+        dones = dones.reshape(T, batch_size).transpose(0, 1)
 
         # Unroll LSTM with state resets on 'done' steps
         new_hidden_sequence, lstm_state = unroll_rnn(
@@ -114,7 +114,9 @@ class ActorCriticLSTM(nn.Module):
         )
 
         # Re-flatten back to [seq_len * batch, features]
-        new_hidden_sequence = rearrange(new_hidden_sequence, "b t f -> (t b) f")
+        new_hidden_sequence = new_hidden_sequence.transpose(0, 1).reshape(
+            -1, self.lstm.hidden_size
+        )
 
         return (
             self.actor(new_hidden_sequence),

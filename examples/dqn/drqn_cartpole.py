@@ -19,7 +19,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import wandb
-from einops import rearrange
 from tensordict import TensorDict
 
 from functional.action_selection import (
@@ -100,7 +99,7 @@ class RecurrentDQN(nn.Module):
         # (B, T, ObsDim) -> (B*T, HiddenSize)
         flat_obs = obs_sequence.flatten(0, 1)
         features = self.feature_extractor(flat_obs)
-        features = rearrange(features, "(b t) h -> b t h", b=batch_size, t=seq_len)
+        features = features.view(batch_size, seq_len, -1)
 
         # lstm_out: (B, T, HiddenSize)
         lstm_out, new_hidden_state = self.lstm(features, hidden_state)

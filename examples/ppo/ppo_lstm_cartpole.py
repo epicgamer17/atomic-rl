@@ -8,8 +8,6 @@ from typing import Tuple, List, Optional, Callable
 import numpy as np
 import random
 import wandb
-from einops import rearrange
-from functools import partial
 from tensordict import TensorDict
 
 from functional.action_selection import sample_distribution
@@ -177,9 +175,9 @@ class ActorCriticLSTM(nn.Module):
         critic_hidden = self.critic_feature_extractor(x)
 
         # Prepare for LSTM: [T*B, F] -> [B, T, F]
-        actor_hidden = rearrange(actor_hidden, "(t b) f -> b t f", b=B, t=T)
-        critic_hidden = rearrange(critic_hidden, "(t b) f -> b t f", b=B, t=T)
-        mb_dones = rearrange(dones, "(t b) -> b t", b=B, t=T)
+        actor_hidden = actor_hidden.reshape(T, B, -1).transpose(0, 1)
+        critic_hidden = critic_hidden.reshape(T, B, -1).transpose(0, 1)
+        mb_dones = dones.reshape(T, B).transpose(0, 1)
 
         # Unroll LSTMs
         actor_hidden_seq, (actor_h, actor_c) = unroll_rnn(
@@ -190,8 +188,12 @@ class ActorCriticLSTM(nn.Module):
         )
 
         # Re-flatten: [B, T, F] -> [T*B, F]
-        actor_hidden_seq = rearrange(actor_hidden_seq, "b t f -> (t b) f")
-        critic_hidden_seq = rearrange(critic_hidden_seq, "b t f -> (t b) f")
+        actor_hidden_seq = actor_hidden_seq.transpose(0, 1).reshape(
+            -1, self.actor_lstm.hidden_size
+        )
+        critic_hidden_seq = critic_hidden_seq.transpose(0, 1).reshape(
+            -1, self.critic_lstm.hidden_size
+        )
 
         logits = self.actor_head(actor_hidden_seq)
         value = self.critic_head(critic_hidden_seq)

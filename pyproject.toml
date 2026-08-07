@@ -29,8 +29,6 @@ dependencies = [
     "gymnasium",
     "tensordict",
     "matplotlib",
-    "pillow",
-    "einops",
     "wandb",
     "tqdm",
     "pyyaml",
