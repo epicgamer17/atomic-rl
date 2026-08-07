@@ -272,11 +272,11 @@ def test_adaptive_obgd_td_step_basic():
     p_before = p.clone()
     opt.td_step(error=error, traces={p: trace})
 
-    # 1. Check second moment v: (1 - 0.9) * ([0.5, 1.0])^2 = 0.1 * [0.25, 1.0] = [0.025, 0.1]
-    v_expected = torch.tensor([0.025, 0.1])
+    # 1. Check second moment v: (1 - 0.9) * (error * trace)^2 = 0.1 * (2.0 * [0.5, 1.0])^2 = 0.1 * [1.0, 4.0] = [0.1, 0.4]
+    v_expected = torch.tensor([0.1, 0.4])
     torch.testing.assert_close(opt.state[p]["v"], v_expected)
 
-    # 2. Adjusted trace: trace / (sqrt(v) + eps) = [0.5 / sqrt(0.025), 1.0 / sqrt(0.1)]
+    # 2. Adjusted trace: trace / (sqrt(v) + eps)
     adj_trace = trace / (torch.sqrt(v_expected) + 1e-8)
     norm = torch.sum(torch.abs(adj_trace))  # total_norm
 

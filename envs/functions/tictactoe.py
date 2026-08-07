@@ -1,6 +1,8 @@
 from typing import Tuple
 import torch
 
+# TODO: this folder is kind of a utils folder, maybe rename it to that.
+
 
 def check_tictactoe_winner(board: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -84,7 +86,7 @@ def tictactoe_dynamics_fn(
     next_embeddings[..., 0] = board
     next_embeddings[..., 1] = next_to_play.view(-1, 1, 1).expand(-1, 3, 3).float()
 
-    next_legal_mask = (board.view(batch_size, -1) == 0)
+    next_legal_mask = board.view(batch_size, -1) == 0
 
     return next_embeddings, reward, next_to_play, is_terminal, next_legal_mask
 
