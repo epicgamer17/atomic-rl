@@ -6,10 +6,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from functional.utils import (
-    normalize_features,
-    update_welford_stats,
-)
+from functional.utils import update_welford_stats
 
 
 class RunningMeanStd:
@@ -271,7 +268,7 @@ class WelfordNormalizeObservation(gym.ObservationWrapper):
     """
     Single-environment observation normalization using Welford's online algorithm.
 
-    Backed by ``update_welford_stats`` and ``normalize_features`` from
+    Backed by ``update_welford_stats`` from
     ``functional.utils`` so that examples share a single canonical implementation.
     """
 
@@ -285,19 +282,21 @@ class WelfordNormalizeObservation(gym.ObservationWrapper):
         self.epsilon = epsilon
         self.device = device
         self.obs_mean = torch.zeros(*self.observation_space.shape, device=device)
-        self.obs_m2 = torch.zeros(*self.observation_space.shape, device=device)
+        self.obs_sq_diff = torch.ones(*self.observation_space.shape, device=device)
+        self.obs_var = torch.ones(*self.observation_space.shape, device=device)
         self.obs_count = torch.tensor(0.0, device=device)
 
     def observation(self, observation: np.ndarray) -> np.ndarray:
         obs_t = torch.as_tensor(
             observation, dtype=torch.float32, device=self.device
         ).unsqueeze(0)
-        self.obs_mean, self.obs_m2, self.obs_count = update_welford_stats(
-            self.obs_mean, self.obs_m2, self.obs_count, obs_t
+        self.obs_mean, self.obs_sq_diff, self.obs_var, self.obs_count = (
+            update_welford_stats(self.obs_mean, self.obs_sq_diff, self.obs_count, obs_t)
         )
-        normalized = normalize_features(
-            obs_t, self.obs_mean, self.obs_m2, self.obs_count, self.epsilon
+        normalized = (obs_t - self.obs_mean.unsqueeze(0)) / torch.sqrt(
+            self.obs_var.unsqueeze(0) + self.epsilon
         )
+
         return normalized.squeeze(0).cpu().numpy()
 
 
@@ -323,8 +322,8 @@ class WelfordNormalizeReward(gym.RewardWrapper):
         self.epsilon = epsilon
         self.device = device
         self.rew_u = torch.tensor(0.0, device=device)
-        self.rew_mean = torch.tensor(0.0, device=device)
-        self.rew_sq_diff = torch.tensor(0.0, device=device)
+        self.rew_sq_diff = torch.tensor(1.0, device=device)
+        self.rew_var = torch.tensor(1.0, device=device)
         self.rew_count = torch.tensor(0.0, device=device)
 
     def step(self, action):
@@ -334,11 +333,30 @@ class WelfordNormalizeReward(gym.RewardWrapper):
         reward_t = torch.as_tensor(raw_reward, dtype=torch.float32, device=self.device)
         self.rew_u = (self.gamma * (1.0 - t_mask) * self.rew_u) + reward_t
 
-        self.rew_mean, self.rew_sq_diff, self.rew_count = update_welford_stats(
-            self.rew_mean, self.rew_sq_diff, self.rew_count, self.rew_u.unsqueeze(0)
+        # NOTE: Paper Algorithm 5 (ScaleReward) hardcodes a zero mean when calling
+        # SampleMeanVar: SampleMeanVar(u, 0, p, n). So this wrapper computes a
+        # mean-zero second-moment scale (≈ sqrt(E[u^2])) for the discounted reward
+        # trace u, NOT a centered variance.
+        #
+        # TODO: The authors' released code (streaming-drl normalization_wrappers.py
+        # `SampleMeanStd`) instead tracks the true running mean and computes the
+        # centered variance Var(u) = E[(u - mean)^2] (still scaling only, not
+        # mean-centering the reward). The two differ whenever the reward trace has
+        # nonzero mean (e.g. Pendulum's all-negative rewards), where E[u^2] > Var(u)
+        # over-shrinks rewards. To match the reference behavior, track a persistent
+        # running mean (self.rew_mean) and pass it here instead of
+        # torch.zeros_like(...), e.g.:
+        #   self.rew_mean, self.rew_sq_diff, self.rew_var, self.rew_count = (
+        #       update_welford_stats(self.rew_mean, self.rew_sq_diff,
+        #                            self.rew_count, self.rew_u.unsqueeze(0))
+        #   )
+        _, self.rew_sq_diff, self.rew_var, self.rew_count = update_welford_stats(
+            torch.zeros_like(self.rew_u),
+            self.rew_sq_diff,
+            self.rew_count,
+            self.rew_u.unsqueeze(0),
         )
 
-        unbiased_var = self.rew_sq_diff / torch.clamp(self.rew_count - 1.0, min=1.0)
-        scaled_reward = reward_t / torch.sqrt(unbiased_var + self.epsilon)
+        scaled_reward = reward_t / torch.sqrt(self.rew_var + self.epsilon)
 
         return obs, scaled_reward.cpu().item(), terminated, truncated, info

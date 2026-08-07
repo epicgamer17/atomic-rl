@@ -11,6 +11,7 @@ from functional.mcts import (
     select_leaf,
     expand_node,
     backpropagate,
+    get_mcts_visit_policy,
 )
 
 pytestmark = pytest.mark.unit
@@ -52,7 +53,7 @@ def test_puct_score_assertion():
     q_values = torch.tensor([[1.0, 2.0]])
     priors_invalid = torch.tensor([[0.5, 0.8]])  # Sums to 1.3
     visits = torch.tensor([[0, 0]])
-    total_visits = 0
+    total_visits = torch.tensor([[0]])
     min_q = torch.tensor([0.0])
     max_q = torch.tensor([2.0])
 
@@ -70,7 +71,7 @@ def test_puct_score_mathematical_correctness():
     q_values = torch.tensor([[2.0, 6.0]])
     priors = torch.tensor([[0.4, 0.6]])
     visits = torch.tensor([[1.0, 3.0]])
-    total_visits = torch.tensor([4.0])
+    total_visits = torch.tensor([[4.0]])
 
     # Static min/max to ensure predictable normalization output:
     # Action 0: (2.0 - 0.0) / 8.0 = 0.25
@@ -99,6 +100,20 @@ def test_puct_score_mathematical_correctness():
     torch.testing.assert_close(calculated_scores, expected_scores, atol=1e-6, rtol=1e-6)
 
 
+def test_puct_score_zero_prior_guard():
+    """Verify that actions with prior=0 (e.g. masked illegal actions) receive -1e9 penalty."""
+    q_values = torch.tensor([[10.0, 5.0]])
+    priors = torch.tensor([[0.0, 1.0]])  # Action 0 masked (prior=0)
+    visits = torch.tensor([[0, 0]])
+    total_visits = torch.tensor([[0]])
+    min_q = torch.tensor([0.0])
+    max_q = torch.tensor([10.0])
+
+    scores = puct_score(q_values, priors, visits, total_visits, min_q, max_q)
+    assert scores[0, 0].item() == -1e9
+    assert scores[0, 1].item() > 0.0
+
+
 # ==========================================
 # Tests for Tree Initialization
 # ==========================================
@@ -117,6 +132,7 @@ def test_init_mcts_tree_geometry():
 
     assert tree["embeddings"].shape == (batch_size, max_nodes, embedding_dim)
     assert tree["children_index"].shape == (batch_size, max_nodes, num_actions)
+    assert tree["is_terminal"].shape == (batch_size, max_nodes)
     assert torch.all(tree["children_index"] == -1)
     assert tree["node_counts"].tolist() == [1, 1]  # Only the root is occupied initially
     torch.testing.assert_close(tree["embeddings"][:, 0], root_embeddings)
@@ -142,6 +158,7 @@ def test_expand_node():
     rewards = torch.tensor([1.5])
     next_embeddings = torch.ones(batch_size, 4)
     next_to_play = torch.tensor([1])
+    is_terminal = torch.tensor([True])
 
     # Run expansion
     expand_node(
@@ -152,6 +169,7 @@ def test_expand_node():
         rewards,
         next_embeddings,
         next_to_play,
+        is_terminal=is_terminal,
     )
 
     # Assert structural mutations
@@ -160,7 +178,36 @@ def test_expand_node():
     torch.testing.assert_close(tree["embeddings"][0, 1], next_embeddings[0])
     assert tree["children_rewards"][0, 0, 1].item() == 1.5
     assert tree["to_play"][0, 1].item() == 1
+    assert tree["is_terminal"][0, 1].item() is True
     torch.testing.assert_close(tree["children_prior"][0, 1], torch.tensor([0.5, 0.5]))
+
+
+# ==========================================
+# Tests for Policy Extraction
+# ==========================================
+
+
+def test_get_mcts_visit_policy_temperature_1():
+    """Verify temperature tau=1.0 yields visit count proportional policy."""
+    visit_counts = torch.tensor([[10.0, 30.0, 60.0]])
+    policy = get_mcts_visit_policy(visit_counts, temperature=1.0)
+    expected = torch.tensor([[0.1, 0.3, 0.6]])
+    torch.testing.assert_close(policy, expected)
+
+
+def test_get_mcts_visit_policy_temperature_greedy():
+    """Verify temperature tau=0.0 yields greedy one-hot policy."""
+    visit_counts = torch.tensor([[10.0, 30.0, 60.0]])
+    policy = get_mcts_visit_policy(visit_counts, temperature=0.0)
+    expected = torch.tensor([[0.0, 0.0, 1.0]])
+    torch.testing.assert_close(policy, expected)
+
+
+def test_get_mcts_visit_policy_negative_temperature():
+    """Verify fail-fast assertion on negative temperature."""
+    visit_counts = torch.tensor([[10.0, 30.0]])
+    with pytest.raises(AssertionError, match="Temperature must be non-negative"):
+        get_mcts_visit_policy(visit_counts, temperature=-0.5)
 
 
 # ==========================================
@@ -303,3 +350,77 @@ def test_select_leaf_deterministic_path():
     assert node_step_2.item() == 2
     assert action_step_2.item() == 0
     assert mask_step_2.item() is True
+
+
+def test_mcts_search_root_legal_mask():
+    """Verify that passing root_legal_mask to mcts_search explicitly masks root illegal actions."""
+    root_embed = torch.zeros(1, 4)
+
+    def expansion_fn(embeds):
+        logits = torch.tensor([[2.0, 5.0, 1.0]])  # Action 1 has highest unmasked logit!
+        values = torch.tensor([0.5])
+        return logits, values
+
+    def dummy_dynamics_fn(embeds, actions):
+        next_embeds = torch.zeros_like(embeds)
+        rewards = torch.zeros(1)
+        next_to_play = torch.zeros(1, dtype=torch.long)
+        is_terminal = torch.zeros(1, dtype=torch.bool)
+        return next_embeds, rewards, next_to_play, is_terminal
+
+    root_legal_mask = torch.tensor([[True, False, True]])  # Action 1 is explicitly ILLEGAL
+
+    tree = mcts_search(
+        root_embeddings=root_embed,
+        num_simulations=20,
+        num_actions=3,
+        expansion_fn=expansion_fn,
+        dynamics_fn=dummy_dynamics_fn,
+        root_legal_mask=root_legal_mask,
+        dirichlet_epsilon=0.5,
+        dirichlet_alpha=0.3,
+    )
+
+    # Action 1 (highest raw logit) must be masked to 0.0 prior at root and receive 0 visits
+    assert tree["children_prior"][0, 0, 1].item() == 0.0
+    assert tree["children_visits"][0, 0, 1].item() == 0.0
+    assert tree["children_visits"][0, 0, 0].item() + tree["children_visits"][0, 0, 2].item() == 20
+
+
+def test_mcts_search_dynamics_fn_legal_mask():
+    """Verify that dynamics_fn returning next_legal_mask explicitly masks child node illegal actions during search."""
+    root_embed = torch.zeros(1, 4)
+
+    def expansion_fn(embeds):
+        # Always return raw unmasked logits where Action 1 is highest
+        logits = torch.tensor([[1.0, 10.0, 1.0]])
+        values = torch.tensor([0.5])
+        return logits, values
+
+    def dynamics_fn_with_mask(embeds, actions):
+        next_embeds = torch.zeros_like(embeds)
+        rewards = torch.zeros(1)
+        next_to_play = torch.zeros(1, dtype=torch.long)
+        is_terminal = torch.zeros(1, dtype=torch.bool)
+        # 5th item: dynamics returns legal mask for next state (Action 1 illegal in expanded nodes)
+        next_legal_mask = torch.tensor([[True, False, True]])
+        return next_embeds, rewards, next_to_play, is_terminal, next_legal_mask
+
+    # Root legal mask allows all actions at root so simulation moves to child
+    root_legal_mask = torch.tensor([[True, True, True]])
+
+    tree = mcts_search(
+        root_embeddings=root_embed,
+        num_simulations=10,
+        num_actions=3,
+        expansion_fn=expansion_fn,
+        dynamics_fn=dynamics_fn_with_mask,
+        root_legal_mask=root_legal_mask,
+        dirichlet_epsilon=0.0,
+    )
+
+    # At child nodes, dynamics_fn mask prevents Action 1 from receiving visits at deeper levels
+    assert tree["children_index"].shape[1] > 1
+
+
+

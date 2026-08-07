@@ -42,6 +42,7 @@ from functional.utils import (
     to_numpy_action,
 )
 from envs.wrappers import FireResetEnv
+from networks import AtariCNN
 from tensordict import TensorDict
 
 # Constants
@@ -69,19 +70,8 @@ torch.manual_seed(SEED)
 class ActorCriticLSTM(nn.Module):
     def __init__(self, num_actions: int):
         super().__init__()
-        # Explicit feature extraction (Nature CNN)
-        # Source: Mnih et al. (2015)
-        self.network = nn.Sequential(
-            layer_init(nn.Conv2d(4, 32, 8, stride=4)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, 4, stride=2)),
-            nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, 3, stride=1)),
-            nn.ReLU(),
-            layer_init(nn.Flatten()),
-            layer_init(nn.Linear(64 * 7 * 7, 512)),
-            nn.ReLU(),
-        )
+        # Nature CNN feature extractor from networks layer
+        self.network = AtariCNN(in_channels=4, out_features=512, scale_inputs=False)
 
         # 2. LSTM Layer
         self.lstm = nn.LSTM(512, 128)

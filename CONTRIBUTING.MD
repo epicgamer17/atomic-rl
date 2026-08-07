@@ -75,9 +75,12 @@ These examples are meant to be illustrative and should be used as a reference fo
 These examples should be as CLEAN as possible, and should be well documented. They should be written in a way that is easy to understand, and they should be easy to modify.
 Each algorithm example should include notes on the paper its based off of. The notes should roughly cover the papers goal, what it is trying to solve, what it achieves, what the key ideas are, the reason those ideas/contributions help solve the problem/achieve the goal, and the math behind the algorithm (roughly). it should also include notes on what was done differently than the paper (if anything) and why. ie why its needed, why its wanted, and why it works, intuitively and mathematically (briefly).
 Should follow best practices of this library and ideally libraries it uses. Should include notes on on design decisions, different options/architectures, and design trade-offs. Things like "we use mc returns for this example but any XYZ could be used for the algorithm" or "we compute n step at ingestion instead of on rollout since..." 
+If running a single discrete action space actions should be cast to ints (otherwise they will have a batch dimension). If running a single continuous action space actions should be flattened (again to remove the batch dim). This is because our functions require a batch dimension, but gym internal logic can silently break with a single batch dim of 1.
 
 *networks/*
 This layer contains the neural network architectures used in the examples.
+Should contain common network components (like resnets, transformers, etc.) but networks "orchestration" should be left in the example files.
+All components should make their behaviour clear. It should not be possible for a architectural decision to be hidden behind a network component, for example pre or post activations etc, unless clearly documented in the docstring.
 
 *envs/* 
 This layer contains the environments used in the examples.
@@ -93,3 +96,15 @@ Essentially the goal here is to provide reusable "environments" that can be used
 These tend to be based of experiments from papers, but they don't have to be. For example the Permuted MNIST. 
 Wrappers for environments should be included here as well. Things like some of the wrappers for gym environments used in PPO for Atari. 
 By default if possible existing gym envs etc should be used instead of creating new ones. But if an env doesn't exist or needs to be modified for a specific purpose (e.g. for an algorithm), then it should be included here.
+The envs/functions folder should include helper functions for envs. Things like hand-coded dynamics functions, etc. 
+
+--- 
+
+Rough file structure: 
+1. 1 file per feature
+2. 1 folder per concept/field 
+3. semantic structure of folder (parent folders represent broader concepts, child folders represent more specific concepts, files represent the "atomic" implementations of a concept)
+
+If done well, folders should almost exist as their own packages. Users can import the env package, or the optimizers package, or the optimizer.metaoptimization package, depending on their field of research or interest. They should be able to look at the file structure and immediately understand what is in the library. 
+
+It should be easy conceptually to find where the code for a specific feature lives, without needing to understand the algorithms that use it. In other words, the user doesn't need to know that algorithm X uses feature Q, and that paper introduced the feature, so they should look there. They can say I'm looking for this feature, which belongs to this concept and find the feature. 

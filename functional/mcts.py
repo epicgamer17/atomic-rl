@@ -1,6 +1,6 @@
 import torch
 from tensordict import TensorDict
-from typing import Tuple, Callable, List
+from typing import Tuple, Callable, List, Optional
 from .utils import add_dirichlet_noise
 
 
@@ -12,13 +12,14 @@ def mcts_search(
     num_simulations: int,
     num_actions: int,
     expansion_fn: Callable,  # Returns (policy_logits, value)
-    dynamics_fn: Callable,  # Returns (next_embedding, reward)
+    dynamics_fn: Callable,  # Returns (next_embedding, reward) or (next_embedding, reward, next_to_play) or (next_embedding, reward, next_to_play, is_terminal) or (next_embedding, reward, next_to_play, is_terminal, next_legal_mask)
     pb_c_base: float = 19652,
     pb_c_init: float = 1.25,
     gamma: float = 0.99,
     dirichlet_epsilon: float = 0.25,
     dirichlet_alpha: float = 0.3,
     root_to_play: torch.Tensor = None,
+    root_legal_mask: Optional[torch.Tensor] = None,
 ) -> TensorDict:
     """
     Orchestrates a batched MCTS search.
@@ -34,6 +35,8 @@ def mcts_search(
         gamma: Discount factor for rewards.
         dirichlet_epsilon: Weight of Dirichlet noise at the root.
         dirichlet_alpha: Concentration parameter for Dirichlet noise.
+        root_to_play: Optional initial player array [B].
+        root_legal_mask: Optional explicit boolean mask [B, num_actions] of legal actions at the root environment state.
     """
     device = root_embeddings.device
     batch_size = root_embeddings.shape[0]
@@ -46,11 +49,23 @@ def mcts_search(
 
     # 2. Initial Evaluation (Root)
     policy_logits, _ = expansion_fn(root_embeddings)
+    if root_legal_mask is None:
+        import warnings
+        warnings.warn(
+            "root_legal_mask was not provided to mcts_search. Illegal actions at the root will not be masked during search or Dirichlet noise calculation.",
+            UserWarning,
+            stacklevel=2,
+        )
+    else:
+        policy_logits = torch.where(root_legal_mask, policy_logits, -1e9)
+
     priors = torch.softmax(policy_logits, dim=-1)
 
-    # 3. Add Dirichlet Noise (Root exploration)
+    # 3. Add Dirichlet Noise (Root exploration, using explicit legal action mask)
     if dirichlet_epsilon > 0:
-        priors = add_dirichlet_noise(priors, dirichlet_epsilon, dirichlet_alpha)
+        priors = add_dirichlet_noise(
+            priors, dirichlet_epsilon, dirichlet_alpha, mask=root_legal_mask
+        )
 
     tree["children_prior"][:, 0] = priors
 
@@ -61,13 +76,26 @@ def mcts_search(
         # The expansion happens at the end of the trajectory
         parent_nodes, actions_taken = trajectory[-1][0], trajectory[-1][1]
 
-        # B. Dynamics (MuZero style): Transition to next state
-        next_embeddings, rewards, next_to_play = dynamics_fn(
+        # B. Dynamics (MuZero style / Simulator): Transition to next state
+        dyn_output = dynamics_fn(
             tree["embeddings"][batch_range, parent_nodes], actions_taken
         )
+        next_legal_mask = None
+        if len(dyn_output) == 5:
+            next_embeddings, rewards, next_to_play, is_terminal, next_legal_mask = dyn_output
+        elif len(dyn_output) == 4:
+            next_embeddings, rewards, next_to_play, is_terminal = dyn_output
+        else:
+            next_embeddings, rewards, next_to_play = dyn_output
+            is_terminal = root_embeddings.new_zeros(batch_size, dtype=torch.bool)
 
         # C. Expansion & Evaluation: Predict policy and value for the leaf
         policy_logits, value = expansion_fn(next_embeddings)
+        if next_legal_mask is not None:
+            policy_logits = torch.where(next_legal_mask, policy_logits, -1e9)
+
+        # For terminal states, value should be 0.0 (terminal state has no future expected return)
+        value = torch.where(is_terminal, torch.zeros_like(value), value)
 
         # D. Expand Tree: Add the new node
         expand_node(
@@ -78,6 +106,7 @@ def mcts_search(
             rewards,
             next_embeddings,
             next_to_play,
+            is_terminal=is_terminal,
         )
 
         # E. Backpropagation: Update value/visit counts up the trajectory
@@ -98,7 +127,6 @@ def init_mcts_tree(
         root_embeddings: Initial state representations [B, D]
         num_simulations: Number of simulations to perform.
         num_actions: Number of possible actions.
-        device: The device to store the tree on.
 
     Returns:
         A TensorDict representing the initial tree state.
@@ -132,6 +160,9 @@ def init_mcts_tree(
             "node_counts": root_embeddings.new_ones(batch_size, dtype=torch.long),
             "to_play": root_embeddings.new_zeros(
                 batch_size, max_nodes, dtype=torch.long
+            ),
+            "is_terminal": root_embeddings.new_zeros(
+                (batch_size, max_nodes), dtype=torch.bool
             ),
             "min_q": root_embeddings.new_full((batch_size,), 1e9),
             "max_q": root_embeddings.new_full((batch_size,), -1e9),
@@ -192,25 +223,37 @@ def puct_score(
         pb_c_base: Base constant for PUCT.
         pb_c_init: Additive constant for PUCT (used for virtual exploration).
     """
-    # 1. Fail Fast: Ensure policy prior is normalized (sums to 1)
+    # 1. Fail Fast: Ensure shape contracts match expected [B, num_actions] and [B, 1] dimensions
+    assert (
+        q_values.shape == policy_prior.shape
+    ), f"q_values shape {q_values.shape} must match policy_prior shape {policy_prior.shape}"
+    assert (
+        q_values.shape == visit_counts.shape
+    ), f"q_values shape {q_values.shape} must match visit_counts shape {visit_counts.shape}"
+    assert (
+        total_visit_counts.shape[:-1] == q_values.shape[:-1]
+    ), f"total_visit_counts batch shape {total_visit_counts.shape[:-1]} must match q_values batch shape {q_values.shape[:-1]}"
+
+    # Ensure policy prior is normalized (sums to 1)
     assert torch.allclose(
         policy_prior.sum(dim=-1),
         torch.ones_like(policy_prior.sum(dim=-1)),
         atol=1e-5,
     ), "Policy prior must be normalized (sum to 1) for PUCT calculation."
 
-    pb_c = (
-        torch.log((q_values.new_tensor(total_visit_counts) + pb_c_base + 1) / pb_c_base)
-        + pb_c_init
+    tot_visits_t = torch.as_tensor(
+        total_visit_counts, dtype=q_values.dtype, device=q_values.device
     )
-    pb_c = pb_c * (
-        torch.sqrt(q_values.new_tensor(total_visit_counts)) / (visit_counts + 1)
-    )
+
+    pb_c = torch.log((tot_visits_t + pb_c_base + 1) / pb_c_base) + pb_c_init
+    pb_c = pb_c * (torch.sqrt(tot_visits_t) / (visit_counts + 1))
 
     # MuZero: Normalize Q-values to [0, 1] before adding the PUCT term
     normalized_q = normalize_q_values(q_values, min_q, max_q)
+    raw_puct = normalized_q + pb_c * policy_prior
 
-    return normalized_q + pb_c * policy_prior
+    # Zero-prior guard: Actions with 0 prior (e.g. masked illegal actions) receive -1e9 penalty
+    return torch.where(policy_prior > 0, raw_puct, raw_puct.new_tensor(-1e9))
 
 
 # TODO: work with Batched MCTS, batch_mcts.pdf
@@ -251,7 +294,7 @@ def select_leaf(
         q_values = tree["children_q_values"][batch_range, current_node]
         priors = tree["children_prior"][batch_range, current_node]
         visits = tree["children_visits"][batch_range, current_node]
-        total_visits = visits.sum(dim=-1)
+        total_visits = visits.sum(dim=-1, keepdim=True)
 
         # 2. Calculate PUCT scores
         scores = puct_score(
@@ -269,21 +312,21 @@ def select_leaf(
         # TODO: should we use action_selection.py here? Does it make sense to use it?
         action = torch.argmax(scores, dim=-1)
 
-        # 4. Check for leaf (child index is -1)
+        # 4. Check for leaf (child index is -1) or terminal node
         next_node = tree["children_index"][batch_range, current_node, action]
         is_leaf = next_node == -1
+        is_term = tree["is_terminal"][batch_range, current_node]
 
         # 5. Record to trajectory (only for elements that were active at the START of this step)
         trajectory.append((current_node.clone(), action.clone(), active_mask.clone()))
 
-        # 6. Update active mask: those who hit a leaf are no longer active for the NEXT step
-        active_mask = active_mask & (~is_leaf)
+        # 6. Update active mask: those who hit a leaf or terminal node are no longer active for the NEXT step
+        active_mask = active_mask & (~is_leaf) & (~is_term)
 
         if not active_mask.any():
             break
 
-        # Update current_node for elements that haven't hit a leaf
-        # Elements that hit a leaf will stay at their current_node (the parent of the new expansion)
+        # Update current_node for elements that haven't hit a leaf/terminal
         current_node = torch.where(active_mask, next_node, current_node)
 
     return current_node, trajectory
@@ -300,6 +343,7 @@ def expand_node(
     rewards: torch.Tensor,  # From dynamics_fn
     next_embeddings: torch.Tensor,  # From dynamics_fn
     next_to_play: torch.Tensor,  # From dynamics_fn
+    is_terminal: torch.Tensor = None,
 ):
     """
     Adds newly evaluated nodes to the tree.
@@ -312,6 +356,7 @@ def expand_node(
         rewards: Rewards received during transition [B].
         next_embeddings: Embeddings of the new nodes [B, D].
         next_to_play: The player whose turn it is in the new node [B].
+        is_terminal: Boolean mask indicating terminal nodes [B].
     """
     batch_size = tree.batch_size[0]
     device = tree.device
@@ -327,6 +372,8 @@ def expand_node(
     tree["embeddings"][batch_range, new_node_indices] = next_embeddings
     tree["children_rewards"][batch_range, parent_nodes, actions_taken] = rewards
     tree["to_play"][batch_range, new_node_indices] = next_to_play
+    if is_terminal is not None:
+        tree["is_terminal"][batch_range, new_node_indices] = is_terminal
 
     # 4. Initialize priors for the new node (apply softmax to logits)
     priors = torch.softmax(policy_logits, dim=-1)
@@ -404,3 +451,45 @@ def backpropagate(
         # In MCTS, b_idx is unique within a step.
         tree["min_q"][b_idx] = torch.min(tree["min_q"][b_idx], new_q)
         tree["max_q"][b_idx] = torch.max(tree["max_q"][b_idx], new_q)
+
+
+def get_mcts_visit_policy(
+    visit_counts: torch.Tensor,
+    temperature: float = 1.0,
+) -> torch.Tensor:
+    """
+    Computes a target policy distribution from MCTS visit counts.
+
+    Formula:
+        for tau > 0: pi(a|s) = N(s, a)^(1/tau) / sum_b N(s, b)^(1/tau)
+        for tau = 0: pi(a|s) = one_hot(argmax_a N(s, a))
+
+    Args:
+        visit_counts: Tensor of visit counts [B, A] or [A].
+        temperature: Temperature parameter tau >= 0.
+
+    Returns:
+        torch.Tensor: Target policy probability distribution with same shape as visit_counts.
+    """
+    assert temperature >= 0.0, f"Temperature must be non-negative, got {temperature}"
+
+    if temperature == 0.0:
+        is_max = (
+            visit_counts == torch.max(visit_counts, dim=-1, keepdim=True).values
+        ).float()
+        return is_max / is_max.sum(dim=-1, keepdim=True)
+
+    if temperature == 1.0:
+        total_visits = visit_counts.sum(dim=-1, keepdim=True)
+        total_visits = torch.where(
+            total_visits > 0, total_visits, torch.ones_like(total_visits)
+        )
+        return visit_counts / total_visits
+
+    exponent = 1.0 / temperature
+    scaled_visits = torch.pow(visit_counts.float(), exponent)
+    total_scaled = scaled_visits.sum(dim=-1, keepdim=True)
+    total_scaled = torch.where(
+        total_scaled > 0, total_scaled, torch.ones_like(total_scaled)
+    )
+    return scaled_visits / total_scaled

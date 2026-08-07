@@ -203,6 +203,7 @@ def to_numpy_action(action_tensor: torch.Tensor) -> np.ndarray:
 
 # TODO: should this be inplace?
 # TODO: there is a tension between Gym which uses numpy and training loops which use torch. If this is to be used in a wrapper for the environment, then it should probably be numpy, but if we want to use it in simple training loops, torch is nicer.
+# TODO: Rename to sample mean var?
 def update_welford_stats(
     mean: torch.Tensor, sq_diff: torch.Tensor, count: torch.Tensor, batch: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -210,13 +211,13 @@ def update_welford_stats(
     Pure mathematical update for running mean and variance using Welford's online algorithm.
 
     Args:
-        mean: current running mean of the features. [*F]
-        sq_diff: current running sum of squared differences from the mean. [*F]
+        mean: current running mean of the features, initially 0.0. [*F]
+        sq_diff: current running sum of squared differences from the mean, initially 1.0. [*F]
         count: current number of samples seen. (1)
         batch: the new batch of features to update with. (B, *F)
 
     Returns:
-        new_mean, new_sq_diff, new_count
+        new_mean, new_sq_diff, new_var, new_count
     """
 
     # Fail Fast: Strict layout validation to catch dimension errors immediately
@@ -237,41 +238,11 @@ def update_welford_stats(
 
     delta2 = batch - new_mean.unsqueeze(0)
     new_sq_diff = sq_diff + (delta * delta2).sum(dim=0)
+    new_var = new_sq_diff / (new_count - 1)
+    if new_count < 2:
+        new_var = torch.ones_like(new_var)
 
-    return new_mean, new_sq_diff, new_count
-
-
-# TODO: should this be inplace?
-# TODO: there is a tension between Gym which uses numpy and training loops which use torch. If this is to be used in a wrapper for the environment, then it should probably be numpy, but if we want to use it in simple training loops, torch is nicer.
-def normalize_features(
-    features: torch.Tensor,
-    mean: torch.Tensor,
-    sq_diff: torch.Tensor,
-    count: torch.Tensor,
-    eps: float = 1e-8,
-) -> torch.Tensor:
-    """
-    Applies running normalization to the features.
-
-    Args:
-        features: The features to normalize. (B, *F)
-        mean: The running mean of the features. (*F)
-        sq_diff: The running sum of squared differences from the mean. (*F)
-        count: The number of samples seen. (1)
-        eps: Small value to prevent division by zero.
-    """
-    assert (
-        features.ndim > mean.ndim
-    ), "Features must contain an explicit leading Batch dimension."
-    assert features.shape[1:] == mean.shape == sq_diff.shape, (
-        f"Geometry mismatch. Feature dimensions {features.shape[1:]} do not match "
-        f"mean ({mean.shape}) or sq_diff ({sq_diff.shape})."
-    )
-
-    # Use unbiased variance if we have more than 1 sample
-    unbiased_var = sq_diff / torch.clamp(count - 1, min=1.0)
-    std = torch.sqrt(unbiased_var + eps)
-    return (features - mean.unsqueeze(0)) / std.unsqueeze(0)
+    return new_mean, new_sq_diff, new_var, new_count
 
 
 # TODO: where to put this?

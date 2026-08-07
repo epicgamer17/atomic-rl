@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Callable, List
+from typing import Callable, List, Dict, Union, Mapping
 from torch.optim.optimizer import Optimizer
 
 # TODO: CHANGE THE OPTIMIZER API HERE TO MATCH WITH IDBD, CBP, and ObGD for adam and SGD
@@ -55,16 +55,31 @@ def obgd_update_(
     theta: torch.Tensor,
     grad: torch.Tensor,
     lr: float,
+    total_norm: float | torch.Tensor,
     scaling_factor: float = 1.0,
 ) -> None:
     """
-    Standard Observation-based Gradient Descent step (supervised).
+    Standard Overshooting-bounded Gradient Descent step (supervised).
+
+    Args:
+        theta (torch.Tensor): A parameter tensor of the network (modified in-place).
+        grad (torch.Tensor): The gradient tensor for theta.
+        lr (float): The base step size (alpha).
+        total_norm (float | torch.Tensor): The L1 norm of the gradients of the
+            WHOLE network (Algorithm 3 of the Stream RL paper). This is a single
+            global norm shared by every parameter.
+        scaling_factor (float): The overshooting scaling factor (kappa).
+
+    Returns:
+        None
     """
     # TODO: add shape assertions
 
     with torch.no_grad():
-        norm_grad = torch.sum(torch.abs(grad))
-        M = lr * scaling_factor * norm_grad
+        # Paper Algorithm 3 normalizes by the L1 norm of the whole (concatenated)
+        # gradient vector, giving the network a single shared step size.
+        norm = torch.as_tensor(total_norm, dtype=torch.float32, device=theta.device)
+        M = lr * scaling_factor * norm
         new_step_size = lr / M.clamp(min=1.0)
         theta.sub_(grad, alpha=new_step_size)
 
@@ -74,18 +89,32 @@ def obgd_td_update_(
     error: torch.Tensor,
     trace: torch.Tensor,
     lr: float,
+    total_norm: float | torch.Tensor,
     scaling_factor: float = 1.0,
 ) -> None:
     """
-    Observation-based Gradient Descent driven by TD-error and eligibility traces.
+    Overshooting-bounded Gradient Descent driven by TD-error and eligibility traces.
+
+    Args:
+        theta (torch.Tensor): A parameter tensor of the network (modified in-place).
+        error (torch.Tensor): The scalar TD-error (delta).
+        trace (torch.Tensor): The eligibility trace tensor for theta.
+        lr (float): The base step size (alpha).
+        total_norm (float | torch.Tensor): The L1 norm of the eligibility traces of the
+            WHOLE network (Algorithm 3 of the Stream RL paper). This is a single global norm.
+        scaling_factor (float): The overshooting scaling factor (kappa).
+
+    Returns:
+        None
     """
 
     # TODO: add shape assertions
 
     with torch.no_grad():
+        # Paper Algorithm 3 normali
         effective_error = torch.abs(error).clamp(min=1.0)
-        norm_trace = torch.sum(torch.abs(trace))
-        M = lr * scaling_factor * effective_error * norm_trace
+        norm = torch.as_tensor(total_norm, dtype=torch.float32, device=theta.device)
+        M = lr * scaling_factor * effective_error * norm
         new_step_size = lr / M.clamp(min=1.0)
         theta.add_(trace, alpha=new_step_size * error)
 
@@ -95,10 +124,11 @@ def obgd_td_update_(
 # NOTE: a benefit of the step and td_step api (among many): Preserves standard step(). If your agent has a separate auxiliary module (like a world model or an autoencoder) trained via standard supervised backpropagation, you can pass its parameters to the exact same optimizer and call optimizer.step() normally.
 class ObGD(Optimizer):
     """
-    Observation-based Gradient Descent
+    Overshooting-bounded Gradient Descent (ObGD - SGD variant).
+    Implementation of Algorithm 3 from Elsayed et al. (2024).
     """
 
-    def __init__(self, params, lr=1e-2, scaling_factor=1.0):
+    def __init__(self, params, lr=1.0, scaling_factor=1.0):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         defaults = dict(lr=lr, scaling_factor=scaling_factor)
@@ -107,12 +137,37 @@ class ObGD(Optimizer):
     @torch.no_grad()
     def step(self, closure=None):
         """
-        Performs a single optimization step (using p.grad).
+        Performs a single supervised optimization step.
         """
         loss = None
         if closure is not None:
             with torch.enable_grad():
                 loss = closure()
+
+        device = (
+            next(
+                p.device
+                for group in self.param_groups
+                for p in group["params"]
+                if p.grad is not None
+            )
+            if any(
+                p.grad is not None
+                for group in self.param_groups
+                for p in group["params"]
+            )
+            else None
+        )
+        total_norm = (
+            torch.tensor(0.0, device=device)
+            if device is not None
+            else torch.tensor(0.0)
+        )
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                total_norm += torch.sum(torch.abs(p.grad))
 
         for group in self.param_groups:
             for p in group["params"]:
@@ -123,12 +178,18 @@ class ObGD(Optimizer):
                     grad=p.grad,
                     lr=group["lr"],
                     scaling_factor=group["scaling_factor"],
+                    total_norm=total_norm,
                 )
         return loss
 
     # TODO: for now our solution. May want to better handle all TD methods, and its possible this is unecessary with some ways we pass gradients and stuff.
     @torch.no_grad()
-    def td_step(self, error: torch.Tensor, traces: List[torch.Tensor], closure=None):
+    def td_step(
+        self,
+        error: torch.Tensor,
+        traces: Union[List[torch.Tensor], Mapping[torch.Tensor, torch.Tensor]],
+        closure=None,
+    ):
         """
         Performs a single temporal difference optimization step.
         """
@@ -137,11 +198,37 @@ class ObGD(Optimizer):
             with torch.enable_grad():
                 loss = closure()
 
-        global_p_idx = 0
+        def resolve_trace(p: torch.Tensor, idx: int):
+            if isinstance(traces, Mapping):
+                if p not in traces:
+                    raise KeyError(
+                        f"Parameter trace not found in traces mapping for param: {p}"
+                    )
+                return traces[p], idx
+            return traces[idx], idx + 1
+
+        device = (
+            next(p.device for group in self.param_groups for p in group["params"])
+            if self.param_groups and self.param_groups[0]["params"]
+            else None
+        )
+        total_norm = (
+            torch.tensor(0.0, device=device)
+            if device is not None
+            else torch.tensor(0.0)
+        )
+        idx = 0
         for group in self.param_groups:
             for p in group["params"]:
-                trace = traces[global_p_idx]
-                global_p_idx += 1
+                trace, idx = resolve_trace(p, idx)
+                if trace is None:
+                    continue
+                total_norm += torch.sum(torch.abs(trace))
+
+        idx = 0
+        for group in self.param_groups:
+            for p in group["params"]:
+                trace, idx = resolve_trace(p, idx)
                 if trace is None:
                     continue
                 obgd_td_update_(
@@ -150,5 +237,242 @@ class ObGD(Optimizer):
                     trace=trace,
                     lr=group["lr"],
                     scaling_factor=group["scaling_factor"],
+                    total_norm=total_norm,
+                )
+        return loss
+
+
+# TODO: the paper defines one obgd_update and just passes in the grad as a trace, is that a better approach?
+def adaptive_obgd_update_(
+    theta: torch.Tensor,
+    grad: torch.Tensor,
+    v: torch.Tensor,
+    lr: float,
+    total_norm: float | torch.Tensor,
+    scaling_factor: float = 1.0,
+    eps: float = 1e-8,
+) -> None:
+    """
+    Adaptive Overshooting-bounded Gradient Descent step (supervised).
+    Follows Appendix B Algorithm 11 of Elsayed et al. (2024).
+
+    Args:
+        theta (torch.Tensor): A parameter tensor of the network (modified in-place).
+        grad (torch.Tensor): The gradient tensor for theta.
+        v (torch.Tensor): Second moment vector for theta.
+        lr (float): Base step size (alpha).
+        total_norm (float | torch.Tensor): The global L1 norm of normalized gradients ||g / (sqrt(v) + eps)||_1
+            summed across the ENTIRE network.
+        scaling_factor (float): Overshooting scaling factor (kappa).
+        eps (float): Numerical stability constant (default 1e-8).
+
+    Returns:
+        None
+    """
+    # TODO: add shape assertions
+
+    with torch.no_grad():
+        norm = torch.as_tensor(total_norm, dtype=torch.float32, device=theta.device)
+        M = lr * scaling_factor * norm
+        new_step_size = lr / M.clamp(min=1.0)
+        adj_grad = grad / (torch.sqrt(v) + eps)
+        theta.sub_(adj_grad, alpha=new_step_size)
+
+
+def adaptive_obgd_td_update_(
+    theta: torch.Tensor,
+    error: torch.Tensor,
+    trace: torch.Tensor,
+    v: torch.Tensor,
+    lr: float,
+    total_norm: float | torch.Tensor,
+    scaling_factor: float = 1.0,
+    eps: float = 1e-8,
+) -> None:
+    """
+    Adaptive Overshooting-bounded Gradient Descent step for TD learning (semi-gradient with eligibility traces).
+    Follows Appendix B Algorithm 11 of Elsayed et al. (2024).
+
+    Args:
+        theta (torch.Tensor): A parameter tensor of the network (modified in-place).
+        error (torch.Tensor): Scalar TD error (delta).
+        trace (torch.Tensor): Eligibility trace tensor for theta (z_w).
+        v (torch.Tensor): Second moment vector for theta.
+        lr (float): Base step size (alpha).
+        total_norm (float | torch.Tensor): The global L1 norm of normalized traces ||z_w / (sqrt(v) + eps)||_1
+            summed across the ENTIRE network.
+        scaling_factor (float): Overshooting scaling factor (kappa).
+        eps (float): Numerical stability constant (default 1e-8).
+
+    Returns:
+        None
+    """
+
+    # TODO: add shape assertions
+
+    with torch.no_grad():
+        effective_error = torch.abs(error).clamp(min=1.0)
+        norm = torch.as_tensor(total_norm, dtype=torch.float32, device=theta.device)
+        M = lr * scaling_factor * effective_error * norm
+        new_step_size = lr / M.clamp(min=1.0)
+        adj_trace = trace / (torch.sqrt(v) + eps)
+        theta.add_(adj_trace, alpha=new_step_size * error)
+
+
+class AdaptiveObGD(Optimizer):
+    """
+    Adaptive Overshooting-bounded Gradient Descent (ObGD Adam).
+    Implementation of Algorithm 11 (Appendix B) from Elsayed et al. (2024).
+    """
+
+    def __init__(
+        self,
+        params,
+        lr: float = 1.0,
+        scaling_factor: float = 1.0,
+        beta: float = 0.99,
+        eps: float = 1e-8,
+    ):
+        if lr < 0.0:
+            raise ValueError(f"Invalid learning rate: {lr}")
+        if not 0.0 <= beta < 1.0:
+            raise ValueError(f"Invalid beta parameter: {beta}")
+        if eps <= 0.0:
+            raise ValueError(f"Invalid epsilon parameter: {eps}")
+
+        defaults = dict(lr=lr, scaling_factor=scaling_factor, beta=beta, eps=eps)
+        super().__init__(params, defaults)
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        """
+        Performs a single supervised optimization step (Algorithm 11).
+        """
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        device = next(
+            (
+                p.device
+                for group in self.param_groups
+                for p in group["params"]
+                if p.grad is not None
+            ),
+            None,
+        )
+        total_norm = (
+            torch.tensor(0.0, device=device)
+            if device is not None
+            else torch.tensor(0.0)
+        )
+
+        for group in self.param_groups:
+            beta = group["beta"]
+            eps = group["eps"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                if "v" not in state:
+                    state["v"] = torch.zeros_like(p)
+                v = state["v"]
+
+                # v <- beta * v + (1 - beta) * (grad)^2
+                v.mul_(beta).addcmul_(p.grad, p.grad, value=1.0 - beta)
+
+                # || grad / (sqrt(v) + eps) ||_1
+                adj_grad = p.grad / (torch.sqrt(v) + eps)
+                total_norm += torch.sum(torch.abs(adj_grad))
+
+        for group in self.param_groups:
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                state = self.state[p]
+                adaptive_obgd_update_(
+                    theta=p,
+                    grad=p.grad,
+                    v=state["v"],
+                    lr=group["lr"],
+                    scaling_factor=group["scaling_factor"],
+                    total_norm=total_norm,
+                    eps=group["eps"],
+                )
+        return loss
+
+    # TODO: for now our solution. May want to better handle all TD methods, and its possible this is unecessary with some ways we pass gradients and stuff.
+    @torch.no_grad()
+    def td_step(
+        self,
+        error: torch.Tensor,
+        traces: Union[List[torch.Tensor], Mapping[torch.Tensor, torch.Tensor]],
+        closure=None,
+    ):
+        """
+        Performs a single temporal difference optimization step (Algorithm 11).
+        """
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        def resolve_trace(p: torch.Tensor, idx: int):
+            if isinstance(traces, Mapping):
+                if p not in traces:
+                    raise KeyError(
+                        f"Parameter trace not found in traces mapping for param: {p}"
+                    )
+                return traces[p], idx
+            return traces[idx], idx + 1
+
+        device = next(
+            (p.device for group in self.param_groups for p in group["params"]),
+            None,
+        )
+        total_norm = (
+            torch.tensor(0.0, device=device)
+            if device is not None
+            else torch.tensor(0.0)
+        )
+
+        idx = 0
+        for group in self.param_groups:
+            beta = group["beta"]
+            eps = group["eps"]
+            for p in group["params"]:
+                trace, idx = resolve_trace(p, idx)
+                if trace is None:
+                    continue
+                state = self.state[p]
+                if "v" not in state:
+                    state["v"] = torch.zeros_like(p)
+                v = state["v"]
+
+                # v <- beta * v + (1 - beta) * (error * trace)^2
+                semi_grad = error * trace
+                v.mul_(beta).addcmul_(semi_grad, semi_grad, value=1.0 - beta)
+
+                # || trace / (sqrt(v) + eps) ||_1
+                adj_trace = trace / (torch.sqrt(v) + eps)
+                total_norm += torch.sum(torch.abs(adj_trace))
+
+        idx = 0
+        for group in self.param_groups:
+            for p in group["params"]:
+                trace, idx = resolve_trace(p, idx)
+                if trace is None:
+                    continue
+                state = self.state[p]
+                adaptive_obgd_td_update_(
+                    theta=p,
+                    error=error,
+                    trace=trace,
+                    v=state["v"],
+                    lr=group["lr"],
+                    scaling_factor=group["scaling_factor"],
+                    total_norm=total_norm,
+                    eps=group["eps"],
                 )
         return loss

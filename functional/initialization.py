@@ -1,4 +1,5 @@
 import random
+import math
 from typing import Callable, List
 
 import numpy as np
@@ -41,6 +42,7 @@ def _allocate_tensordict(
     return data
 
 
+# TODO: unify our custom initializers. some operate on layers others on modules. Probably should for the most part be modules. However some initializations only apply to certain layers (output layers). could we do this with a higher order function?
 def make_gnt_init(
     init_fn: Callable[[torch.Tensor], None],
 ) -> Callable[[torch.Tensor], None]:
@@ -87,39 +89,48 @@ def layer_init(
     return layer
 
 
+def lecun_uniform_(tensor: torch.Tensor) -> None:
+    """
+    Applies LeCun uniform initialization to the weight tensor.
+    """
+    fan_in = nn.init._calculate_fan_in_and_fan_out(tensor)[0]
+    bound = 1.0 / math.sqrt(fan_in)
+    nn.init.uniform_(tensor, -bound, bound)
+
+
 def sparse_init_weight_(tensor: torch.Tensor, sparsity: float) -> None:
     """
     Applies sparsity to a weight matrix based on the Stream RL pseudocode.
-    Zeroes out a `sparsity` fraction of the input connections (fan_in) for ALL output neurons.
-    From the Stream RL Paper. LeCun initialization is recommended.
+    Zeroes out a `sparsity` fraction of incoming connections (fan_in) independently for EACH output neuron.
+    From the Stream RL Paper (Section 4). LeCun initialization is recommended.
 
     Args:
         tensor: The weight tensor to modify in-place (assumes [out_features, in_features]).
-        sparsity: The fraction of fan_in to set to 0.
+        sparsity: The fraction of fan_in to set to 0 per neuron.
     """
     with torch.no_grad():
         if tensor.dim() < 2:
-            fan_in = tensor.size(0)
-        else:
-            fan_in = torch.nn.init._calculate_fan_in_and_fan_out(tensor)[0]
+            return
 
-        n = int(sparsity * fan_in)
+        out_features = tensor.size(0)
+        in_features = (
+            tensor.size(1)
+            if tensor.dim() == 2
+            else tensor.view(tensor.size(0), -1).size(1)
+        )
 
+        n = int(sparsity * in_features)
         if n == 0:
             return
 
-        # Permutation set P of size fan in
-        P = torch.randperm(fan_in, device=tensor.device)
+        view = tensor if tensor.dim() == 2 else tensor.view(out_features, -1)
 
-        # Index set I of size n (subset of P)
-        I = P[:n]
+        # For each output neuron (row), sample n random incoming weight indices (columns) to set to 0.0
+        mask_indices = torch.rand(
+            out_features, in_features, device=tensor.device
+        ).topk(n, dim=1).indices
 
-        # Wi,j <- 0, \forall i \in I, \forall j
-        if tensor.dim() == 2:
-            tensor[:, I] = 0.0
-        elif tensor.dim() > 2:
-            view = tensor.view(tensor.size(0), -1)
-            view[:, I] = 0.0
+        view.scatter_(1, mask_indices, 0.0)
 
 
 def make_sparse_init(
