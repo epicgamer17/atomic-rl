@@ -8,7 +8,7 @@ from atomic_rl.utils import (
     scale_tensor_by_std,
     to_tensor,
     to_numpy_action,
-    update_welford_stats,
+    compute_welford_stats,
     add_dirichlet_noise,
     compute_tile_coding_features,
 )
@@ -237,7 +237,7 @@ def test_update_welford_stats():
     # Pass a batch containing 2 instances
     batch = torch.tensor([[1.0, 10.0], [3.0, 20.0]])
 
-    mean, sq_diff, var, count = update_welford_stats(mean, sq_diff, count, batch)
+    mean, sq_diff, var, count = compute_welford_stats(mean, sq_diff, count, batch)
 
     # Math Verification:
     # count = 0 + 2 = 2
@@ -260,7 +260,7 @@ def test_update_welford_stats_assertion():
     # Passing a unbatched 1D tensor should trigger the layout validation check
     bad_batch = torch.tensor([1.0, 2.0])
     with pytest.raises(AssertionError, match="Shape Mismatch"):
-        update_welford_stats(mean, var, count, bad_batch)
+        compute_welford_stats(mean, var, count, bad_batch)
 
 
 # ==========================================

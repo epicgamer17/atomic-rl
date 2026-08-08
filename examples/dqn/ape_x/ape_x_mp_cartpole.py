@@ -4,7 +4,7 @@ APE-X DQN implemented with torch.multiprocessing.
 
 # TODO: attempt a cleanup if possible
 
-from atomic_rl.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 import os
 import time
 import torch
@@ -25,7 +25,7 @@ from atomic_rl.buffers.replay import (
     sample_per,
     update_priorities,
     with_per_tracking,
-    circular_write_strategy,
+    circular_write_strategy_,
     make_n_step_accumulator,
     PERBufferState,
 )
@@ -36,8 +36,8 @@ from atomic_rl.action_selection import (
     gather_q_values,
 )
 from atomic_rl.schedules import get_ape_x_epsilon
-from atomic_rl.optimizer import apply_gradients
-from atomic_rl.network import hard_update_target_network_
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.update_target_net import hard_update_target_network_
 
 # --- Constants ---
 ENV_NAME = "CartPole-v1"
@@ -72,9 +72,9 @@ torch.manual_seed(SEED)
 class DuelingDQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
-        self.value_head = layer_init(nn.Linear(512, 1), std=1.0)
-        self.advantage_head = layer_init(nn.Linear(512, num_actions), std=1.0)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 512))
+        self.value_head = layer_init_(nn.Linear(512, 1), std=1.0)
+        self.advantage_head = layer_init_(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -101,7 +101,7 @@ class SharedPERBuffer:
 
         # This is a local function from with_per_tracking, which is not picklable.
         # We'll initialize it in __init__ and __setstate__.
-        self.per_add = with_per_tracking(circular_write_strategy)
+        self.per_add = with_per_tracking(circular_write_strategy_)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -113,7 +113,7 @@ class SharedPERBuffer:
     def __setstate__(self, state):
         self.__dict__.update(state)
         # Re-initialize the local function after unpickling
-        self.per_add = with_per_tracking(circular_write_strategy)
+        self.per_add = with_per_tracking(circular_write_strategy_)
 
     def add_transitions(self, transitions: TensorDict):
         with self.lock:
@@ -347,7 +347,7 @@ def learner_worker(
                 "td_targets/mean": td_target.mean().detach(),
             }
         )
-        optimizer = apply_gradients(
+        optimizer = apply_gradients_(
             optimizer,
             weighted_loss,
             model=local_model,

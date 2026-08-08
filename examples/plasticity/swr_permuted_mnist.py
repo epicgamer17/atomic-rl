@@ -25,9 +25,9 @@ import matplotlib.pyplot as plt
 
 from envs.streams.permuted_mnist import make_permuted_mnist_stream
 from atomic_rl.plasticity import (
-    apply_selective_weight_reinitialization,
+    apply_selective_weight_reinitialization_,
     init_cbp_state,
-    apply_continual_backprop,
+    apply_continual_backprop_,
 )
 from atomic_rl.metrics import (
     compute_dead_units_proportion,
@@ -150,7 +150,7 @@ def run_permuted_mnist(mode: str, num_tasks: int = 50):
 
             # 3. Apply Plasticity Method
             if mode == "swr" and (global_step + 1) % reinit_frequency == 0:
-                apply_selective_weight_reinitialization(
+                apply_selective_weight_reinitialization_(
                     parameters=hidden_params,
                     optimizer=optimizer,
                     init_fn=init_weights_kaiming,
@@ -162,7 +162,7 @@ def run_permuted_mnist(mode: str, num_tasks: int = 50):
             optimizer.step()
 
             if mode == "cbp":
-                apply_continual_backprop(
+                apply_continual_backprop_(
                     layer_pairs=layer_pairs,
                     activations=[a1, a2, a3],
                     cbp_states=cbp_states,

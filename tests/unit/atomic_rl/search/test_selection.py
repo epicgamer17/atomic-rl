@@ -1,7 +1,8 @@
 import pytest
 import torch
 
-from atomic_rl.search import init_mcts_tree, normalize_q_values, puct_score, select_leaf
+from atomic_rl.search import init_mcts_tree, puct_score, select_leaf
+from atomic_rl.search.selection import _normalize_q_values
 
 pytestmark = pytest.mark.unit
 
@@ -16,7 +17,7 @@ def test_normalize_q_values_standard():
     min_q = torch.tensor([0.0, 2.0])
     max_q = torch.tensor([10.0, 4.0])
 
-    normalized = normalize_q_values(q_values, min_q, max_q)
+    normalized = _normalize_q_values(q_values, min_q, max_q)
     expected = torch.tensor([[0.0, 0.5, 1.0], [0.0, 0.5, 1.0]])
     torch.testing.assert_close(normalized, expected)
 
@@ -28,7 +29,7 @@ def test_normalize_q_values_division_by_zero():
     max_q = torch.tensor([5.0, 0.0])  # Span is 0.0
 
     # Should safely treat span as 1.0 to map (q_values - min_q) / 1.0 -> 0.0
-    normalized = normalize_q_values(q_values, min_q, max_q)
+    normalized = _normalize_q_values(q_values, min_q, max_q)
     torch.testing.assert_close(normalized, torch.zeros_like(q_values))
 
 

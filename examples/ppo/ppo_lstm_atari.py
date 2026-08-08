@@ -2,7 +2,7 @@
 # TODO: compare with 37 implementation details of PPO results
 # TODO: attempt a cleanup if possible
 # TODO: notes on PPO + LSTM
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -13,7 +13,7 @@ import random
 import wandb
 
 from atomic_rl.action_selection import sample_distribution
-from atomic_rl.optimizer import apply_gradients
+from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.returns import compute_gae
 from atomic_rl.losses import (
     clipped_surrogate_loss,
@@ -24,7 +24,7 @@ from atomic_rl.losses import (
 )
 from torch.optim.lr_scheduler import LinearLR
 from atomic_rl.metrics import compute_explained_variance
-from atomic_rl.network import unroll_rnn
+from atomic_rl.bptt.unroll_rnn import unroll_rnn
 from atomic_rl.buffers.rollout import (
     init_rollout_buffer,
     store_rollout_step_,
@@ -82,8 +82,8 @@ class ActorCriticLSTM(nn.Module):
                 nn.init.orthogonal_(param, 1.0)
 
         # 3. Output Heads
-        self.actor = layer_init(nn.Linear(128, num_actions), std=0.01)
-        self.critic = layer_init(nn.Linear(128, 1), std=1.0)
+        self.actor = layer_init_(nn.Linear(128, num_actions), std=0.01)
+        self.critic = layer_init_(nn.Linear(128, 1), std=1.0)
 
     def forward(
         self,
@@ -411,7 +411,7 @@ for iteration in range(MAX_ITERATIONS):
             loss = pg_loss + CRITIC_COEFF * critic_loss + ENTROPY_COEFF * ent_loss
 
             # Backprop
-            optimizer = apply_gradients(
+            optimizer = apply_gradients_(
                 optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
             )
 

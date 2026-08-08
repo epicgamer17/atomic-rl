@@ -105,7 +105,7 @@ for step in range(MAX_STEPS):
         loss, grads = calculate_loss(params, batch)
         
         # Apply Updates (Pure function)
-        params, optimizer_state = apply_gradients(params, optimizer_state, grads)
+        params, optimizer_state = apply_gradients_(params, optimizer_state, grads)
         
         # Because we are in a monolith, logging is effortless:
         wandb.log({"loss": loss, "step": step})

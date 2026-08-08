@@ -1,5 +1,5 @@
 from . import metaoptimization
-from .apply_gradients import apply_gradients
+from .apply_gradients import apply_gradients_
 from .obgd import obgd_update_, obgd_td_update_, ObGD
 from .adaptive_obgd import (
     adaptive_obgd_update_,

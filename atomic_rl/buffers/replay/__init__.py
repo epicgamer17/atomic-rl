@@ -2,9 +2,9 @@
 
 from .state import BufferState, PERBufferState, init_buffer, init_per_buffer
 from .write import (
-    circular_write_strategy,
+    circular_write_strategy_,
     compute_is_weights,
-    reservoir_write_strategy,
+    reservoir_write_strategy_,
     update_priorities,
     with_per_tracking,
 )

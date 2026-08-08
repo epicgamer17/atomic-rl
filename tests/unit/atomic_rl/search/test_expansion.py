@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from atomic_rl.search import expand_node, init_mcts_tree
+from atomic_rl.search import expand_node_, init_mcts_tree
 
 pytestmark = pytest.mark.unit
 
@@ -24,7 +24,7 @@ def test_expand_node():
     is_terminal = torch.tensor([True])
 
     # Run expansion
-    expand_node(
+    expand_node_(
         tree,
         parent_nodes,
         actions_taken,

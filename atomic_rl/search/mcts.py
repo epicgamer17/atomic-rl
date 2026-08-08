@@ -2,8 +2,8 @@ import torch
 from tensordict import TensorDict
 from typing import Tuple, Callable, List, Optional
 from ..utils import add_dirichlet_noise
-from .backpropagation import backpropagate
-from .expansion import expand_node
+from .backpropagation import backpropagate_
+from .expansion import expand_node_
 from .selection import select_leaf
 from .tree import init_mcts_tree
 
@@ -105,7 +105,7 @@ def mcts_search(
         value = torch.where(is_terminal, torch.zeros_like(value), value)
 
         # D. Expand Tree: Add the new node
-        expand_node(
+        expand_node_(
             tree,
             parent_nodes,
             actions_taken,
@@ -117,6 +117,6 @@ def mcts_search(
         )
 
         # E. Backpropagation: Update value/visit counts up the trajectory
-        backpropagate(tree, trajectory, value, gamma)
+        backpropagate_(tree, trajectory, value, gamma)
 
     return tree

@@ -52,7 +52,7 @@ from atomic_rl.losses import cross_entropy_loss, mse_loss
 from atomic_rl.action_selection import argmax_selector, sample_distribution
 from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
     BufferState,
 )
@@ -504,7 +504,7 @@ def train_alphazero_tictactoe():
                 },
                 batch_size=[len(new_samples)],
             ).to(device)
-            replay_buffer_state, _ = circular_write_strategy(
+            replay_buffer_state, _ = circular_write_strategy_(
                 replay_buffer_state, batch_td
             )
 

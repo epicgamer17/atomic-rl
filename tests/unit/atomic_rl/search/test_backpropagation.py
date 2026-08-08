@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from atomic_rl.search import backpropagate, init_mcts_tree
+from atomic_rl.search import backpropagate_, init_mcts_tree
 
 pytestmark = pytest.mark.unit
 
@@ -31,7 +31,7 @@ def test_backpropagate_alternating_players():
     )  # Value evaluation out of Node 1 from Player 1's perspective
     gamma = 1.0
 
-    backpropagate(tree, trajectory, leaf_value, gamma)
+    backpropagate_(tree, trajectory, leaf_value, gamma)
 
     # Math:
     # parent_player (0) != child_player (1) -> perspective_multiplier = -1.0

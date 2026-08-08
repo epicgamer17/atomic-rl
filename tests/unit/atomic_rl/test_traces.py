@@ -1,6 +1,6 @@
 import pytest
 import torch
-from atomic_rl.traces import update_accumulating_traces, update_replacing_traces
+from atomic_rl.traces import compute_accumulating_traces, compute_replacing_traces
 
 pytestmark = pytest.mark.unit
 
@@ -23,7 +23,7 @@ def test_update_accumulating_traces():
         [0.0, 0.5, 0.0]
     ])
     
-    res = update_accumulating_traces(traces, gradients, gamma, lam, terminated)
+    res = compute_accumulating_traces(traces, gradients, gamma, lam, terminated)
     torch.testing.assert_close(res, expected)
 
 def test_update_replacing_traces():
@@ -46,9 +46,9 @@ def test_update_replacing_traces():
         [0.0, 1.0, 0.0]
     ])
     
-    res = update_replacing_traces(traces, features, gamma, lam, terminated)
+    res = compute_replacing_traces(traces, features, gamma, lam, terminated)
     torch.testing.assert_close(res, expected)
 
 def test_traces_assertions():
     with pytest.raises(AssertionError, match="Trace and gradient shapes must match"):
-        update_accumulating_traces(torch.randn(2, 3), torch.randn(2, 2), 0.9, 0.9, torch.randn(2))
+        compute_accumulating_traces(torch.randn(2, 3), torch.randn(2, 2), 0.9, 0.9, torch.randn(2))

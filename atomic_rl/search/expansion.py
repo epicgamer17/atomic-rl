@@ -7,7 +7,7 @@ from ..utils import add_dirichlet_noise
 # TODO: legal move masking for AlphaZero and terminal nodes for AlphaZero
 # TODO: Sampled MuZero
 # TODO: initial value for unvisited nodes, allow options, AlphaZero and MuZero: 0, Gumbel Muzero, v_mix, EfficientZero and Batch MCTS mean score
-def expand_node(
+def expand_node_(
     tree: TensorDict,
     parent_nodes: torch.Tensor,
     actions_taken: torch.Tensor,

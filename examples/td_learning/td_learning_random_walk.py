@@ -37,7 +37,7 @@ from pathlib import Path
 
 from envs.mdp.random_walk import RandomWalkEnv
 from atomic_rl.td import semi_gradient_td_update_
-from atomic_rl.traces import update_accumulating_traces
+from atomic_rl.traces import compute_accumulating_traces
 
 # --- CONSTANTS ---
 NUM_NON_TERMINAL_STATES = 5
@@ -116,8 +116,8 @@ def random_walk_episode(
 
             # 2. Update Eligibility Trace: e_t = gamma * lambda * e_{t-1} + phi_t
             # Note: Gamma is 1.0 for this task.
-            # update_accumulating_traces expects [batch, features]
-            traces = update_accumulating_traces(
+            # compute_accumulating_traces expects [batch, features]
+            traces = compute_accumulating_traces(
                 traces.unsqueeze(0),
                 phi_t.unsqueeze(0),
                 gamma=1.0,
@@ -211,7 +211,7 @@ def run_batch_experiment():
                 traces = torch.zeros(NUM_NON_TERMINAL_STATES)
                 for phi_t, reward, phi_next, terminated in episode:
                     # Update traces: e_t = gamma * lam * e_{t-1} + phi_t
-                    traces = update_accumulating_traces(
+                    traces = compute_accumulating_traces(
                         traces.unsqueeze(0),
                         phi_t.unsqueeze(0),
                         gamma=1.0,

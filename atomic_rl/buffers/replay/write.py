@@ -8,7 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 
 
-def circular_write_strategy(
+def circular_write_strategy_(
     buffer_state: BufferState, batch: TensorDict
 ) -> Tuple[BufferState, torch.Tensor]:
     """Standard circular writing."""
@@ -37,7 +37,7 @@ def circular_write_strategy(
     return buffer_state, indices
 
 
-def reservoir_write_strategy(
+def reservoir_write_strategy_(
     buffer_state: BufferState, batch: TensorDict
 ) -> Tuple[BufferState, torch.Tensor]:
     """

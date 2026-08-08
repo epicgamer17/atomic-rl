@@ -4,7 +4,7 @@ from torch.optim.optimizer import Optimizer
 
 
 # TODO: remove this. It is orchestration.
-def apply_gradients(
+def apply_gradients_(
     optimizer: Optimizer,
     loss: torch.Tensor,
     model: nn.Module = None,

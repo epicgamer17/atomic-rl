@@ -55,7 +55,7 @@ def puct_score(
     pb_c = pb_c * (torch.sqrt(tot_visits_t) / (visit_counts + 1))
 
     # MuZero: Normalize Q-values to [0, 1] before adding the PUCT term
-    normalized_q = normalize_q_values(q_values, min_q, max_q)
+    normalized_q = _normalize_q_values(q_values, min_q, max_q)
     raw_puct = normalized_q + pb_c * policy_prior
 
     # Zero-prior guard: Actions with 0 prior (e.g. masked illegal actions) receive -1e9 penalty
@@ -139,7 +139,7 @@ def select_leaf(
 
 
 # TODO: soft min max stats? efficient_zero.pdf
-def normalize_q_values(
+def _normalize_q_values(
     q_values: torch.Tensor, min_q: torch.Tensor, max_q: torch.Tensor
 ) -> torch.Tensor:
     """

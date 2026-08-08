@@ -29,7 +29,7 @@ The library ships as three flat, top-level import packages: `atomic_rl` (pure ma
 
 ```python
 import torch
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 from atomic_rl.action_selection import argmax_selector, with_epsilon_greedy
 from atomic_rl.td import compute_v_td_target
 from networks.resnet import ResNetBlock
@@ -102,7 +102,7 @@ for step in range(MAX_STEPS):
         
         # Calculate Loss & Gradients via Pure Math
         loss, grads = calculate_loss(params, batch)
-        params, optimizer_state = apply_gradients(params, optimizer_state, grads)
+        params, optimizer_state = apply_gradients_(params, optimizer_state, grads)
         
         # Monolithic layout makes logging and tracking effortless
         wandb.log({"loss": loss, "step": step})

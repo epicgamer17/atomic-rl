@@ -6,7 +6,7 @@ from ..utils import add_dirichlet_noise
 
 # TODO: make this work with alternating and single player games. also make work for catan (inconsistent turn ordering, ie p1 twice then p2 3 times, then p3 once)
 # TODO: make it work with more than 2 players
-def backpropagate(
+def backpropagate_(
     tree: TensorDict,
     trajectory: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]],
     leaf_value: torch.Tensor,

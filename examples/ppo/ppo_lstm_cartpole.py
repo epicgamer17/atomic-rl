@@ -1,4 +1,4 @@
-from atomic_rl.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,7 +11,7 @@ import wandb
 from tensordict import TensorDict
 
 from atomic_rl.action_selection import sample_distribution
-from atomic_rl.optimizer import apply_gradients
+from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.returns import compute_gae
 from atomic_rl.losses import (
     clipped_surrogate_loss,
@@ -21,7 +21,7 @@ from atomic_rl.losses import (
 )
 from torch.optim.lr_scheduler import LinearLR
 from atomic_rl.metrics import compute_explained_variance
-from atomic_rl.network import unroll_rnn
+from atomic_rl.bptt.unroll_rnn import unroll_rnn
 from atomic_rl.buffers.rollout import (
     init_rollout_buffer,
     store_rollout_step_,
@@ -73,19 +73,19 @@ class ActorCritic(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
         self.actor = nn.Sequential(
-            # TODO: layer_init does not take in an RNG key but should for reproducibility
-            layer_init(nn.Linear(input_shape[0], 64)),
+            # TODO: layer_init_ does not take in an RNG key but should for reproducibility
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, num_actions), std=0.01),
+            layer_init_(nn.Linear(64, num_actions), std=0.01),
         )
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init_(nn.Linear(64, 1), std=1.0),
         )
 
     def forward(self, x: torch.Tensor):
@@ -97,9 +97,9 @@ class ActorCriticLSTM(nn.Module):
         super().__init__()
         # Separate Actor Path
         self.actor_feature_extractor = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
         )
         self.actor_lstm = nn.LSTM(64, 64)
@@ -108,13 +108,13 @@ class ActorCriticLSTM(nn.Module):
                 nn.init.constant_(param, 0)
             elif "weight" in name:
                 nn.init.orthogonal_(param, 1.0)
-        self.actor_head = layer_init(nn.Linear(64, num_actions), std=0.01)
+        self.actor_head = layer_init_(nn.Linear(64, num_actions), std=0.01)
 
         # Separate Critic Path
         self.critic_feature_extractor = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
         )
         self.critic_lstm = nn.LSTM(64, 64)
@@ -123,7 +123,7 @@ class ActorCriticLSTM(nn.Module):
                 nn.init.constant_(param, 0)
             elif "weight" in name:
                 nn.init.orthogonal_(param, 1.0)
-        self.critic_head = layer_init(nn.Linear(64, 1), std=1.0)
+        self.critic_head = layer_init_(nn.Linear(64, 1), std=1.0)
 
     def forward(
         self,
@@ -513,7 +513,7 @@ def train_ppo(use_lstm: bool = False):
                 ent_loss = ent_loss.mean()
 
                 loss = pg_loss + CRITIC_COEFF * critic_loss + ENTROPY_COEFF * ent_loss
-                optimizer = apply_gradients(
+                optimizer = apply_gradients_(
                     optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
                 )
 

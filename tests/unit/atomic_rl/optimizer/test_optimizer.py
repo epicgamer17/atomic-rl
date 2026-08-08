@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from atomic_rl.optimizer import (
     ObGD,
-    apply_gradients,
+    apply_gradients_,
     obgd_td_update_,
     obgd_update_,
 )
@@ -24,7 +24,7 @@ def test_apply_gradients_basic():
     y = model(x)
     loss = (y - 1.0) ** 2
 
-    apply_gradients(optimizer, loss)
+    apply_gradients_(optimizer, loss)
 
     # Weight should have changed
     assert not torch.equal(model.weight, original_weight)
@@ -32,7 +32,7 @@ def test_apply_gradients_basic():
     # Verify zero_grad(set_to_none=True) happened
     # After optimizer.step(), gradients should still be None if set_to_none=True was used correctly before backward
     # Wait, loss.backward() populates .grad. optimizer.step() doesn't clear it.
-    # But apply_gradients calls zero_grad(set_to_none=True) FIRST.
+    # But apply_gradients_ calls zero_grad(set_to_none=True) FIRST.
     # So if we call it twice, after the second zero_grad, .grad should be None.
     optimizer.zero_grad(set_to_none=True)
     assert model.weight.grad is None
@@ -51,7 +51,7 @@ def test_apply_gradients_clipping():
     loss = y**2  # Loss = (100 * 1)^2 = 10000. Grad = 2 * 100 * 100 = 20000.
 
     clip_norm = 1.0
-    apply_gradients(optimizer, loss, model=model, clip_grad_norm=clip_norm)
+    apply_gradients_(optimizer, loss, model=model, clip_grad_norm=clip_norm)
 
     # Total norm should be clipped to 1.0
     total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_norm)
@@ -66,7 +66,7 @@ def test_apply_gradients_no_model_clipping_error():
     with pytest.raises(
         AssertionError, match="Model must be provided for gradient clipping"
     ):
-        apply_gradients(optimizer, loss, clip_grad_norm=1.0)
+        apply_gradients_(optimizer, loss, clip_grad_norm=1.0)
 
 
 # ==========================================

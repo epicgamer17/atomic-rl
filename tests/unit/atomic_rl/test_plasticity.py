@@ -5,15 +5,15 @@ from typing import Tuple
 from unittest.mock import Mock, patch
 
 from atomic_rl.plasticity import (
-    compute_gradient_utility,
-    compute_magnitude_utility,
-    get_threshold_pruning_mask,
-    get_proportional_pruning_mask,
+    _compute_gradient_utility,
+    _compute_magnitude_utility,
+    _get_threshold_pruning_mask,
+    _get_proportional_pruning_mask,
     reset_optimizer_states_elementwise_,
-    apply_selective_weight_reinitialization,
+    apply_selective_weight_reinitialization_,
     init_cbp_state,
-    get_cbp_replacement_mask,
-    apply_continual_backprop,
+    _get_cbp_replacement_mask,
+    apply_continual_backprop_,
 )
 
 pytestmark = pytest.mark.unit
@@ -28,7 +28,7 @@ def test_compute_gradient_utility_correctness():
     weight = torch.tensor([-2.0, 3.0, 0.5])
     grad = torch.tensor([4.0, -1.0, 0.0])
 
-    utilities = compute_gradient_utility(weight, grad)
+    utilities = _compute_gradient_utility(weight, grad)
     expected = torch.tensor([8.0, 3.0, 0.0])
     torch.testing.assert_close(utilities, expected)
 
@@ -38,13 +38,13 @@ def test_compute_gradient_utility_mismatch():
     weight = torch.randn(2, 3)
     grad = torch.randn(2, 2)
     with pytest.raises(AssertionError, match="shapes must match"):
-        compute_gradient_utility(weight, grad)
+        _compute_gradient_utility(weight, grad)
 
 
 def test_compute_magnitude_utility():
     """Verify magnitude utility calculation: |w|."""
     weight = torch.tensor([-5.5, 0.0, 2.1])
-    utilities = compute_magnitude_utility(weight)
+    utilities = _compute_magnitude_utility(weight)
     torch.testing.assert_close(utilities, torch.tensor([5.5, 0.0, 2.1]))
 
 
@@ -57,7 +57,7 @@ def test_get_threshold_pruning_mask():
     """Verify threshold mask targets elements less than or equal to k * mean(utilities)."""
     utilities = torch.tensor([1.0, 2.0, 3.0, 4.0])  # mean = 2.5
     # threshold = 1.0 * 2.5 = 2.5 -> Elements <= 2.5 are pruned ([True, True, False, False])
-    mask = get_threshold_pruning_mask(utilities, threshold_factor=1.0)
+    mask = _get_threshold_pruning_mask(utilities, threshold_factor=1.0)
     torch.testing.assert_close(
         mask, torch.tensor([True, True, False, False], dtype=torch.bool)
     )
@@ -72,7 +72,7 @@ def test_get_proportional_pruning_mask_stochastic_round_down():
     with patch(
         "torch.bernoulli", return_value=torch.tensor(0.0, device=utilities.device)
     ):
-        mask = get_proportional_pruning_mask(utilities, proportional_factor=0.3)
+        mask = _get_proportional_pruning_mask(utilities, proportional_factor=0.3)
 
     expected = torch.tensor([True, False, False, False, False], dtype=torch.bool)
     torch.testing.assert_close(mask, expected)
@@ -87,7 +87,7 @@ def test_get_proportional_pruning_mask_stochastic_round_up():
     with patch(
         "torch.bernoulli", return_value=torch.tensor(1.0, device=utilities.device)
     ):
-        mask = get_proportional_pruning_mask(utilities, proportional_factor=0.3)
+        mask = _get_proportional_pruning_mask(utilities, proportional_factor=0.3)
 
     expected = torch.tensor([True, True, False, False, False], dtype=torch.bool)
     torch.testing.assert_close(mask, expected)
@@ -136,7 +136,7 @@ def test_swr_raises_runtime_error_if_grad_missing():
     with pytest.raises(
         RuntimeError, match="Gradient utility requested, but param.grad is None"
     ):
-        apply_selective_weight_reinitialization(
+        apply_selective_weight_reinitialization_(
             [param], optimizer, init_fn=nn.init.zeros_, utility_type="gradient"
         )
 
@@ -153,7 +153,7 @@ def test_swr_orchestration_execution_flow():
     def mock_init(tensor):
         tensor.fill_(-99.0)
 
-    masks_applied = apply_selective_weight_reinitialization(
+    masks_applied = apply_selective_weight_reinitialization_(
         [param],
         optimizer,
         init_fn=mock_init,
@@ -192,7 +192,7 @@ def test_get_cbp_replacement_mask_excludes_ineligible():
 
     # replacement_rate = 0.25 -> requests 1 item to replace.
     # It must select index 0 (utility 0.1) because it's the lowest eligible item.
-    mask = get_cbp_replacement_mask(utilities, eligible_mask, replacement_rate=0.25)
+    mask = _get_cbp_replacement_mask(utilities, eligible_mask, replacement_rate=0.25)
     expected = torch.tensor([True, False, False, False], dtype=torch.bool)
     torch.testing.assert_close(mask, expected)
 
@@ -235,7 +235,7 @@ def test_apply_continual_backprop_pipeline():
         tensor.fill_(-5.0)
 
     # 3. Execute CBP sequence pass
-    apply_continual_backprop(
+    apply_continual_backprop_(
         layer_pairs=[(weight, bias, next_weight, next_bias)],
         activations=activations,
         cbp_states=cbp_states,

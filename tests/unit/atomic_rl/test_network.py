@@ -2,10 +2,10 @@ import pytest
 import torch
 import torch.nn as nn
 from typing import Tuple
-from atomic_rl.network import (
+from atomic_rl.bptt.unroll_rnn import unroll_rnn
+from atomic_rl.update_target_net import (
     hard_update_target_network_,
     soft_update_target_network_,
-    unroll_rnn,
 )
 
 pytestmark = pytest.mark.unit

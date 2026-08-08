@@ -19,7 +19,7 @@ Architectural Design & Behavior Notes:
 import torch
 import torch.nn as nn
 from typing import Tuple, Sequence, Optional
-from atomic_rl.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 
 
 class Transpose(nn.Module):
@@ -76,14 +76,14 @@ class AtariCNN(nn.Module):
         self.scale_inputs = scale_inputs
 
         self.network = nn.Sequential(
-            layer_init(nn.Conv2d(in_channels, 32, kernel_size=8, stride=4)),
+            layer_init_(nn.Conv2d(in_channels, 32, kernel_size=8, stride=4)),
             nn.ReLU(),
-            layer_init(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
+            layer_init_(nn.Conv2d(32, 64, kernel_size=4, stride=2)),
             nn.ReLU(),
-            layer_init(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
+            layer_init_(nn.Conv2d(64, 64, kernel_size=3, stride=1)),
             nn.ReLU(),
             nn.Flatten(),
-            layer_init(nn.Linear(64 * 7 * 7, out_features)),
+            layer_init_(nn.Linear(64 * 7 * 7, out_features)),
             nn.ReLU(),
         )
 
@@ -134,7 +134,7 @@ class Conv2dBackbone(nn.Module):
         curr_channels = in_channels
         for out_c, k, s, p in zip(channels, kernel_sizes, strides, paddings):
             layers.append(
-                layer_init(
+                layer_init_(
                     nn.Conv2d(curr_channels, out_c, kernel_size=k, stride=s, padding=p)
                 )
             )

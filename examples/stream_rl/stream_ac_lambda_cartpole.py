@@ -33,11 +33,11 @@ from atomic_rl.action_selection import sample_distribution
 from atomic_rl.initialization import set_seed, lecun_uniform_, make_sparse_init
 from atomic_rl.optimizer import AdaptiveObGD
 from atomic_rl.td import compute_v_td_target
-from atomic_rl.traces import update_accumulating_traces
+from atomic_rl.traces import compute_accumulating_traces
 from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
-    update_welford_stats,
+    compute_welford_stats,
 )
 from atomic_rl.metrics import compute_explained_variance
 from envs.wrappers.normalization import (
@@ -225,7 +225,7 @@ for step in range(MAX_STEPS):
                 batched_trace = actor_traces[p].unsqueeze(0)
                 batched_grad = p.grad.unsqueeze(0)
 
-                updated_trace = update_accumulating_traces(
+                updated_trace = compute_accumulating_traces(
                     traces=batched_trace,
                     gradients=batched_grad,
                     gamma=GAMMA,
@@ -240,7 +240,7 @@ for step in range(MAX_STEPS):
                 batched_trace = critic_traces[p].unsqueeze(0)
                 batched_grad = p.grad.unsqueeze(0)
 
-                updated_trace = update_accumulating_traces(
+                updated_trace = compute_accumulating_traces(
                     traces=batched_trace,
                     gradients=batched_grad,
                     gamma=GAMMA,

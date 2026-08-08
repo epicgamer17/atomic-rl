@@ -2,7 +2,7 @@ import pytest
 from atomic_rl.initialization import (
     _allocate_tensordict,
     make_gnt_init,
-    layer_init,
+    layer_init_,
     sparse_init_weight_,
     set_seed,
     make_sparse_init,
@@ -22,7 +22,7 @@ def test_layer_init():
     std = 0.5
     bias_const = 0.1
 
-    initialized_layer = layer_init(layer, std=std, bias_const=bias_const)
+    initialized_layer = layer_init_(layer, std=std, bias_const=bias_const)
 
     # Check bias initialization
     torch.testing.assert_close(

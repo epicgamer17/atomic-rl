@@ -30,12 +30,12 @@ from tqdm import tqdm
 from pathlib import Path
 
 from atomic_rl.td import true_online_td_update_, semi_gradient_td_update_
-from atomic_rl.traces import update_true_online_traces
+from atomic_rl.traces import compute_true_online_traces
 from atomic_rl.optimizer.metaoptimization import (
     update_autostep_rates_,
     update_idbd_rates_,
 )
-from atomic_rl.plasticity import apply_continual_backprop, init_cbp_state
+from atomic_rl.plasticity import apply_continual_backprop_, init_cbp_state
 
 # Configuration
 NUM_STATES = 19
@@ -248,7 +248,7 @@ def run_experiment(config: str):
             )
 
         if lam > 0.0:
-            traces = update_true_online_traces(
+            traces = compute_true_online_traces(
                 traces=traces.unsqueeze(0),
                 features=rep_t.detach().unsqueeze(0),
                 alpha=alphas_head,
@@ -313,7 +313,7 @@ def run_experiment(config: str):
                 ),
                 (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None),
             ]
-            replacement_masks = apply_continual_backprop(
+            replacement_masks = apply_continual_backprop_(
                 layer_pairs=current_layer_pairs,
                 activations=[a1_t_grad.unsqueeze(0), rep_t_grad.unsqueeze(0)],
                 cbp_states=cbp_states,

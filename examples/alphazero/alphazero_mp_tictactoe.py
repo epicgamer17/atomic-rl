@@ -35,7 +35,7 @@ from atomic_rl.losses import cross_entropy_loss, mse_loss
 from atomic_rl.action_selection import argmax_selector, sample_distribution
 from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
     BufferState,
 )
@@ -148,7 +148,7 @@ class SharedReplayBuffer:
             self.buffer_state.pointer = self._pointer.value
             self.buffer_state.size = self._size.value
 
-            self.buffer_state, _ = circular_write_strategy(
+            self.buffer_state, _ = circular_write_strategy_(
                 self.buffer_state, samples_td
             )
 

@@ -20,7 +20,7 @@ NOTE: perhaps this should be in VPG?
 NOTE: This does not implement the LSTM version which was also described in the A3C Paper or the equivalent Sarsa and DQN versions of the A3C algorithm.
 """
 
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -33,7 +33,7 @@ import wandb
 from functools import partial
 
 from atomic_rl.action_selection import sample_distribution
-from atomic_rl.optimizer import apply_gradients
+from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.returns import compute_n_step_returns
 from atomic_rl.losses import policy_gradient_loss, huber_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
@@ -72,10 +72,10 @@ set_seed(SEED)
 class ActorCritic(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 64))
-        self.l2 = layer_init(nn.Linear(64, 64))
-        self.l3_actor = layer_init(nn.Linear(64, num_actions), std=0.01)
-        self.l3_critic = layer_init(nn.Linear(64, 1), std=1.0)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 64))
+        self.l2 = layer_init_(nn.Linear(64, 64))
+        self.l3_actor = layer_init_(nn.Linear(64, num_actions), std=0.01)
+        self.l3_critic = layer_init_(nn.Linear(64, 1), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -268,7 +268,7 @@ for iteration in range(MAX_ITERATIONS):
     loss = pg_loss + CRITIC_COEFF * critic_loss - ENTROPY_COEFF * ent_loss
 
     # Apply Updates
-    optimizer = apply_gradients(
+    optimizer = apply_gradients_(
         optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
     )
 

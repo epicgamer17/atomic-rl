@@ -34,7 +34,7 @@ from .utils import ema_update, ema_update_
 # TODO: also add a GnT Adam class
 
 
-def compute_gradient_utility(weight: torch.Tensor, grad: torch.Tensor) -> torch.Tensor:
+def _compute_gradient_utility(weight: torch.Tensor, grad: torch.Tensor) -> torch.Tensor:
     """
     Computes the Gradient Utility of weights as defined in the SWR paper.
     Utility = |w * g_w| (First-order Taylor approximation of loss change if weight is zeroed).
@@ -50,7 +50,7 @@ def compute_gradient_utility(weight: torch.Tensor, grad: torch.Tensor) -> torch.
     return torch.abs(weight * grad)
 
 
-def compute_magnitude_utility(weight: torch.Tensor) -> torch.Tensor:
+def _compute_magnitude_utility(weight: torch.Tensor) -> torch.Tensor:
     """
     Computes the Magnitude Utility of weights.
     Utility = |w|
@@ -64,7 +64,7 @@ def compute_magnitude_utility(weight: torch.Tensor) -> torch.Tensor:
     return torch.abs(weight)
 
 
-def get_threshold_pruning_mask(
+def _get_threshold_pruning_mask(
     utilities: torch.Tensor, threshold_factor: float
 ) -> torch.BoolTensor:
     """
@@ -82,7 +82,7 @@ def get_threshold_pruning_mask(
     return utilities <= threshold
 
 
-def get_proportional_pruning_mask(
+def _get_proportional_pruning_mask(
     utilities: torch.Tensor, proportional_factor: float
 ) -> torch.BoolTensor:
     """
@@ -155,7 +155,7 @@ def reset_optimizer_states_elementwise_(
 
 
 # TODO: should this have an _ since it is in place? (it uses an inplace function) I think this is true for other functions in the file too.
-def apply_selective_weight_reinitialization(
+def apply_selective_weight_reinitialization_(
     parameters: Iterable[nn.Parameter],
     optimizer: torch.optim.Optimizer,
     init_fn: Callable[
@@ -184,7 +184,7 @@ def apply_selective_weight_reinitialization(
     Example:
         >>> from atomic_rl.utils import make_gnt_init
         >>> init_fn = make_gnt_init(nn.init.orthogonal_)
-        >>> masks_applied = apply_selective_weight_reinitialization(model.parameters(), optimizer, init_fn)
+        >>> masks_applied = apply_selective_weight_reinitialization_(model.parameters(), optimizer, init_fn)
     """
     masks_applied = {}
     for param in parameters:
@@ -197,11 +197,11 @@ def apply_selective_weight_reinitialization(
                 if param.grad is None:
                     raise RuntimeError(
                         "Gradient utility requested, but param.grad is None. "
-                        "Ensure apply_selective_weight_reinitialization is called AFTER loss.backward()."
+                        "Ensure apply_selective_weight_reinitialization_ is called AFTER loss.backward()."
                     )
-                utilities = compute_gradient_utility(param, param.grad)
+                utilities = _compute_gradient_utility(param, param.grad)
             elif utility_type == "magnitude":
-                utilities = compute_magnitude_utility(param)
+                utilities = _compute_magnitude_utility(param)
             else:
                 raise ValueError(
                     f"Unknown utility_type: '{utility_type}'. Use 'gradient' or 'magnitude'."
@@ -209,9 +209,9 @@ def apply_selective_weight_reinitialization(
 
             # 2. Pruning Mask Calculation
             if prune_type == "threshold":
-                mask = get_threshold_pruning_mask(utilities, k)
+                mask = _get_threshold_pruning_mask(utilities, k)
             elif prune_type == "proportional":
-                mask = get_proportional_pruning_mask(utilities, k)
+                mask = _get_proportional_pruning_mask(utilities, k)
             else:
                 raise ValueError(
                     f"Unknown prune_type: '{prune_type}'. Use 'threshold' or 'proportional'."
@@ -254,7 +254,7 @@ def init_cbp_state(weight: torch.Tensor) -> dict[str, torch.Tensor]:
     }
 
 
-def get_cbp_replacement_mask(
+def _get_cbp_replacement_mask(
     utilities: torch.Tensor,
     eligible_mask: torch.BoolTensor,
     replacement_rate: float,
@@ -305,7 +305,7 @@ def get_cbp_replacement_mask(
     return mask
 
 
-def apply_continual_backprop(
+def apply_continual_backprop_(
     layer_pairs: Iterable[
         tuple[
             torch.Tensor, Optional[torch.Tensor], torch.Tensor, Optional[torch.Tensor]
@@ -346,7 +346,7 @@ def apply_continual_backprop(
     Example:
         >>> from atomic_rl.utils import make_gnt_init
         >>> init_fn = make_gnt_init(nn.init.orthogonal_)
-        >>> apply_continual_backprop(layer_pairs, activations, cbp_states, optimizer, init_fn)
+        >>> apply_continual_backprop_(layer_pairs, activations, cbp_states, optimizer, init_fn)
 
         NOTE: Corresponds to lines 8 onwards in the CBP paper pseudocode (the for each layer loop)
     """
@@ -393,7 +393,7 @@ def apply_continual_backprop(
             eligible_mask = ages > maturity_threshold
 
             # 4. Features to replace: n_l * rho of eligible features with smallest utility
-            mask = get_cbp_replacement_mask(u_hat, eligible_mask, replacement_rate)
+            mask = _get_cbp_replacement_mask(u_hat, eligible_mask, replacement_rate)
 
             if not mask.any():
                 replacement_masks[weight] = mask

@@ -14,7 +14,7 @@ NOTE: DQN is fundamentally on off-policy algorithm and in theory works well with
 
 """
 
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,7 +29,7 @@ from functools import partial
 
 from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
 )
 from atomic_rl.losses import mse_loss
@@ -40,8 +40,8 @@ from atomic_rl.action_selection import (
     with_epsilon_greedy,
 )
 from atomic_rl.schedules import get_linear_schedule
-from atomic_rl.optimizer import apply_gradients
-from atomic_rl.network import hard_update_target_network_
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.update_target_net import hard_update_target_network_
 from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
@@ -68,9 +68,9 @@ set_seed(SEED)
 class DQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
-        self.l2 = layer_init(nn.Linear(512, 512))
-        self.l3 = layer_init(nn.Linear(512, num_actions), std=1.0)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init_(nn.Linear(512, 512))
+        self.l3 = layer_init_(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -158,7 +158,7 @@ for step in range(MAX_STEPS):
         "next_obs": to_tensor(next_obs),
         "gamma": torch.tensor(GAMMA, dtype=torch.float32),
     }
-    buffer_state, _ = circular_write_strategy(
+    buffer_state, _ = circular_write_strategy_(
         buffer_state, TensorDict(transition, batch_size=[]).unsqueeze(0)
     )
 
@@ -207,7 +207,7 @@ for step in range(MAX_STEPS):
         loss = loss.mean()
 
         # Apply Updates
-        optimizer = apply_gradients(optimizer, loss)
+        optimizer = apply_gradients_(optimizer, loss)
 
         if step % 100 == 0:
             # Augment info with orchestration-level metrics

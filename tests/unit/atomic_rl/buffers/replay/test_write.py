@@ -5,11 +5,11 @@ import math
 from tensordict import TensorDict
 
 from atomic_rl.buffers.replay import (
-    circular_write_strategy,
+    circular_write_strategy_,
     compute_is_weights,
     init_buffer,
     init_per_buffer,
-    reservoir_write_strategy,
+    reservoir_write_strategy_,
     update_priorities,
     with_per_tracking,
 )
@@ -24,7 +24,7 @@ def test_circular_write_strategy():
 
     # 1. Write 3 items
     batch = TensorDict({"data": torch.tensor([[1.0], [2.0], [3.0]])}, batch_size=[3])
-    state, indices = circular_write_strategy(state, batch)
+    state, indices = circular_write_strategy_(state, batch)
 
     assert state.size == 3
     assert state.pointer == 3
@@ -36,7 +36,7 @@ def test_circular_write_strategy():
     batch2 = TensorDict(
         {"data": torch.tensor([[4.0], [5.0], [6.0], [7.0]])}, batch_size=[4]
     )
-    state, indices2 = circular_write_strategy(state, batch2)
+    state, indices2 = circular_write_strategy_(state, batch2)
 
     assert state.size == 5  # capped at capacity
     assert state.pointer == 2  # (3 + 4) % 5 = 2
@@ -60,7 +60,7 @@ def test_reservoir_write_strategy():
     batch = TensorDict(
         {"data": torch.arange(10, dtype=torch.float32).reshape(-1, 1)}, batch_size=[10]
     )
-    state, indices = reservoir_write_strategy(state, batch)
+    state, indices = reservoir_write_strategy_(state, batch)
 
     assert state.steps_seen == 10
     assert state.size == 5
@@ -98,7 +98,7 @@ def test_per_tree_logic():
 def test_with_per_tracking():
     capacity = 4
     state = init_per_buffer(capacity, {"data": (1,)})
-    wrapped_write = with_per_tracking(circular_write_strategy)
+    wrapped_write = with_per_tracking(circular_write_strategy_)
 
     # 1. Automatic max priority
     batch = TensorDict({"data": torch.tensor([[10.0]])}, batch_size=[1])

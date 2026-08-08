@@ -13,7 +13,7 @@ Note this is implemented inline with common Rainbow Implementations and may not 
 TODO: Can this be applied to any feature prediction or only q values? Or is it only predicting tensors of features or something? Can this be expanded beyond q values to something more general?
 """
 
-from atomic_rl.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,7 +29,7 @@ from atomic_rl.utils import to_numpy_action
 
 from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
 )
 from atomic_rl.losses import mse_loss
@@ -40,8 +40,8 @@ from atomic_rl.action_selection import (
     with_epsilon_greedy,
 )
 from atomic_rl.schedules import get_linear_schedule
-from atomic_rl.optimizer import apply_gradients
-from atomic_rl.network import hard_update_target_network_
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.update_target_net import hard_update_target_network_
 
 # Constants
 BATCH_SIZE = 128
@@ -67,18 +67,18 @@ class DuelingDQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
         # Shared feature extractor
-        self.feature_layer = layer_init(nn.Linear(input_shape[0], 512))
+        self.feature_layer = layer_init_(nn.Linear(input_shape[0], 512))
 
         # Dueling Heads: Value and Advantage
         self.advantage_head = nn.Sequential(
-            layer_init(nn.Linear(512, 512)),
+            layer_init_(nn.Linear(512, 512)),
             nn.ReLU(),
-            layer_init(nn.Linear(512, num_actions), std=1.0),
+            layer_init_(nn.Linear(512, num_actions), std=1.0),
         )
         self.value_head = nn.Sequential(
-            layer_init(nn.Linear(512, 512)),
+            layer_init_(nn.Linear(512, 512)),
             nn.ReLU(),
-            layer_init(nn.Linear(512, 1), std=1.0),
+            layer_init_(nn.Linear(512, 1), std=1.0),
         )
 
     def forward(self, x):
@@ -169,7 +169,7 @@ for step in range(MAX_STEPS):
         "next_obs": torch.as_tensor(next_obs, dtype=torch.float32),
         "gamma": torch.tensor(GAMMA, dtype=torch.float32),
     }
-    buffer_state, _ = circular_write_strategy(
+    buffer_state, _ = circular_write_strategy_(
         buffer_state, TensorDict(transition, batch_size=[]).unsqueeze(0)
     )
 
@@ -217,7 +217,7 @@ for step in range(MAX_STEPS):
         loss = loss.mean()
 
         # Apply Updates
-        optimizer = apply_gradients(optimizer, loss)
+        optimizer = apply_gradients_(optimizer, loss)
 
         if step % 100 == 0:
             # W&B handles scalars and histograms of tensors (like priorities) automatically.

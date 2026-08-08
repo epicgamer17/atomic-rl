@@ -10,7 +10,7 @@ Compared to PPO, A2C is typically less sample-efficient and less stable on compl
 tasks like HalfCheetah, as it lacks the trust-region / clipping constraints that PPO provides.
 """
 
-from atomic_rl.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,7 +23,7 @@ import wandb
 from functools import partial
 
 from atomic_rl.action_selection import sample_distribution
-from atomic_rl.optimizer import apply_gradients
+from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.returns import compute_n_step_returns
 from atomic_rl.losses import policy_gradient_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
@@ -69,21 +69,21 @@ class ActorCritic(nn.Module):
         super().__init__()
         # Actor Network: Predicts distribution parameters (mu and log_std)
         self.actor_backbone = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], HIDDEN_SIZE)),
+            layer_init_(nn.Linear(input_shape[0], HIDDEN_SIZE)),
             nn.Tanh(),
-            layer_init(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
+            layer_init_(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
             nn.Tanh(),
         )
-        self.actor_mu = layer_init(nn.Linear(HIDDEN_SIZE, num_actions), std=0.01)
+        self.actor_mu = layer_init_(nn.Linear(HIDDEN_SIZE, num_actions), std=0.01)
         self.log_std = nn.Parameter(torch.ones(1, num_actions) * INITIAL_LOG_STD)
 
         # Critic Network: Predicts the state value estimate
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], HIDDEN_SIZE)),
+            layer_init_(nn.Linear(input_shape[0], HIDDEN_SIZE)),
             nn.Tanh(),
-            layer_init(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
+            layer_init_(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
             nn.Tanh(),
-            layer_init(nn.Linear(HIDDEN_SIZE, 1), std=1.0),
+            layer_init_(nn.Linear(HIDDEN_SIZE, 1), std=1.0),
         )
 
     def forward(
@@ -294,7 +294,7 @@ for iteration in range(MAX_ITERATIONS):
     loss = pg_loss + CRITIC_COEFF * critic_loss - ENTROPY_COEFF * ent_loss
 
     # Apply Updates
-    optimizer = apply_gradients(
+    optimizer = apply_gradients_(
         optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
     )
 

@@ -2,7 +2,7 @@
 
 from .mcts import mcts_search
 from .tree import init_mcts_tree
-from .selection import normalize_q_values, puct_score, select_leaf
-from .expansion import expand_node
-from .backpropagation import backpropagate
+from .selection import puct_score, select_leaf
+from .expansion import expand_node_
+from .backpropagation import backpropagate_
 from .policy import get_mcts_visit_policy

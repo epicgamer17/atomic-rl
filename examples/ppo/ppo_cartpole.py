@@ -25,7 +25,7 @@ TODO: More on pessemistic lower bound, what it means, why its useful, etc
 """
 
 # TODO: attempt a cleanup if possible
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -38,7 +38,7 @@ import wandb
 from functools import partial
 
 from atomic_rl.action_selection import sample_distribution
-from atomic_rl.optimizer import apply_gradients
+from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.returns import compute_gae
 from atomic_rl.losses import (
     clipped_surrogate_loss,
@@ -90,18 +90,18 @@ class ActorCritic(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
         self.actor = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, num_actions), std=0.01),
+            layer_init_(nn.Linear(64, num_actions), std=0.01),
         )
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init_(nn.Linear(64, 1), std=1.0),
         )
 
     def forward(self, x):
@@ -332,7 +332,7 @@ for iteration in range(MAX_ITERATIONS):
             loss = pg_loss + CRITIC_COEFF * critic_loss + ENTROPY_COEFF * ent_loss
 
             # Apply Updates
-            optimizer = apply_gradients(
+            optimizer = apply_gradients_(
                 optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
             )
 

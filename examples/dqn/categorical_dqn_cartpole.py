@@ -19,7 +19,7 @@ This paradigm/approach of treating q value estimation, value estimation, or rewa
 NOTE: the below DQN implementation is not the same as used in the paper (it does not use dueling DQN, double DQN, etc).
 """
 
-from atomic_rl.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,7 +35,7 @@ from atomic_rl.utils import to_numpy_action
 
 from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
 )
 from atomic_rl.losses import cross_entropy_loss
@@ -46,8 +46,8 @@ from atomic_rl.action_selection import (
     with_epsilon_greedy,
 )
 from atomic_rl.schedules import get_linear_schedule
-from atomic_rl.optimizer import apply_gradients
-from atomic_rl.network import hard_update_target_network_
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.update_target_net import hard_update_target_network_
 from atomic_rl.metrics import log_distributional_metrics
 
 from atomic_rl.td import compute_categorical_q_td_target
@@ -80,9 +80,9 @@ torch.manual_seed(SEED)
 class CategoricalDQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int, atom_size: int = 51):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
-        self.l2 = layer_init(nn.Linear(512, 512))
-        self.l3 = layer_init(nn.Linear(512, num_actions * atom_size), std=1.0)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init_(nn.Linear(512, 512))
+        self.l3 = layer_init_(nn.Linear(512, num_actions * atom_size), std=1.0)
         self.num_actions = num_actions
         self.atom_size = atom_size
 
@@ -176,7 +176,7 @@ for step in range(MAX_STEPS):
         "next_obs": torch.as_tensor(next_obs, dtype=torch.float32),
         "gamma": torch.tensor(GAMMA, dtype=torch.float32),
     }
-    buffer_state, _ = circular_write_strategy(
+    buffer_state, _ = circular_write_strategy_(
         buffer_state, TensorDict(transition, batch_size=[]).unsqueeze(0)
     )
 
@@ -230,7 +230,7 @@ for step in range(MAX_STEPS):
         loss = loss.mean()
 
         # Apply Updates
-        optimizer = apply_gradients(optimizer, loss)
+        optimizer = apply_gradients_(optimizer, loss)
 
         if step % 100 == 0:
             # Log all metrics from info_dict. W&B handles scalars and histograms of tensors.

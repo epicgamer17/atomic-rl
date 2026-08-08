@@ -2,7 +2,7 @@
 # TODO: compare with 37 implementation details of PPO results, mine seem lower/have less variance than theirs for sure and a mean of 1000 after 1M steps instead of 2000 like theirs.
 # TODO: attempt a cleanup if possible
 # TODO: notes on multi continuous
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -13,7 +13,7 @@ import random
 import wandb
 
 from atomic_rl.action_selection import sample_distribution
-from atomic_rl.optimizer import apply_gradients
+from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.returns import compute_gae
 from atomic_rl.losses import (
     clipped_surrogate_loss,
@@ -66,20 +66,20 @@ class ActorCritic(nn.Module):
         super().__init__()
         # 1. Critic Network
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init_(nn.Linear(64, 1), std=1.0),
         )
 
         # 2. Actor Mean Network
         self.actor_mean = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, num_actions), std=0.01),
+            layer_init_(nn.Linear(64, num_actions), std=0.01),
         )
 
         # 3. Actor LogStd (Independent, learnable parameter)
@@ -334,7 +334,7 @@ for iteration in range(MAX_ITERATIONS):
             loss = pg_loss + CRITIC_COEFF * critic_loss + ENTROPY_COEFF * ent_loss
 
             # Backprop
-            optimizer = apply_gradients(
+            optimizer = apply_gradients_(
                 optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
             )
 

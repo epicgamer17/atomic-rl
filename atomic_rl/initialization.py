@@ -69,7 +69,7 @@ def make_gnt_init(
     return wrapped_init
 
 
-def layer_init(
+def layer_init_(
     layer: nn.Module, std: float = np.sqrt(2), bias_const: float = 0.0
 ) -> nn.Module:
     """

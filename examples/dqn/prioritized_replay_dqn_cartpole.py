@@ -18,7 +18,7 @@ In summary, PER is a simple but effective technique that can significantly impro
 NOTE: below we only implement the TD error based priority method for simplicity.
 """
 
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,7 +35,7 @@ from atomic_rl.buffers.replay import (
     init_per_buffer,
     sample_per,
     update_priorities,
-    circular_write_strategy,
+    circular_write_strategy_,
     with_per_tracking,
 )
 from atomic_rl.schedules import get_linear_schedule
@@ -50,8 +50,8 @@ from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
 )
-from atomic_rl.optimizer import apply_gradients
-from atomic_rl.network import hard_update_target_network_
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.update_target_net import hard_update_target_network_
 
 # Constants
 BATCH_SIZE = 128
@@ -81,9 +81,9 @@ torch.manual_seed(SEED)
 class DQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
-        self.l2 = layer_init(nn.Linear(512, 512))
-        self.l3 = layer_init(nn.Linear(512, num_actions), std=1.0)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init_(nn.Linear(512, 512))
+        self.l3 = layer_init_(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -119,7 +119,7 @@ buffer_state = init_per_buffer(
     device=device,
 )
 # Compose circular write with PER tracking
-per_add_transition = with_per_tracking(circular_write_strategy)
+per_add_transition = with_per_tracking(circular_write_strategy_)
 
 obs, info = env.reset(seed=SEED)
 rng_key = torch.Generator(device=device)
@@ -227,7 +227,7 @@ for step in range(MAX_STEPS):
         loss, info_dict = per_loss_fn(pred_sa, td_target)
 
         # Apply Updates
-        optimizer = apply_gradients(optimizer, loss)
+        optimizer = apply_gradients_(optimizer, loss)
 
         # Update PER Priorities
         buffer_state = update_priorities(

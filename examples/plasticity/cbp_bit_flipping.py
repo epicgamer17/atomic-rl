@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from atomic_rl.plasticity import (
     init_cbp_state,
-    apply_continual_backprop,
+    apply_continual_backprop_,
 )
 from atomic_rl.metrics import (
     compute_dead_units_proportion,
@@ -118,7 +118,7 @@ for step, (x, y) in enumerate(stream):
     loss_cbp.backward()
     opt_cbp.step()
 
-    apply_continual_backprop(
+    apply_continual_backprop_(
         layer_pairs=layer_pairs,
         activations=[a1_cbp.unsqueeze(0)],
         cbp_states=cbp_states,

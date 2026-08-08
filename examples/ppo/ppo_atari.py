@@ -1,7 +1,7 @@
 # Fully Generated
 # TODO: compare with 37 implementation details of PPO results
 # TODO: attempt a cleanup if possible
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -12,7 +12,7 @@ import random
 import wandb
 
 from atomic_rl.action_selection import sample_distribution
-from atomic_rl.optimizer import apply_gradients
+from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.returns import compute_gae
 from atomic_rl.losses import (
     clipped_surrogate_loss,
@@ -65,8 +65,8 @@ class ActorCritic(nn.Module):
         super().__init__()
         # Nature CNN feature extractor from networks layer
         self.network = AtariCNN(in_channels=4, out_features=512, scale_inputs=True)
-        self.actor = layer_init(nn.Linear(512, num_actions), std=0.01)
-        self.critic = layer_init(nn.Linear(512, 1), std=1.0)
+        self.actor = layer_init_(nn.Linear(512, num_actions), std=0.01)
+        self.critic = layer_init_(nn.Linear(512, 1), std=1.0)
 
     def forward(self, x):
         hidden = self.network(x)
@@ -317,7 +317,7 @@ for iteration in range(MAX_ITERATIONS):
             loss = pg_loss + CRITIC_COEFF * critic_loss + ENTROPY_COEFF * ent_loss
 
             # Backprop
-            optimizer = apply_gradients(
+            optimizer = apply_gradients_(
                 optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
             )
 

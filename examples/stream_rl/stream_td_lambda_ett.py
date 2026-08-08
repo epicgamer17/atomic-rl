@@ -34,10 +34,10 @@ from pathlib import Path
 
 from tqdm import tqdm
 from atomic_rl.initialization import set_seed, lecun_uniform_, make_sparse_init
-from atomic_rl.optimizer import AdaptiveObGD, apply_gradients
+from atomic_rl.optimizer import AdaptiveObGD, apply_gradients_
 from atomic_rl.td import compute_v_td_target
-from atomic_rl.traces import update_accumulating_traces
-from atomic_rl.utils import to_tensor, update_welford_stats
+from atomic_rl.traces import compute_accumulating_traces
+from atomic_rl.utils import to_tensor, compute_welford_stats
 from envs.streams.ett import make_ettm2_stream
 
 # ---------------------------------------------------------------------------
@@ -195,7 +195,7 @@ def run_full_pass(device: torch.device):
 
         # Initial observation normalization
         obs_0 = obs_tensor[0]
-        obs_mean, obs_sq_diff, obs_var, obs_count = update_welford_stats(
+        obs_mean, obs_sq_diff, obs_var, obs_count = compute_welford_stats(
             obs_mean, obs_sq_diff, obs_count, obs_0.unsqueeze(0)
         )
         norm_obs = (obs_0 - obs_mean) / torch.sqrt(obs_var + 1e-8)
@@ -211,7 +211,7 @@ def run_full_pass(device: torch.device):
 
             # --- Stream TD(0.8) Update Step ---
             # 1. Normalize next observation
-            obs_mean, obs_sq_diff, obs_var, obs_count = update_welford_stats(
+            obs_mean, obs_sq_diff, obs_var, obs_count = compute_welford_stats(
                 obs_mean, obs_sq_diff, obs_count, next_obs.unsqueeze(0)
             )
             norm_next_obs = (next_obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
@@ -220,7 +220,7 @@ def run_full_pass(device: torch.device):
             # the reference SampleMeanStd; see envs/wrappers/normalization.py)
             term_val = 1.0 if terminated else 0.0
             rew_u = GAMMA * (1.0 - term_val) * rew_u + reward
-            rew_mean, rew_sq_diff, rew_var, rew_count = update_welford_stats(
+            rew_mean, rew_sq_diff, rew_var, rew_count = compute_welford_stats(
                 rew_mean,
                 rew_sq_diff,
                 rew_count,
@@ -259,7 +259,7 @@ def run_full_pass(device: torch.device):
                     if p.grad is not None:
                         batched_trace = stream_traces[p].unsqueeze(0)
                         batched_grad = p.grad.unsqueeze(0)
-                        updated_trace = update_accumulating_traces(
+                        updated_trace = compute_accumulating_traces(
                             traces=batched_trace,
                             gradients=batched_grad,
                             gamma=GAMMA,
@@ -293,7 +293,7 @@ def run_full_pass(device: torch.device):
                     if p.grad is not None:
                         batched_trace = classic_traces[p].unsqueeze(0)
                         batched_grad = p.grad.unsqueeze(0)
-                        updated_trace = update_accumulating_traces(
+                        updated_trace = compute_accumulating_traces(
                             traces=batched_trace,
                             gradients=batched_grad,
                             gamma=GAMMA,

@@ -8,7 +8,7 @@ Introduces policy gradient, simply put increase the probability of playing "good
 On-Policy Algorithm so it can't store old data. Simple places for inovation and changes, data efficiency, baseline methods/advantage computation, adding a value network, more efficient data collection, allowing for trajectories instead of only episodes, relying on Monte Carlo returns (high variance), allowing for offline data, among many others.
 """
 
-from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,7 +21,7 @@ import wandb
 from functools import partial
 
 from atomic_rl.action_selection import sample_distribution
-from atomic_rl.optimizer import apply_gradients
+from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.returns import compute_mc_returns
 from atomic_rl.losses import policy_gradient_loss
 from atomic_rl.utils import (
@@ -47,9 +47,9 @@ set_seed(SEED)
 class Actor(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 64))
-        self.l2 = layer_init(nn.Linear(64, 64))
-        self.l3 = layer_init(nn.Linear(64, num_actions), std=0.01)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 64))
+        self.l2 = layer_init_(nn.Linear(64, 64))
+        self.l3 = layer_init_(nn.Linear(64, num_actions), std=0.01)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -152,7 +152,7 @@ for episode in range(MAX_EPISODES):
     loss = loss.mean()
 
     # Apply Updates
-    optimizer = apply_gradients(optimizer, loss)
+    optimizer = apply_gradients_(optimizer, loss)
 
     if episode % 100 == 0:
         # W&B handles scalars and histograms of tensors (like priorities) automatically.

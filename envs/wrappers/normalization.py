@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from atomic_rl.utils import update_welford_stats
+from atomic_rl.utils import compute_welford_stats
 
 # Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
 #   The authors' wrappers (NormalizeObservation, ScaleReward, ObservationTraces,
@@ -273,7 +273,7 @@ class WelfordNormalizeObservation(gym.ObservationWrapper):
     """
     Single-environment observation normalization using Welford's online algorithm.
 
-    Backed by ``update_welford_stats`` from
+    Backed by ``compute_welford_stats`` from
     ``atomic_rl.utils`` so that examples share a single canonical implementation.
 
     Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
@@ -299,7 +299,7 @@ class WelfordNormalizeObservation(gym.ObservationWrapper):
             observation, dtype=torch.float32, device=self.device
         ).unsqueeze(0)
         self.obs_mean, self.obs_sq_diff, self.obs_var, self.obs_count = (
-            update_welford_stats(self.obs_mean, self.obs_sq_diff, self.obs_count, obs_t)
+            compute_welford_stats(self.obs_mean, self.obs_sq_diff, self.obs_count, obs_t)
         )
         normalized = (obs_t - self.obs_mean.unsqueeze(0)) / torch.sqrt(
             self.obs_var.unsqueeze(0) + self.epsilon
@@ -313,7 +313,7 @@ class WelfordNormalizeReward(gym.RewardWrapper):
     Single-environment reward scaling via discounted trace + Welford.
 
     Tracks ``rew_u = γ·(1 - t_mask)·rew_u + r``, maintains running statistics of
-    ``rew_u`` via ``update_welford_stats``, and returns ``r / σ(rew_u)``.
+    ``rew_u`` via ``compute_welford_stats``, and returns ``r / σ(rew_u)``.
     The termination mask ``t_mask`` zeros the trace on ``terminated or truncated``,
     replacing the separate ``u.zero_()`` step.
 
@@ -360,7 +360,7 @@ class WelfordNormalizeReward(gym.RewardWrapper):
         # trace has a nonzero mean (e.g. Pendulum's all-negative rewards), where
         # E[u^2] > Var(u) would otherwise over-shrink rewards.
         self.rew_mean, self.rew_sq_diff, self.rew_var, self.rew_count = (
-            update_welford_stats(
+            compute_welford_stats(
                 self.rew_mean,
                 self.rew_sq_diff,
                 self.rew_count,

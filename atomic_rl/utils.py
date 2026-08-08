@@ -207,7 +207,7 @@ def to_numpy_action(action_tensor: torch.Tensor) -> np.ndarray:
 # Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
 #   The authors' `SampleMeanVar` / `SampleMeanStd` implement the same running statistics
 #   used by the paper (Algorithm 5); consult them to verify this Welford update.
-def update_welford_stats(
+def compute_welford_stats(
     mean: torch.Tensor, sq_diff: torch.Tensor, count: torch.Tensor, batch: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """

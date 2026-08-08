@@ -12,7 +12,7 @@ From Stream RL Paper:
 #   The authors keep eligibility traces INTERNAL to their optimizers (state["eligibility_trace"],
 #   updated in .td_step() as e.mul_(gamma*lambda).add_(grad)). We split trace management out
 #   into these functional helpers; consult their optim.py to verify the trace update.
-def update_accumulating_traces(
+def compute_accumulating_traces(
     traces: torch.Tensor,  # [batch, num_features]
     gradients: torch.Tensor,  # [batch, num_features]
     gamma: float | torch.Tensor,
@@ -49,7 +49,7 @@ def update_accumulating_traces(
     return new_traces
 
 
-def update_replacing_traces(
+def compute_replacing_traces(
     traces: torch.Tensor,
     features: torch.Tensor,  # Can be continuous/non-binary
     gamma: float | torch.Tensor,
@@ -84,7 +84,7 @@ def update_replacing_traces(
     return new_traces
 
 
-def update_true_online_traces(
+def compute_true_online_traces(
     traces: torch.Tensor,  # [B, features]
     features: torch.Tensor,  # [B, features]
     alpha: float | torch.Tensor,

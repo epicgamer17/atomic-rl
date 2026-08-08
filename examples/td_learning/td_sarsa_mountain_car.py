@@ -24,9 +24,9 @@ from pathlib import Path
 
 from atomic_rl.td import true_online_td_update_, semi_gradient_td_update_
 from atomic_rl.traces import (
-    update_true_online_traces,
-    update_replacing_traces,
-    update_accumulating_traces,
+    compute_true_online_traces,
+    compute_replacing_traces,
+    compute_accumulating_traces,
 )
 from atomic_rl.utils import compute_tile_coding_features
 from atomic_rl.action_selection import with_epsilon_greedy, argmax_selector
@@ -91,7 +91,7 @@ def true_online_sarsa_episode(
                 next_state, next_action, NUM_ACTIONS, NUM_TILINGS, TILES_PER_TILING
             )
 
-            traces = update_true_online_traces(
+            traces = compute_true_online_traces(
                 traces=traces.unsqueeze(0),
                 features=phi_t.unsqueeze(0),
                 alpha=alpha,
@@ -204,7 +204,7 @@ def replacing_sarsa_episode(
                         )
                         traces[phi_other == 1.0] = 0.0
 
-            traces = update_replacing_traces(
+            traces = compute_replacing_traces(
                 traces=traces.unsqueeze(0),
                 features=phi_t.unsqueeze(0),
                 gamma=gamma,
@@ -268,7 +268,7 @@ def accumulating_sarsa_episode(
                 next_state, next_action, NUM_ACTIONS, NUM_TILINGS, TILES_PER_TILING
             )
 
-            traces = update_accumulating_traces(
+            traces = compute_accumulating_traces(
                 traces=traces.unsqueeze(0),
                 gradients=phi_t.unsqueeze(0),
                 gamma=gamma,
