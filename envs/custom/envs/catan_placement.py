@@ -10,7 +10,7 @@ from catanatron.models.map import NUM_NODES
 from catanatron.models.board import get_edges
 from catanatron.players.minimax import AlphaBetaPlayer
 
-from custom_gym_envs.envs.catan import CatanAECEnv, normalize_action
+from .catan import CatanAECEnv, normalize_action
 
 from pettingzoo.utils import wrappers
 
@@ -111,12 +111,14 @@ class CatanPlacementAECEnv(CatanAECEnv):
     def _is_placement_phase(self) -> bool:
         """Returns True if the game is still in the initial placement phase."""
         # In Catan, the placement phase ends when all players have placed exactly 2 initial settlements.
-        # Since settlements can be upgraded to cities later in the game, we must count BOTH 
+        # Since settlements can be upgraded to cities later in the game, we must count BOTH
         # settlements and cities to prevent the environment from thinking we reverted to the placement phase.
         for player in self.game.state.players:
-            settlements = len(self.game.state.buildings_by_color[player.color].get(SETTLEMENT, []))
+            settlements = len(
+                self.game.state.buildings_by_color[player.color].get(SETTLEMENT, [])
+            )
             cities = len(self.game.state.buildings_by_color[player.color].get(CITY, []))
-            
+
             if (settlements + cities) < 2:
                 return True
         return False
