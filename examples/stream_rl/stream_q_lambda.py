@@ -10,6 +10,18 @@ Key Details:
 - Follows Watkins's Q(λ): eligibility traces are reset to zero BEFORE taking
   an environment step if a non-greedy action is selected.
 - Integrates the canonical functional.traces core engine.
+
+NOTE: We chose to use AdaptiveObGD over the standard ObGD. The reference code
+(github.com/mohmdelsayed/streaming-drl) uses plain ObGD for all released stream
+algorithms, and the paper's DQN setup (Appendix F.1) uses plain ObGD as well.
+
+TODO (reference vs. paper):
+  - Reference stream_dqn.py uses plain ObGD (alpha=1, kappa=2); we use AdaptiveObGD
+    here by deliberate choice.
+  - Reference uses HIDDEN_SIZE=128; we use 256.
+  - Reward scaling: we follow paper Algorithm 5 (mean-zero second moment via
+    WelfordNormalizeReward); the reference SampleMeanStd uses the centered variance
+    (see envs/wrappers/normalization.py).
 """
 
 import math
@@ -69,7 +81,6 @@ device = torch.device("cpu")
 # ---------------------------------------------------------------------------
 # TODO/NOTE: figure out if we want to make a network component for these in networks/
 class LayerNormMLP(nn.Module):
-
     def __init__(self, input_dim: int, hidden_dim: int):
         super().__init__()
         self.l1 = nn.Linear(input_dim, hidden_dim)

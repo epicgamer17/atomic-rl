@@ -341,10 +341,12 @@ class WelfordNormalizeReward(gym.RewardWrapper):
         # TODO: The authors' released code (streaming-drl normalization_wrappers.py
         # `SampleMeanStd`) instead tracks the true running mean and computes the
         # centered variance Var(u) = E[(u - mean)^2] (still scaling only, not
-        # mean-centering the reward). The two differ whenever the reward trace has
-        # nonzero mean (e.g. Pendulum's all-negative rewards), where E[u^2] > Var(u)
-        # over-shrinks rewards. To match the reference behavior, track a persistent
-        # running mean (self.rew_mean) and pass it here instead of
+        # mean-centering the reward). This is a deliberate paper-vs-reference
+        # deviation: we follow paper Algorithm 5 (mean-zero second moment), while the
+        # reference uses the centered variance. The two differ whenever the reward
+        # trace has nonzero mean (e.g. Pendulum's all-negative rewards), where
+        # E[u^2] > Var(u) over-shrinks rewards. To match the reference behavior, track
+        # a persistent running mean (self.rew_mean) and pass it here instead of
         # torch.zeros_like(...), e.g.:
         #   self.rew_mean, self.rew_sq_diff, self.rew_var, self.rew_count = (
         #       update_welford_stats(self.rew_mean, self.rew_sq_diff,

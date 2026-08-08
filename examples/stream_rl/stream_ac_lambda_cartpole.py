@@ -3,6 +3,20 @@ Stream AC(λ) — streaming actor-critic on CartPole-v1.
 
 Algorithm 7 from Elsayed, Vasan & Mahmood (2024):
 "Streaming Deep Reinforcement Learning Finally Works" (arXiv:2410.14606).
+
+NOTE: We chose to use AdaptiveObGD over the standard ObGD. The reference code
+(github.com/mohmdelsayed/streaming-drl) uses plain ObGD for all released stream
+algorithms, and the paper's AC setup (Appendix F.1) uses plain ObGD as well.
+
+TODO (reference vs. paper):
+  - Reference stream_ac_continuous.py uses plain ObGD (alpha=1, kappa=2); we use
+    AdaptiveObGD here by deliberate choice.
+  - Reference uses HIDDEN_SIZE=128; we use 256.
+  - Reference wraps the environment with an AddTimeInfo observation wrapper (appends
+    the reward to the state); we do not.
+  - Reward scaling: we follow paper Algorithm 5 (mean-zero second moment via
+    WelfordNormalizeReward); the reference SampleMeanStd uses the centered variance
+    (see envs/wrappers/normalization.py).
 """
 
 import math
@@ -59,7 +73,7 @@ class LayerNormMLP(nn.Module):
         self.ln1 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
         self.l2 = nn.Linear(hidden_dim, hidden_dim)
         self.ln2 = nn.LayerNorm(hidden_dim, elementwise_affine=False)
-        
+
         # Configure and apply sparse initialization
         sparse_init = make_sparse_init(lecun_uniform_, SPARSITY)
         for param in self.parameters():
@@ -116,13 +130,15 @@ env = WelfordNormalizeReward(env, gamma=GAMMA, device=device)
 obs_shape = env.observation_space.shape
 num_actions = env.action_space.n
 
-actor = CategoricalActor(
-    LayerNormMLP(obs_shape[0], HIDDEN_SIZE), num_actions
-).to(device)
+actor = CategoricalActor(LayerNormMLP(obs_shape[0], HIDDEN_SIZE), num_actions).to(
+    device
+)
 critic = CriticNet(LayerNormMLP(obs_shape[0], HIDDEN_SIZE)).to(device)
 
 actor_optimizer = AdaptiveObGD(actor.parameters(), lr=ALPHA, scaling_factor=KAPPA_ACTOR)
-critic_optimizer = AdaptiveObGD(critic.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC)
+critic_optimizer = AdaptiveObGD(
+    critic.parameters(), lr=ALPHA, scaling_factor=KAPPA_CRITIC
+)
 
 actor_traces = {p: torch.zeros_like(p, device=device) for p in actor.parameters()}
 critic_traces = {p: torch.zeros_like(p, device=device) for p in critic.parameters()}

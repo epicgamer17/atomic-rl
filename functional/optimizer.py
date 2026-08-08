@@ -261,7 +261,7 @@ def adaptive_obgd_update_(
         grad (torch.Tensor): The gradient tensor for theta.
         v (torch.Tensor): Second moment vector for theta.
         lr (float): Base step size (alpha).
-        total_norm (float | torch.Tensor): The global L1 norm of normalized gradients ||g / (sqrt(v) + eps)||_1
+        total_norm (float | torch.Tensor): The global L1 norm of normalized gradients ||g / sqrt(v + eps)||_1
             summed across the ENTIRE network.
         scaling_factor (float): Overshooting scaling factor (kappa).
         eps (float): Numerical stability constant (default 1e-8).
@@ -275,7 +275,7 @@ def adaptive_obgd_update_(
         norm = torch.as_tensor(total_norm, dtype=torch.float32, device=theta.device)
         M = lr * scaling_factor * norm
         new_step_size = lr / M.clamp(min=1.0)
-        adj_grad = grad / (torch.sqrt(v) + eps)
+        adj_grad = grad / torch.sqrt(v + eps)
         theta.sub_(adj_grad, alpha=new_step_size)
 
 
@@ -299,7 +299,7 @@ def adaptive_obgd_td_update_(
         trace (torch.Tensor): Eligibility trace tensor for theta (z_w).
         v (torch.Tensor): Second moment vector for theta.
         lr (float): Base step size (alpha).
-        total_norm (float | torch.Tensor): The global L1 norm of normalized traces ||z_w / (sqrt(v) + eps)||_1
+        total_norm (float | torch.Tensor): The global L1 norm of normalized traces ||z_w / sqrt(v + eps)||_1
             summed across the ENTIRE network.
         scaling_factor (float): Overshooting scaling factor (kappa).
         eps (float): Numerical stability constant (default 1e-8).
@@ -315,7 +315,7 @@ def adaptive_obgd_td_update_(
         norm = torch.as_tensor(total_norm, dtype=torch.float32, device=theta.device)
         M = lr * scaling_factor * effective_error * norm
         new_step_size = lr / M.clamp(min=1.0)
-        adj_trace = trace / (torch.sqrt(v) + eps)
+        adj_trace = trace / torch.sqrt(v + eps)
         theta.add_(adj_trace, alpha=new_step_size * error)
 
 
@@ -323,6 +323,21 @@ class AdaptiveObGD(Optimizer):
     """
     Adaptive Overshooting-bounded Gradient Descent (ObGD Adam).
     Implementation of Algorithm 11 (Appendix B) from Elsayed et al. (2024).
+
+    NOTE: The stream examples deliberately use this optimizer (AdaptiveObGD) over the
+    standard ObGD. The paper's ETT/AC setups (Appendix F.1) and the reference code use
+    plain ObGD (alpha=1, kappa=2); we chose AdaptiveObGD to keep the weight update
+    scale-invariant via the EMA second moment.
+
+    TODO (reference vs. paper):
+      - The reference optim.py applies a bias correction v_hat = v / (1 - beta^step) when
+        normalizing; this is NOT in paper Algorithm 11, so we follow the paper (no bias
+        correction). Optionally match the reference.
+      - Our default beta is 0.99; the reference uses 0.999. TODO: match the reference for
+        parity.
+      - API design: the reference keeps eligibility traces internally (constructor takes
+        gamma, lamda, kappa) and exposes a single .step(); we intentionally split trace
+        management into functional.traces + td_step(error, traces).
     """
 
     def __init__(
@@ -382,8 +397,8 @@ class AdaptiveObGD(Optimizer):
                 # v <- beta * v + (1 - beta) * (grad)^2
                 v.mul_(beta).addcmul_(p.grad, p.grad, value=1.0 - beta)
 
-                # || grad / (sqrt(v) + eps) ||_1
-                adj_grad = p.grad / (torch.sqrt(v) + eps)
+                # || grad / sqrt(v + eps) ||_1
+                adj_grad = p.grad / torch.sqrt(v + eps)
                 total_norm += torch.sum(torch.abs(adj_grad))
 
         for group in self.param_groups:
@@ -454,8 +469,8 @@ class AdaptiveObGD(Optimizer):
                 semi_grad = error * trace
                 v.mul_(beta).addcmul_(semi_grad, semi_grad, value=1.0 - beta)
 
-                # || trace / (sqrt(v) + eps) ||_1
-                adj_trace = trace / (torch.sqrt(v) + eps)
+                # || trace / sqrt(v + eps) ||_1
+                adj_trace = trace / torch.sqrt(v + eps)
                 total_norm += torch.sum(torch.abs(adj_trace))
 
         idx = 0

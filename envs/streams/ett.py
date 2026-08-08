@@ -8,6 +8,14 @@ Yields (obs, target_cumulant) pairs where:
 EMA memory traces: S_t = beta * S_{t-1} + (1 - beta) * O_t   (beta=0.999)
 GVF with gamma ~ 0.99 gives a ~100-step / 25-hour prediction horizon.
 
+TODO (reference vs. paper):
+  - The reference ETT environment (github.com/mohmdelsayed/streaming-drl, stream_td.py)
+    min-max normalizes the cumulant to [0, 1] before applying ScaleReward. We follow
+    the paper and yield the raw cumulant. Optionally match the reference for parity.
+  - The reference ObservationTraces wrapper applies a bias-corrected EMA
+    (mean / (1 - beta^count)) when yielding the trace. The paper (Section 4.5) defines
+    the plain EMA trace S_t = beta * S_{t-1} + (1 - beta) * O_t, which we follow here.
+
 Data source: https://github.com/zhouhaoyi/ETDataset
 """
 
