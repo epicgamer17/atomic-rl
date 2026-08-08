@@ -31,8 +31,6 @@ dependencies = [
     "matplotlib",
     "wandb",
     "tqdm",
-    "pyyaml",
-    "typing_extensions",
     "pygame",
 ]
 
@@ -45,7 +43,6 @@ envs = [
     "pettingzoo",
     "catanatron",
     "rlcard",
-    "easydict",
 ]
 examples = [
     "ray",
