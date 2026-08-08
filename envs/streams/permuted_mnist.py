@@ -4,6 +4,8 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Dataset
 from typing import Iterator
 
+from ._data_dir import get_default_data_dir
+
 
 class PermutedDataset(Dataset):
     """Dataset wrapper that applies a specific permutation to the data."""
@@ -21,8 +23,10 @@ class PermutedDataset(Dataset):
 
 
 def make_permuted_mnist_stream(
-    batch_size: int = 30, data_dir: str = "./data"
+    batch_size: int = 30, data_dir: str | None = None
 ) -> Iterator[DataLoader]:
+    if data_dir is None:
+        data_dir = get_default_data_dir("mnist")
 
     transform = transforms.Compose(
         [
