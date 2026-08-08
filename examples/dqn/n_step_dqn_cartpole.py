@@ -7,7 +7,7 @@ This method increases the variance of updates but reduces the bias. In a sense, 
 This idea of bootstrapping the value n steps ahead is foundational to Reinforcement Learning and extremely common. The overall concept is used in N-Step TD (TD(lambda)), GAE (for policy gradients), and Monte Carlo returns. Note, however, that TD(lambda) and GAE use an exponentially weighted sum of all possible n-step returns (all values of n). rather than a single value of n. So learning from n-step returns is a general concept that applies to many other algorithms.
 """
 
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,26 +19,26 @@ import random
 import wandb
 from functools import partial
 
-from functional.replay_buffer import (
+from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
     make_n_step_accumulator,
 )
-from functional.losses import mse_loss
-from functional.td import compute_q_td_target
-from functional.action_selection import (
+from atomic_rl.losses import mse_loss
+from atomic_rl.td import compute_q_td_target
+from atomic_rl.action_selection import (
     argmax_selector,
     gather_q_values,
     with_epsilon_greedy,
 )
-from functional.utils import (
+from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
 )
-from functional.schedules import get_linear_schedule
-from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network_
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.update_target_net import hard_update_target_network_
 
 # Constants
 BATCH_SIZE = 128
@@ -64,9 +64,9 @@ torch.manual_seed(SEED)
 class DQN(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 512))
-        self.l2 = layer_init(nn.Linear(512, 512))
-        self.l3 = layer_init(nn.Linear(512, num_actions), std=1.0)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 512))
+        self.l2 = layer_init_(nn.Linear(512, 512))
+        self.l3 = layer_init_(nn.Linear(512, num_actions), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -163,7 +163,7 @@ for step in range(MAX_STEPS):
 
     # TODO: this is a bit yuckier than the list but also more efficient. maybe update.
     if n_step_transitions.batch_size[0] > 0:
-        buffer_state, _ = circular_write_strategy(buffer_state, n_step_transitions)
+        buffer_state, _ = circular_write_strategy_(buffer_state, n_step_transitions)
 
     # Update state for next tick
     obs = next_obs
@@ -210,7 +210,7 @@ for step in range(MAX_STEPS):
         loss = loss.mean()
 
         # Apply Updates
-        optimizer = apply_gradients(optimizer, loss)
+        optimizer = apply_gradients_(optimizer, loss)
 
         if step % 100 == 0:
             # W&B handles scalars and histograms of tensors (like priorities) automatically.

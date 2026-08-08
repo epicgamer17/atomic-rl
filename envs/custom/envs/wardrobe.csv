@@ -1,4 +1,0 @@
-item_id,r_primary,g_primary,b_primary,r_secondary,g_secondary,b_secondary,r_tertiary,g_tertiary,b_tertiary,patterned,graphic_location,collared_shirt,length,body_part,fit,material
-0,255,255,255,-1,-1,-1,-1,-1,-1,0,0,0,1,2,0,0
-1,0,0,0,-1,-1,-1,-1,-1,-1,0,0,0,1,2,0,0
-0,255,255,255,-1,-1,-1,-1,-1,-1,0,0,0,1,0,0,2

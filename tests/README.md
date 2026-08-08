@@ -15,7 +15,7 @@ tests/
 ├── conftest.py                             # Global PyTorch fixtures (dummy tensors, seeded envs)
 │
 ├── unit/                                   # Tier 1: strictly mirrors the source tree
-│   ├── agents/                             #   ↳ e.g., tests/unit/agents/learner/functional/
+│   ├── agents/                             #   ↳ e.g., tests/unit/agents/learner/atomic_rl/
 │   ├── modules/                            #   ↳ e.g., tests/unit/modules/heads/
 │   ├── replay_buffers/                     #   ↳ e.g., tests/unit/replay_buffers/
 │   └── search/                             #   ↳ e.g., tests/unit/search/aos_search/

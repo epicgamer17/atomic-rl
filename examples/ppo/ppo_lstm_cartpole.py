@@ -1,4 +1,4 @@
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,23 +8,21 @@ from typing import Tuple, List, Optional, Callable
 import numpy as np
 import random
 import wandb
-from einops import rearrange
-from functools import partial
 from tensordict import TensorDict
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_gae
-from functional.losses import (
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.returns import compute_gae
+from atomic_rl.losses import (
     clipped_surrogate_loss,
     entropy_loss,
     probability_ratio,
     clipped_mse_loss,
 )
 from torch.optim.lr_scheduler import LinearLR
-from functional.visualization import compute_explained_variance
-from functional.network import unroll_rnn
-from functional.rollout_buffer import (
+from atomic_rl.metrics import compute_explained_variance
+from atomic_rl.bptt.unroll_rnn import unroll_rnn
+from atomic_rl.buffers.rollout import (
     init_rollout_buffer,
     store_rollout_step_,
     flatten_rollout_buffer,
@@ -33,13 +31,17 @@ from functional.rollout_buffer import (
     yield_shuffled_minibatches,
     yield_sequential_minibatches,
 )
-from functional.utils import (
+from atomic_rl.utils import (
     standardize_tensor,
     to_tensor,
     to_numpy_action,
     extract_vector_env_final_obs,
 )
-from envs.wrappers import FlickeringObservation, NormalizeObservation, VecNormalize
+from atomic_rl.envs.wrappers import (
+    FlickeringObservation,
+    NormalizeObservation,
+    VecNormalize,
+)
 
 # TODO: is this working PPO + LSTM fails to learn MDP cartpole (it performs worse than vanilla PPO)
 
@@ -75,19 +77,19 @@ class ActorCritic(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
         self.actor = nn.Sequential(
-            # TODO: layer_init does not take in an RNG key but should for reproducibility
-            layer_init(nn.Linear(input_shape[0], 64)),
+            # TODO: layer_init_ does not take in an RNG key but should for reproducibility
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, num_actions), std=0.01),
+            layer_init_(nn.Linear(64, num_actions), std=0.01),
         )
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 1), std=1.0),
+            layer_init_(nn.Linear(64, 1), std=1.0),
         )
 
     def forward(self, x: torch.Tensor):
@@ -99,9 +101,9 @@ class ActorCriticLSTM(nn.Module):
         super().__init__()
         # Separate Actor Path
         self.actor_feature_extractor = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
         )
         self.actor_lstm = nn.LSTM(64, 64)
@@ -110,13 +112,13 @@ class ActorCriticLSTM(nn.Module):
                 nn.init.constant_(param, 0)
             elif "weight" in name:
                 nn.init.orthogonal_(param, 1.0)
-        self.actor_head = layer_init(nn.Linear(64, num_actions), std=0.01)
+        self.actor_head = layer_init_(nn.Linear(64, num_actions), std=0.01)
 
         # Separate Critic Path
         self.critic_feature_extractor = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], 64)),
+            layer_init_(nn.Linear(input_shape[0], 64)),
             nn.Tanh(),
-            layer_init(nn.Linear(64, 64)),
+            layer_init_(nn.Linear(64, 64)),
             nn.Tanh(),
         )
         self.critic_lstm = nn.LSTM(64, 64)
@@ -125,7 +127,7 @@ class ActorCriticLSTM(nn.Module):
                 nn.init.constant_(param, 0)
             elif "weight" in name:
                 nn.init.orthogonal_(param, 1.0)
-        self.critic_head = layer_init(nn.Linear(64, 1), std=1.0)
+        self.critic_head = layer_init_(nn.Linear(64, 1), std=1.0)
 
     def forward(
         self,
@@ -177,9 +179,9 @@ class ActorCriticLSTM(nn.Module):
         critic_hidden = self.critic_feature_extractor(x)
 
         # Prepare for LSTM: [T*B, F] -> [B, T, F]
-        actor_hidden = rearrange(actor_hidden, "(t b) f -> b t f", b=B, t=T)
-        critic_hidden = rearrange(critic_hidden, "(t b) f -> b t f", b=B, t=T)
-        mb_dones = rearrange(dones, "(t b) -> b t", b=B, t=T)
+        actor_hidden = actor_hidden.reshape(T, B, -1).transpose(0, 1)
+        critic_hidden = critic_hidden.reshape(T, B, -1).transpose(0, 1)
+        mb_dones = dones.reshape(T, B).transpose(0, 1)
 
         # Unroll LSTMs
         actor_hidden_seq, (actor_h, actor_c) = unroll_rnn(
@@ -190,8 +192,12 @@ class ActorCriticLSTM(nn.Module):
         )
 
         # Re-flatten: [B, T, F] -> [T*B, F]
-        actor_hidden_seq = rearrange(actor_hidden_seq, "b t f -> (t b) f")
-        critic_hidden_seq = rearrange(critic_hidden_seq, "b t f -> (t b) f")
+        actor_hidden_seq = actor_hidden_seq.transpose(0, 1).reshape(
+            -1, self.actor_lstm.hidden_size
+        )
+        critic_hidden_seq = critic_hidden_seq.transpose(0, 1).reshape(
+            -1, self.critic_lstm.hidden_size
+        )
 
         logits = self.actor_head(actor_hidden_seq)
         value = self.critic_head(critic_hidden_seq)
@@ -511,7 +517,7 @@ def train_ppo(use_lstm: bool = False):
                 ent_loss = ent_loss.mean()
 
                 loss = pg_loss + CRITIC_COEFF * critic_loss + ENTROPY_COEFF * ent_loss
-                optimizer = apply_gradients(
+                optimizer = apply_gradients_(
                     optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
                 )
 

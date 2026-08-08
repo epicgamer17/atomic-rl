@@ -6,7 +6,7 @@ Documentation by Signature: A well-named function with a clean signature and typ
 
 Spin straw into gold: Try to make the code as readable and understandable as possible, fully implement features to the best of your ability (following this philosophy) before moving on to the next feature. Maximum utilty per feature/commit.
 
-*functional/*
+*atomic_rl/*
 This layer contains "pure" mathematical functions. 
 These functions should be stateless, have no side effects, and strictly avoid guessing the shapes of incoming tensors wherever possible. Exceptions are permitted for standard ML conventions that inherently require state (e.g., in-place network updates or buffer history closures), provided they are clearly documented. 
 If a function expects a batch dimension, it must receive a batch dimension. On top of this, shapes and expectations should aim to make it so reshaping is rarely needed and if it is, it should be explicit. 
@@ -55,7 +55,11 @@ Functional core, OOP wrapper
 
 
 Torch-like conventions
-Follow PyTorch naming conventions. For example, if using inplace operations the function name should end with an underscore (_)
+Usability over Performance. The primary goal is useability, the secondary goal is reasonable performance. (From PyTorch)
+Explicit is better than implicit (From PyTorch and Zen of Python)
+Simple is better than complex (From PyTorch)
+Python First with Best In Class Language Interoperability (From PyTorch)
+
 Functions should never hardcode device='cuda' or device='cpu', nor should they default to float32 unless absolutely mathematically necessary.
 When creating new tensors inside a functional block, use .new_zeros(), .new_empty(), or torch.zeros_like(tensor) on an incoming tensor to inherently match its device and dtype. This prevents silent device-mismatch crashes during distributed training or when swapping from CPU to GPU.
 Functions that compute targets (e.g., TD-targets, GAE) should explicitly note in their docstrings whether they return detached tensors.
@@ -68,6 +72,8 @@ If a function fundamentally requires a contiguous block of memory (common when r
 
 TorchRL-like conventions
 Never blindly zero-out values using a generic done mask. If an episode is Truncated (hit a time limit), the state still has a bootstrap value, and masking it to 0 artificially corrupts the value function. Your functional TD-learning and return functions must explicitly expect terminated masks, not generic done masks
+
+Relative imports (from .utils import ...) internally is the production best practice. PyTorch does exactly this — torch/nn/modules/linear.py uses from .module import Module, from ..parameter import Parameter. 
 
 *examples/*
 This layer contains examples of how to use the functions in the functional layer.
@@ -108,3 +114,12 @@ Rough file structure:
 If done well, folders should almost exist as their own packages. Users can import the env package, or the optimizers package, or the optimizer.metaoptimization package, depending on their field of research or interest. They should be able to look at the file structure and immediately understand what is in the library. 
 
 It should be easy conceptually to find where the code for a specific feature lives, without needing to understand the algorithms that use it. In other words, the user doesn't need to know that algorithm X uses feature Q, and that paper introduced the feature, so they should look there. They can say I'm looking for this feature, which belongs to this concept and find the feature. 
+
+Function Naming Conventions: 
+1. Trailing underscore for inplace (fn_)
+2. Leading underscore for private (_fn)
+3. Leading 'compute' for pure function (compute_fn)
+4. Leading '_update' for inplace function (_update_fn)
+    a. this is for when it makes more sense to say that something is being updated rather than just a name. May be worth changing this convention, but it is the current one.
+5. Leading 'make' for higher order factories
+6. Leading 'with' for wrapped functions that return a function

@@ -5,7 +5,7 @@ STRUCTURALLY SIMILAR TO a2c_cartpole.py but adapted for continuous actions.
 Uses standard Gymnasium Vector Envs and the functional rollout buffer system.
 """
 
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,20 +17,20 @@ import random
 import wandb
 from functools import partial
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_n_step_returns
-from functional.losses import policy_gradient_loss, mse_loss, entropy_loss
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.returns import compute_n_step_returns
+from atomic_rl.losses import policy_gradient_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
-from functional.visualization import compute_explained_variance
-from functional.rollout_buffer import (
+from atomic_rl.metrics import compute_explained_variance
+from atomic_rl.buffers.rollout import (
     init_rollout_buffer,
     store_rollout_step_,
     flatten_rollout_buffer,
     record_truncations_,
     get_rollout_next_values,
 )
-from functional.utils import (
+from atomic_rl.utils import (
     standardize_tensor,
     to_tensor,
     to_numpy_action,
@@ -76,21 +76,21 @@ class ActorCritic(nn.Module):
 
         # Actor Network: Predicts distribution parameters (mu and log_std)
         self.actor_backbone = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], HIDDEN_SIZE)),
+            layer_init_(nn.Linear(input_shape[0], HIDDEN_SIZE)),
             nn.Tanh(),
-            layer_init(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
+            layer_init_(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
             nn.Tanh(),
         )
-        self.actor_mu = layer_init(nn.Linear(HIDDEN_SIZE, num_actions), std=0.01)
+        self.actor_mu = layer_init_(nn.Linear(HIDDEN_SIZE, num_actions), std=0.01)
         self.log_std = nn.Parameter(torch.ones(1, num_actions) * INITIAL_LOG_STD)
 
         # Critic Network: Predicts the state value estimate
         self.critic = nn.Sequential(
-            layer_init(nn.Linear(input_shape[0], HIDDEN_SIZE)),
+            layer_init_(nn.Linear(input_shape[0], HIDDEN_SIZE)),
             nn.Tanh(),
-            layer_init(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
+            layer_init_(nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE)),
             nn.Tanh(),
-            layer_init(nn.Linear(HIDDEN_SIZE, 1), std=1.0),
+            layer_init_(nn.Linear(HIDDEN_SIZE, 1), std=1.0),
         )
 
     def forward(
@@ -200,7 +200,7 @@ for iteration in range(MAX_ITERATIONS):
 
             # 4. Handle Truncations (Gymnasium auto-resets)
             if "final_observation" in info:
-                from functional.utils import extract_vector_env_final_obs
+                from atomic_rl.utils import extract_vector_env_final_obs
 
                 env_indices, final_obs = extract_vector_env_final_obs(info)
                 # Filter to only record environments that were truncated
@@ -288,7 +288,7 @@ for iteration in range(MAX_ITERATIONS):
     loss = pg_loss + CRITIC_COEFF * critic_loss - ENTROPY_COEFF * ent_loss
 
     # Apply Updates
-    optimizer = apply_gradients(
+    optimizer = apply_gradients_(
         optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
     )
 

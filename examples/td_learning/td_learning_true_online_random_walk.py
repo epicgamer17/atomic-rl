@@ -12,9 +12,9 @@ import random
 from typing import List, Tuple
 from pathlib import Path
 
-from envs.mdp.random_walk import RandomWalkEnv
-from functional.td import true_online_td_update_
-from functional.traces import update_true_online_traces
+from atomic_rl.envs.mdp.random_walk import RandomWalkEnv
+from atomic_rl.td import true_online_td_update_
+from atomic_rl.traces import compute_true_online_traces
 
 # --- CONSTANTS ---
 NUM_NON_TERMINAL_STATES = 5
@@ -55,8 +55,8 @@ def true_online_random_walk_episode(
             phi_next, reward, terminated = env.step()
 
             # 2. Update True Online Eligibility Trace
-            # update_true_online_traces expects [batch, features]
-            traces = update_true_online_traces(
+            # compute_true_online_traces expects [batch, features]
+            traces = compute_true_online_traces(
                 traces=traces.unsqueeze(0),
                 features=phi_t.unsqueeze(0),
                 alpha=alpha,
@@ -147,7 +147,8 @@ def plot_results(
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    plot_path = str(Path(__file__).parent / filename)
+    plot_path = str(Path(__file__).resolve().parents[2] / "figures" / filename)
+    Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
     plt.show()

@@ -11,7 +11,7 @@ Task:
 - Seed reset at the beginning of each algorithm/parameter run.
 """
 
-from functional.initialization import set_seed
+from atomic_rl.initialization import set_seed
 import torch
 import math
 import os
@@ -21,12 +21,12 @@ from typing import Tuple
 
 # TODO: find better ranges for params and U shaped curves.
 
-from functional.meta_optimization import (
+from atomic_rl.optimizer.metaoptimization import (
     IDBD,
     K1,
     K2,
 )
-from envs.streams.random_walk import make_random_walk_tracking_task
+from atomic_rl.envs.streams.random_walk import make_random_walk_tracking_task
 
 
 def run_tracking_experiment(
@@ -51,9 +51,13 @@ def run_tracking_experiment(
     if algorithm == "IDBD":
         optimizer = IDBD([weights], initial_lr=1.0 / num_features, meta_lr=param)
     elif algorithm == "K1":
-        optimizer = K1([weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true)
+        optimizer = K1(
+            [weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true
+        )
     elif algorithm == "K2":
-        optimizer = K2([weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true)
+        optimizer = K2(
+            [weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true
+        )
 
     # State for LS (RLS)
     # Parameter 'param' is the initialization P(0) = param * I
@@ -205,8 +209,11 @@ def main():
     plt.grid(True, alpha=0.3)
     plt.legend()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    save_path = os.path.join(script_dir, "idbd_random_walk_reproduction.png")
+    figures_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "figures"
+    )
+    os.makedirs(figures_dir, exist_ok=True)
+    save_path = os.path.join(figures_dir, "idbd_random_walk_reproduction.png")
 
     plt.savefig(save_path)
     print(f"Plot saved to {save_path}")

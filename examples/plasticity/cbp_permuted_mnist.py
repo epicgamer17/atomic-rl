@@ -3,24 +3,28 @@ Example: CBP vs Standard Adam on Online Permuted MNIST
 """
 
 # TODO: improve and make plots and stuff like SWR example
-from functional.initialization import make_gnt_init
+from atomic_rl.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functional.plasticity import (
+from atomic_rl.plasticity import (
     init_cbp_state,
-    apply_continual_backprop,
+    apply_continual_backprop_,
 )
-from functional.metrics import (
+from atomic_rl.metrics import (
     compute_dead_units_proportion,
     compute_average_weight_magnitude,
     compute_average_gradient_magnitude,
 )
-from functional.visualization import (
+from atomic_rl.metrics import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
-from envs.streams.permuted_mnist import make_permuted_mnist_stream
+from atomic_rl.envs.streams.permuted_mnist import make_permuted_mnist_stream
+from pathlib import Path
+
+FIGURES_DIR = Path(__file__).resolve().parents[2] / "figures"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
 HIDDEN, RHO, ETA, MATURITY, LR = 2000, 1e-4, 0.99, 1000, 0.01
 
@@ -104,7 +108,7 @@ for task_id, loader in enumerate(stream):
         loss_cbp.backward()
         opt_cbp.step()
 
-        apply_continual_backprop(
+        apply_continual_backprop_(
             layer_pairs, [a1, a2], cbp_states, opt_cbp, init_fn, ETA, MATURITY, RHO
         )
 
@@ -145,7 +149,7 @@ plot_continual_learning_performance(
         "CBP": metrics_cbp["Accuracy"],
     },
     title="Permuted MNIST: Online Accuracy",
-    save_path="cbp_mnist_accuracy.png",
+    save_path=str(FIGURES_DIR / "cbp_mnist_accuracy.png"),
 )
 
 # Remove Accuracy for correlates plot
@@ -154,5 +158,5 @@ acc_cbp = metrics_cbp.pop("Accuracy")
 
 plot_plasticity_correlates(
     metrics_dict={"Standard Adam": metrics_std, "CBP": metrics_cbp},
-    save_path="cbp_mnist_correlates.png",
+    save_path=str(FIGURES_DIR / "cbp_mnist_correlates.png"),
 )

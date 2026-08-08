@@ -1,6 +1,6 @@
 import pytest
 import torch
-from networks.transformer import (
+from atomic_rl.networks.transformer import (
     PositionalEncoding,
     MultiHeadSelfAttention,
     TransformerBlock,
@@ -17,7 +17,9 @@ def test_transformer_skeleton_not_implemented():
         pos_enc(torch.randn(2, 10, 64))
 
     mha = MultiHeadSelfAttention(embed_dim=64, num_heads=4)
-    with pytest.raises(NotImplementedError, match="TODO: Implement MultiHeadSelfAttention"):
+    with pytest.raises(
+        NotImplementedError, match="TODO: Implement MultiHeadSelfAttention"
+    ):
         mha(torch.randn(2, 10, 64))
 
     block = TransformerBlock(embed_dim=64, num_heads=4)

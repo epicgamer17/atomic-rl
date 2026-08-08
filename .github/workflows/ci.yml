@@ -26,7 +26,7 @@ jobs:
         pip install -e ".[test]"
         
     - name: Run Unit & Smoke Tests with Coverage
-      run: pytest -m "smoke or unit" --cov=functional --cov=networks --cov-fail-under=90 tests/
+      run: pytest -m "smoke or unit" --cov=atomic_rl --cov=networks --cov-fail-under=90 tests/
 
   # Job 2: Only runs if fast tests pass, and usually restricted to PRs
   heavy-integration-tests:
@@ -58,7 +58,7 @@ jobs:
       with:
         name: failed-training-graphs
         # Uploads any .png files generated during the failed test
-        path: ./*.png 
+        path: figures/*.png 
         retention-days: 5
   # Job 3: Automated Performance Dashboard
   performance-benchmarks:

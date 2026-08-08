@@ -20,15 +20,16 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import concurrent.futures
 from typing import Tuple
+from pathlib import Path
 
-from functional.td import true_online_td_update_, semi_gradient_td_update_
-from functional.traces import (
-    update_true_online_traces,
-    update_replacing_traces,
-    update_accumulating_traces,
+from atomic_rl.td import true_online_td_update_, semi_gradient_td_update_
+from atomic_rl.traces import (
+    compute_true_online_traces,
+    compute_replacing_traces,
+    compute_accumulating_traces,
 )
-from functional.utils import compute_tile_coding_features
-from functional.action_selection import with_epsilon_greedy, argmax_selector
+from atomic_rl.utils import compute_tile_coding_features
+from atomic_rl.action_selection import with_epsilon_greedy, argmax_selector
 
 epsilon_greedy_selector = with_epsilon_greedy(argmax_selector)
 
@@ -90,7 +91,7 @@ def true_online_sarsa_episode(
                 next_state, next_action, NUM_ACTIONS, NUM_TILINGS, TILES_PER_TILING
             )
 
-            traces = update_true_online_traces(
+            traces = compute_true_online_traces(
                 traces=traces.unsqueeze(0),
                 features=phi_t.unsqueeze(0),
                 alpha=alpha,
@@ -203,7 +204,7 @@ def replacing_sarsa_episode(
                         )
                         traces[phi_other == 1.0] = 0.0
 
-            traces = update_replacing_traces(
+            traces = compute_replacing_traces(
                 traces=traces.unsqueeze(0),
                 features=phi_t.unsqueeze(0),
                 gamma=gamma,
@@ -267,7 +268,7 @@ def accumulating_sarsa_episode(
                 next_state, next_action, NUM_ACTIONS, NUM_TILINGS, TILES_PER_TILING
             )
 
-            traces = update_accumulating_traces(
+            traces = compute_accumulating_traces(
                 traces=traces.unsqueeze(0),
                 gradients=phi_t.unsqueeze(0),
                 gamma=gamma,
@@ -427,6 +428,12 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.title("Recreation of Sutton (2014) Figure 4 (Mountain Car Control)")
-    plt.savefig("true_online_sarsa_mountain_car.png", dpi=300)
+    plot_path = (
+        Path(__file__).resolve().parents[2]
+        / "figures"
+        / "true_online_sarsa_mountain_car.png"
+    )
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(plot_path, dpi=300)
 
-    print("Experiment complete! Saved plot to true_online_sarsa_mountain_car.png")
+    print(f"Experiment complete! Saved plot to {plot_path}")

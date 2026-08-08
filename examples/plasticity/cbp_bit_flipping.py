@@ -7,24 +7,28 @@ time (bit flips) and the target is more complex than the learner, the best
 approximation continually changes, requiring the learner to track it.
 """
 
-from functional.initialization import make_gnt_init
+from atomic_rl.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from functional.plasticity import (
+from atomic_rl.plasticity import (
     init_cbp_state,
-    apply_continual_backprop,
+    apply_continual_backprop_,
 )
-from functional.metrics import (
+from atomic_rl.metrics import (
     compute_dead_units_proportion,
     compute_average_weight_magnitude,
     compute_average_gradient_magnitude,
 )
-from functional.visualization import (
+from atomic_rl.metrics import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
-from envs.streams.bit_flipping import make_bit_flipping_stream
+from atomic_rl.envs.streams.bit_flipping import make_bit_flipping_stream
+from pathlib import Path
+
+FIGURES_DIR = Path(__file__).resolve().parents[2] / "figures"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # TODO: improve and make plots and stuff like SWR example
 # TODO: MSE plots seem slightly different than the paper.
@@ -114,7 +118,7 @@ for step, (x, y) in enumerate(stream):
     loss_cbp.backward()
     opt_cbp.step()
 
-    apply_continual_backprop(
+    apply_continual_backprop_(
         layer_pairs=layer_pairs,
         activations=[a1_cbp.unsqueeze(0)],
         cbp_states=cbp_states,
@@ -172,7 +176,7 @@ for step, (x, y) in enumerate(stream):
         linear_block_losses.zero_()
 
         print(
-            f"{step+1:5d} | {metrics_adam['Loss'][-1]:.4f}    | {metrics_cbp['Loss'][-1]:.4f}   | "
+            f"{step + 1:5d} | {metrics_adam['Loss'][-1]:.4f}    | {metrics_cbp['Loss'][-1]:.4f}   | "
             f"Dead Std: {metrics_adam['Dead Units'][-1]:.2f}, Dead CBP: {metrics_cbp['Dead Units'][-1]:.2f}"
         )
 
@@ -203,7 +207,7 @@ plot_continual_learning_performance(
     },
     title="Bit Flipping: MSE Loss",
     ylabel="MSE Loss",
-    save_path="cbp_bit_flipping_loss.png",
+    save_path=str(FIGURES_DIR / "cbp_bit_flipping_loss.png"),
 )
 
 # Remove Loss for correlates plot
@@ -212,5 +216,5 @@ metrics_cbp.pop("Loss")
 
 plot_plasticity_correlates(
     metrics_dict={"Standard Adam": metrics_adam, "CBP": metrics_cbp},
-    save_path="cbp_bit_flipping_correlates.png",
+    save_path=str(FIGURES_DIR / "cbp_bit_flipping_correlates.png"),
 )

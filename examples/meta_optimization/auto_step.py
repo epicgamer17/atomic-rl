@@ -13,18 +13,18 @@ range of meta_lr values, whereas IDBD will heavily depend on tuning meta_lr
 depending on the task's variance scale.
 """
 
-from functional.initialization import set_seed
+from atomic_rl.initialization import set_seed
 import torch
 import math
 import os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from functional.meta_optimization import (
+from atomic_rl.optimizer.metaoptimization import (
     IDBD,
     Autostep,
 )
-from envs.streams.random_walk import make_random_walk_tracking_task
+from atomic_rl.envs.streams.random_walk import make_random_walk_tracking_task
 
 
 def evaluate_algorithm(
@@ -135,8 +135,11 @@ def main():
         "Autostep vs IDBD: Robustness to Meta-LR and Variance (Mahmood et al. 2012)"
     )
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    save_path = os.path.join(script_dir, "autostep_robustness.png")
+    figures_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "figures"
+    )
+    os.makedirs(figures_dir, exist_ok=True)
+    save_path = os.path.join(figures_dir, "autostep_robustness.png")
     plt.savefig(save_path)
     print(f"\nPlot saved to {save_path}")
 

@@ -9,19 +9,21 @@ Key Details:
 - Leverages custom Welford Gym wrappers for inline real-time scaling.
 - Follows Watkins's Q(λ): eligibility traces are reset to zero BEFORE taking
   an environment step if a non-greedy action is selected.
-- Integrates the canonical functional.traces core engine.
+- Integrates the canonical atomic_rl.traces core engine.
 
 NOTE: We chose to use AdaptiveObGD over the standard ObGD. The reference code
 (github.com/mohmdelsayed/streaming-drl) uses plain ObGD for all released stream
 algorithms, and the paper's DQN setup (Appendix F.1) uses plain ObGD as well.
 
-TODO (reference vs. paper):
-  - Reference stream_dqn.py uses plain ObGD (alpha=1, kappa=2); we use AdaptiveObGD
-    here by deliberate choice.
-  - Reference uses HIDDEN_SIZE=128; we use 256.
-  - Reward scaling: we follow paper Algorithm 5 (mean-zero second moment via
-    WelfordNormalizeReward); the reference SampleMeanStd uses the centered variance
-    (see envs/wrappers/normalization.py).
+NOTE (reference vs. paper): We intentionally match the authors' released code
+(github.com/mohmdelsayed/streaming-drl) rather than the paper algorithms — a conscious
+and intentional decision.
+  - HIDDEN_SIZE matches the reference (128).
+  - Reward scaling matches the reference `SampleMeanStd` centered variance via
+    `WelfordNormalizeReward` (see envs/wrappers/normalization.py); this differs from
+    paper Algorithm 5's mean-zero second moment.
+  - Intentional divergence from the reference: we use AdaptiveObGD (the reference
+    stream_dqn.py uses plain ObGD, alpha=1, kappa=2).
 """
 
 import math
@@ -32,27 +34,27 @@ import torch.nn.functional as F
 import numpy as np
 import wandb
 
-from functional.action_selection import (
+from atomic_rl.action_selection import (
     with_epsilon_greedy,
     argmax_selector,
     gather_q_values,
 )
-from functional.initialization import (
+from atomic_rl.initialization import (
     set_seed,
     lecun_uniform_,
     make_sparse_init,
 )
-from functional.optimizer import AdaptiveObGD
-from functional.traces import update_accumulating_traces
-from functional.utils import (
+from atomic_rl.optimizer import AdaptiveObGD
+from atomic_rl.traces import compute_accumulating_traces
+from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
-    update_welford_stats,
+    compute_welford_stats,
 )
-from functional.schedules import get_linear_schedule
-from functional.td import compute_q_td_target
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.td import compute_q_td_target
 
-from envs.wrappers.normalization import (
+from atomic_rl.envs.wrappers.normalization import (
     WelfordNormalizeObservation,
     WelfordNormalizeReward,
 )
@@ -65,7 +67,7 @@ LAMBDA = 0.8
 ALPHA = 1.0
 KAPPA_CRITIC = 2.0
 SPARSITY = 0.9
-HIDDEN_SIZE = 256
+HIDDEN_SIZE = 128  # matches the reference implementation
 MAX_STEPS = 200_000
 SEED = 42
 LOG_INTERVAL = 100
@@ -81,6 +83,8 @@ device = torch.device("cpu")
 # ---------------------------------------------------------------------------
 # TODO/NOTE: figure out if we want to make a network component for these in networks/
 class LayerNormMLP(nn.Module):
+    # Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/layer.py
+    #   The authors' LayerNormMLP (hidden_size=128) with sparse init is in layer.py.
     def __init__(self, input_dim: int, hidden_dim: int):
         super().__init__()
         self.l1 = nn.Linear(input_dim, hidden_dim)
@@ -222,7 +226,7 @@ for step in range(MAX_STEPS):
                 batched_trace = traces[p].unsqueeze(0)
                 batched_grad = p.grad.unsqueeze(0)
 
-                updated_batched_trace = update_accumulating_traces(
+                updated_batched_trace = compute_accumulating_traces(
                     traces=batched_trace,
                     gradients=batched_grad,
                     gamma=GAMMA,

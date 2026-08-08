@@ -8,18 +8,18 @@
 Idea of this example is to attempt to combine the Alberta Plan Related papers i have created so far.
 
 Step 1:
-Online Normalization: [functional/utils.py]
-Meta-Learned Step-Sizes: IDBD or AutoStep [functional/meta_optimization.py]
+Online Normalization: [atomic_rl/utils.py]
+Meta-Learned Step-Sizes: IDBD or AutoStep [atomic_rl/optimizer/metaoptimization/]
 Feature Relevance Tracking: This is handled by both Meta Optimization Methods (IDBD and AutoStep) and Generate and Test methods (CBP and SWR).
     In CBP/SWR, it's the utilities tensor (tracking how much a feature contributes to the output).
     In IDBD/AutoStep, it's the h trace (tracking the correlation of recent gradients).
-Generate-and-Test Mechanics: [functional/plasticity.py] (e.g. SWR, CBP). In combination with Meta Optimization Methods high learning rate features are not pruned, low learning rate features are pruned, and a new feature is generated.
+Generate-and-Test Mechanics: [atomic_rl/plasticity.py] (e.g. SWR, CBP). In combination with Meta Optimization Methods high learning rate features are not pruned, low learning rate features are pruned, and a new feature is generated.
 Resource Budgeting: Controlled by: k (SWR) or replacement_rate (CBP).
 
 """
 
 # TODO: should this use ema?
-from functional.initialization import make_gnt_init
+from atomic_rl.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,10 +29,13 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from pathlib import Path
 
-from functional.td import true_online_td_update_, semi_gradient_td_update_
-from functional.traces import update_true_online_traces
-from functional.meta_optimization import update_autostep_rates_, update_idbd_rates_
-from functional.plasticity import apply_continual_backprop, init_cbp_state
+from atomic_rl.td import true_online_td_update_, semi_gradient_td_update_
+from atomic_rl.traces import compute_true_online_traces
+from atomic_rl.optimizer.metaoptimization import (
+    update_autostep_rates_,
+    update_idbd_rates_,
+)
+from atomic_rl.plasticity import apply_continual_backprop_, init_cbp_state
 
 # Configuration
 NUM_STATES = 19
@@ -173,12 +176,15 @@ def run_experiment(config: str):
             backbone.fc2.weight: init_cbp_state(backbone.fc2.weight),
         }
         layer_pairs = [
-            (backbone.fc1.weight, backbone.fc1.bias, backbone.fc2.weight, backbone.fc2.bias),
-            (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None)
+            (
+                backbone.fc1.weight,
+                backbone.fc1.bias,
+                backbone.fc2.weight,
+                backbone.fc2.bias,
+            ),
+            (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None),
         ]
-        init_fn = make_gnt_init(
-            lambda t: nn.init.kaiming_uniform_(t, a=math.sqrt(5))
-        )
+        init_fn = make_gnt_init(lambda t: nn.init.kaiming_uniform_(t, a=math.sqrt(5)))
     else:
         cbp_states = None
         layer_pairs = None
@@ -242,7 +248,7 @@ def run_experiment(config: str):
             )
 
         if lam > 0.0:
-            traces = update_true_online_traces(
+            traces = compute_true_online_traces(
                 traces=traces.unsqueeze(0),
                 features=rep_t.detach().unsqueeze(0),
                 alpha=alphas_head,
@@ -299,10 +305,15 @@ def run_experiment(config: str):
             # TODO: is theta is updated out-of-place? we assume it is so we dynamically reconstruct
             # the layer pairs to avoid a "stale reference" bug where CBP refers to the step 0 theta.
             current_layer_pairs = [
-                (backbone.fc1.weight, backbone.fc1.bias, backbone.fc2.weight, backbone.fc2.bias),
+                (
+                    backbone.fc1.weight,
+                    backbone.fc1.bias,
+                    backbone.fc2.weight,
+                    backbone.fc2.bias,
+                ),
                 (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None),
             ]
-            replacement_masks = apply_continual_backprop(
+            replacement_masks = apply_continual_backprop_(
                 layer_pairs=current_layer_pairs,
                 activations=[a1_t_grad.unsqueeze(0), rep_t_grad.unsqueeze(0)],
                 cbp_states=cbp_states,
@@ -419,7 +430,8 @@ def main():
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    save_path = Path("examples/alberta_plan/ablation_results.png")
+    save_path = Path(__file__).resolve().parents[2] / "figures" / "ablation_results.png"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, dpi=300)
     print(f"Results saved to {save_path.absolute()}")
 

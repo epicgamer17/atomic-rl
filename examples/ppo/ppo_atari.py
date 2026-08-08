@@ -1,7 +1,7 @@
 # Fully Generated
 # TODO: compare with 37 implementation details of PPO results
 # TODO: attempt a cleanup if possible
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -11,10 +11,10 @@ import numpy as np
 import random
 import wandb
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_gae
-from functional.losses import (
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.returns import compute_gae
+from atomic_rl.losses import (
     clipped_surrogate_loss,
     entropy_loss,
     probability_ratio,
@@ -22,23 +22,22 @@ from functional.losses import (
     mse_loss,
 )
 from torch.optim.lr_scheduler import LinearLR
-from functional.visualization import compute_explained_variance
-from functional.rollout_buffer import (
+from atomic_rl.metrics import compute_explained_variance
+from atomic_rl.buffers.rollout import (
     init_rollout_buffer,
-    store_rollout_step,
     store_rollout_step_,
     record_truncations_,
     get_rollout_next_values,
     yield_shuffled_minibatches,
 )
-from functional.utils import (
+from atomic_rl.utils import (
     ema_update,
     standardize_tensor,
     to_tensor,
     to_numpy_action,
 )
-from envs.wrappers import FireResetEnv
-from networks import AtariCNN
+from atomic_rl.envs.wrappers import FireResetEnv
+from atomic_rl.networks import AtariCNN
 from tensordict import TensorDict
 
 # Constants
@@ -64,10 +63,10 @@ set_seed(SEED)
 class ActorCritic(nn.Module):
     def __init__(self, num_actions: int):
         super().__init__()
-        # Nature CNN feature extractor from networks layer
+        # Nature CNN feature extractor from atomic_rl.networks layer
         self.network = AtariCNN(in_channels=4, out_features=512, scale_inputs=True)
-        self.actor = layer_init(nn.Linear(512, num_actions), std=0.01)
-        self.critic = layer_init(nn.Linear(512, 1), std=1.0)
+        self.actor = layer_init_(nn.Linear(512, num_actions), std=0.01)
+        self.critic = layer_init_(nn.Linear(512, 1), std=1.0)
 
     def forward(self, x):
         hidden = self.network(x)
@@ -210,7 +209,7 @@ for iteration in range(MAX_ITERATIONS):
 
             # 4. Handle Truncations (Gymnasium auto-resets)
             if "final_observation" in info:
-                from functional.utils import extract_vector_env_final_obs
+                from atomic_rl.utils import extract_vector_env_final_obs
 
                 env_indices, final_obs = extract_vector_env_final_obs(info)
                 # Filter to only record environments that were truncated
@@ -318,7 +317,7 @@ for iteration in range(MAX_ITERATIONS):
             loss = pg_loss + CRITIC_COEFF * critic_loss + ENTROPY_COEFF * ent_loss
 
             # Backprop
-            optimizer = apply_gradients(
+            optimizer = apply_gradients_(
                 optimizer, loss, model=model, clip_grad_norm=MAX_GRAD_NORM
             )
 

@@ -25,22 +25,22 @@ import random
 import wandb
 from tensordict import TensorDict
 from functools import partial
-from functional.utils import to_numpy_action
+from atomic_rl.utils import to_numpy_action
 
-from functional.replay_buffer import (
+from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
 )
-from functional.losses import mse_loss
-from functional.td import compute_q_td_target
-from functional.action_selection import (
+from atomic_rl.losses import mse_loss
+from atomic_rl.td import compute_q_td_target
+from atomic_rl.action_selection import (
     argmax_selector,
     gather_q_values,
 )
-from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network_
-from networks.noisy_linear import NoisyLinear
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.update_target_net import hard_update_target_network_
+from atomic_rl.networks.noisy_linear import NoisyLinear
 
 # Constants
 BATCH_SIZE = 128
@@ -154,7 +154,7 @@ for step in range(MAX_STEPS):
         "next_obs": torch.as_tensor(next_obs, dtype=torch.float32),
         "gamma": torch.tensor(GAMMA, dtype=torch.float32),
     }
-    buffer_state, _ = circular_write_strategy(
+    buffer_state, _ = circular_write_strategy_(
         buffer_state, TensorDict(transition, batch_size=[]).unsqueeze(0)
     )
 
@@ -206,7 +206,7 @@ for step in range(MAX_STEPS):
         loss = loss.mean()
 
         # Apply Updates
-        optimizer = apply_gradients(optimizer, loss)
+        optimizer = apply_gradients_(optimizer, loss)
 
         if step % 100 == 0:
             # W&B handles scalars and histograms of tensors (like priorities) automatically.

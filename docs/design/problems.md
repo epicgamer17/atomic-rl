@@ -105,7 +105,7 @@ for step in range(MAX_STEPS):
         loss, grads = calculate_loss(params, batch)
         
         # Apply Updates (Pure function)
-        params, optimizer_state = apply_gradients(params, optimizer_state, grads)
+        params, optimizer_state = apply_gradients_(params, optimizer_state, grads)
         
         # Because we are in a monolith, logging is effortless:
         wandb.log({"loss": loss, "step": step})
@@ -183,8 +183,15 @@ As you can see there is a lot of algorithms I want to try and so I need to be ab
 IN A FEW SENTENCE: Monolitic approach but with functions for stuff that is reused often. No routing code, that is handled by the monolithic shell. Then I can possibly add back validation systems later if I want to. More work on buffers, but in comparison with the Graph Approach I get the persistent layer simply in my files global variables, rather than havin to do graph work. User controls plotting, user makes evaluation loops. 
 
 ROUGH PLAN ON LAYERS?: 
-    Functional Core (rl.functional/)
+    Functional Core (rl.atomic_rl/)
     Replay Buffers (rl.buffers/)
     Search Algorithms (rl.search/)?? (possibly included in functional, and would just call other functional code), possibly define in the monolithic shell?
     Validation Systems (rl.validation/)??
     Execution Loops (rl.exec/)?? (is this where I include backend stuff like ray, threading, sequential, etc?? or another layer??)
+
+--- 
+
+FURTHER NOTE: 
+Unlike many algorithms, and after using many libraries, I no longer believe that plug and play on any environment is desireable for a library. At least not as far as learning to understand that algorithm, and learning to use that algorithm properly. I have found that there are subtle tricks involved for each env that are often not mentioned explicitly in the paper. When they are implicilty hidden by the "plug and play" parts of a library it hides those details and forces the user to dive deep into the library code to understand the tricks occuring for that algorithm on that environment. These may not be major things, perhaps detecting that an environment has a continuous action space and automatically switching the action selection and network to handle it. But there are details here that are now performed by the defaults of the library. Additionally, I find that many object oriented libraries like torch rl become hard to use, they become unpythonic. You suddenly begin to nest objects and start managing object hiearchies. Each of the objects have objects inside (some that are not apparantly obvious) this can make them hard to alter, or managing these objects adds additional boilerplate and relationships that users must learn, instead of simply understanding the concept and math behind the RL, they must now also understand how to use it for that library. This boilerplate also makes it difficult to use these RL libraries with other libraries and Python packages. What if they do not integrate nicely with the boilerplate? Your code becomes a jumbled mess.
+
+A major benefit of the approach we eneded up going with is that it works with essentially any python library stylistically, and if you disagree with our approach chosen, it is easy to simply use the functions we have created to make an OOP Algorithm class that is plug and play. 

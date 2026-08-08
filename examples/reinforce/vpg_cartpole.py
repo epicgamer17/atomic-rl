@@ -5,7 +5,7 @@ Essentially REINFORCE + a value function for the baseline to compute advantages.
 NOTE: very similar to A2C/A3C
 """
 
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init_
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,16 +17,16 @@ import random
 import wandb
 from functools import partial
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_mc_returns
-from functional.losses import policy_gradient_loss, mse_loss
-from functional.utils import (
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.returns import compute_mc_returns
+from atomic_rl.losses import policy_gradient_loss, mse_loss
+from atomic_rl.utils import (
     standardize_tensor,
     to_tensor,
     to_numpy_action,
 )
-from functional.visualization import compute_explained_variance
+from atomic_rl.metrics import compute_explained_variance
 
 # Constants
 LEARNING_RATE = 1e-3
@@ -46,9 +46,9 @@ torch.manual_seed(SEED)
 class Actor(nn.Module):
     def __init__(self, input_shape: Tuple, num_actions: int):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 64))
-        self.l2 = layer_init(nn.Linear(64, 64))
-        self.l3 = layer_init(nn.Linear(64, num_actions), std=0.01)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 64))
+        self.l2 = layer_init_(nn.Linear(64, 64))
+        self.l3 = layer_init_(nn.Linear(64, num_actions), std=0.01)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -60,9 +60,9 @@ class Actor(nn.Module):
 class Critic(nn.Module):
     def __init__(self, input_shape: Tuple):
         super().__init__()
-        self.l1 = layer_init(nn.Linear(input_shape[0], 64))
-        self.l2 = layer_init(nn.Linear(64, 64))
-        self.l3 = layer_init(nn.Linear(64, 1), std=1.0)
+        self.l1 = layer_init_(nn.Linear(input_shape[0], 64))
+        self.l2 = layer_init_(nn.Linear(64, 64))
+        self.l3 = layer_init_(nn.Linear(64, 1), std=1.0)
 
     def forward(self, x):
         x = F.relu(self.l1(x))
@@ -170,7 +170,7 @@ for episode in range(MAX_EPISODES):
     loss = pg_loss + CRITIC_COEFF * critic_loss
 
     # Apply Updates
-    optimizer = apply_gradients(optimizer, loss)
+    optimizer = apply_gradients_(optimizer, loss)
 
     if episode % 100 == 0:
         # Calculate explained variance

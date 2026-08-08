@@ -9,14 +9,17 @@ The paper's ETT setup (Appendix F.1) and the reference code use plain ObGD
 (alpha=1, kappa=2); we deliberately keep AdaptiveObGD here so the update is
 scale-invariant via its EMA second moment.
 
-TODO (reference vs. paper):
-  - The reference implementation (github.com/mohmdelsayed/streaming-drl) uses plain
-    ObGD in stream_td.py; we match the paper's plain-ObGD ETT experiment only in the
-    hyperparameters (ALPHA=1, KAPPA=2) while using AdaptiveObGD for the update.
-  - The reference ETT environment min-max normalizes the cumulant (observation traces)
-    to [0, 1] before scaling the reward (see envs/streams/ett.py); the paper defines
-    the trace without that normalization and we follow the paper.
-  - Reference uses HIDDEN_SIZE=128 (we do too here); the other stream examples use 256.
+NOTE (reference vs. paper): We intentionally match the authors' released code
+(github.com/mohmdelsayed/streaming-drl) rather than the paper algorithms — a conscious
+and intentional decision.
+  - The reference ETT environment min-max normalizes the cumulant to [0, 1] and applies
+    a bias-corrected EMA trace before scaling the reward; we match that (see
+    envs/streams/ett.py).
+  - The reward scaling below mirrors the reference `SampleMeanStd` centered variance,
+    matching `envs/wrappers/normalization.py` `WelfordNormalizeReward`.
+  - Reference uses HIDDEN_SIZE=128 (we do too).
+  - Intentional divergence: the reference uses plain ObGD (alpha=1, kappa=2) in
+    stream_td.py; we deliberately keep AdaptiveObGD for the update.
 """
 
 import math
@@ -27,14 +30,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import wandb
+from pathlib import Path
 
 from tqdm import tqdm
-from functional.initialization import set_seed, lecun_uniform_, make_sparse_init
-from functional.optimizer import AdaptiveObGD, apply_gradients
-from functional.td import compute_v_td_target
-from functional.traces import update_accumulating_traces
-from functional.utils import to_tensor, update_welford_stats
-from envs.streams.ett import make_ettm2_stream
+from atomic_rl.initialization import set_seed, lecun_uniform_, make_sparse_init
+from atomic_rl.optimizer import AdaptiveObGD, apply_gradients_
+from atomic_rl.td import compute_v_td_target
+from atomic_rl.traces import compute_accumulating_traces
+from atomic_rl.utils import to_tensor, compute_welford_stats
+from atomic_rl.envs.streams.ett import make_ettm2_stream
 
 # ---------------------------------------------------------------------------
 # Constants & Hyperparameters (Appendix F.1)
@@ -53,6 +57,8 @@ SEED_START = 42
 # Networks
 # ---------------------------------------------------------------------------
 class LayerNormMLP(nn.Module):
+    # Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/layer.py
+    #   The authors' LayerNormMLP (hidden_size=128) with sparse init is in layer.py.
     def __init__(self, input_dim: int, hidden_dim: int):
         super().__init__()
         self.l1 = nn.Linear(input_dim, hidden_dim)
@@ -182,13 +188,14 @@ def run_full_pass(device: torch.device):
         obs_count = torch.tensor(0.0, device=device)
 
         rew_u = torch.tensor(0.0, device=device)
+        rew_mean = torch.tensor(0.0, device=device)
         rew_sq_diff = torch.tensor(1.0, device=device)
         rew_var = torch.tensor(1.0, device=device)
         rew_count = torch.tensor(0.0, device=device)
 
         # Initial observation normalization
         obs_0 = obs_tensor[0]
-        obs_mean, obs_sq_diff, obs_var, obs_count = update_welford_stats(
+        obs_mean, obs_sq_diff, obs_var, obs_count = compute_welford_stats(
             obs_mean, obs_sq_diff, obs_count, obs_0.unsqueeze(0)
         )
         norm_obs = (obs_0 - obs_mean) / torch.sqrt(obs_var + 1e-8)
@@ -204,16 +211,17 @@ def run_full_pass(device: torch.device):
 
             # --- Stream TD(0.8) Update Step ---
             # 1. Normalize next observation
-            obs_mean, obs_sq_diff, obs_var, obs_count = update_welford_stats(
+            obs_mean, obs_sq_diff, obs_var, obs_count = compute_welford_stats(
                 obs_mean, obs_sq_diff, obs_count, next_obs.unsqueeze(0)
             )
             norm_next_obs = (next_obs - obs_mean) / torch.sqrt(obs_var + 1e-8)
 
-            # 2. Scale reward via discounted Welford trace
+            # 2. Scale reward via discounted Welford trace (centered variance, matching
+            # the reference SampleMeanStd; see envs/wrappers/normalization.py)
             term_val = 1.0 if terminated else 0.0
             rew_u = GAMMA * (1.0 - term_val) * rew_u + reward
-            _, rew_sq_diff, rew_var, rew_count = update_welford_stats(
-                torch.zeros_like(rew_u),
+            rew_mean, rew_sq_diff, rew_var, rew_count = compute_welford_stats(
+                rew_mean,
                 rew_sq_diff,
                 rew_count,
                 rew_u.unsqueeze(0),
@@ -251,7 +259,7 @@ def run_full_pass(device: torch.device):
                     if p.grad is not None:
                         batched_trace = stream_traces[p].unsqueeze(0)
                         batched_grad = p.grad.unsqueeze(0)
-                        updated_trace = update_accumulating_traces(
+                        updated_trace = compute_accumulating_traces(
                             traces=batched_trace,
                             gradients=batched_grad,
                             gamma=GAMMA,
@@ -285,7 +293,7 @@ def run_full_pass(device: torch.device):
                     if p.grad is not None:
                         batched_trace = classic_traces[p].unsqueeze(0)
                         batched_grad = p.grad.unsqueeze(0)
-                        updated_trace = update_accumulating_traces(
+                        updated_trace = compute_accumulating_traces(
                             traces=batched_trace,
                             gradients=batched_grad,
                             gamma=GAMMA,
@@ -350,6 +358,9 @@ def main():
         "--wandb", action="store_true", help="Enable weights and biases logging"
     )
     args = parser.parse_args()
+
+    figures_dir = Path(__file__).resolve().parents[2] / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
 
     # Determine device: use GPU if available and requested, otherwise cpu
     device = torch.device("cpu")
@@ -532,19 +543,19 @@ def main():
         else:
             plt.ylim(40, 80)
             plt.xlim(start_idx, stop_idx)
-        plt.savefig(save_filename, dpi=300, bbox_inches="tight")
+        plt.savefig(figures_dir / save_filename, dpi=300, bbox_inches="tight")
         plt.close()
-        print(f"Saved plot: {save_filename}")
+        print(f"Saved plot: {figures_dir / save_filename}")
 
     # Save combined plot
     fig.tight_layout()
-    combined_filename = "ett_prediction_comparison.png"
+    combined_filename = figures_dir / "ett_prediction_comparison.png"
     fig.savefig(combined_filename, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved combined plot: {combined_filename}")
 
     if args.wandb:
-        wandb.log({"ett_prediction_comparison": wandb.Image(combined_filename)})
+        wandb.log({"ett_prediction_comparison": wandb.Image(str(combined_filename))})
         wandb.finish()
 
 

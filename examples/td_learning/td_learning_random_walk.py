@@ -35,9 +35,9 @@ import random
 from typing import List, Tuple
 from pathlib import Path
 
-from envs.mdp.random_walk import RandomWalkEnv
-from functional.td import semi_gradient_td_update_
-from functional.traces import update_accumulating_traces
+from atomic_rl.envs.mdp.random_walk import RandomWalkEnv
+from atomic_rl.td import semi_gradient_td_update_
+from atomic_rl.traces import compute_accumulating_traces
 
 # --- CONSTANTS ---
 NUM_NON_TERMINAL_STATES = 5
@@ -116,8 +116,8 @@ def random_walk_episode(
 
             # 2. Update Eligibility Trace: e_t = gamma * lambda * e_{t-1} + phi_t
             # Note: Gamma is 1.0 for this task.
-            # update_accumulating_traces expects [batch, features]
-            traces = update_accumulating_traces(
+            # compute_accumulating_traces expects [batch, features]
+            traces = compute_accumulating_traces(
                 traces.unsqueeze(0),
                 phi_t.unsqueeze(0),
                 gamma=1.0,
@@ -211,7 +211,7 @@ def run_batch_experiment():
                 traces = torch.zeros(NUM_NON_TERMINAL_STATES)
                 for phi_t, reward, phi_next, terminated in episode:
                     # Update traces: e_t = gamma * lam * e_{t-1} + phi_t
-                    traces = update_accumulating_traces(
+                    traces = compute_accumulating_traces(
                         traces.unsqueeze(0),
                         phi_t.unsqueeze(0),
                         gamma=1.0,
@@ -266,7 +266,8 @@ def plot_results(
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    plot_path = str(Path(__file__).parent / filename)
+    plot_path = str(Path(__file__).resolve().parents[2] / "figures" / filename)
+    Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
     plt.show()
@@ -284,9 +285,10 @@ def plot_batch_results(results: List[float]):
     plt.title("Replication of Sutton (1988) Figure 4\n(Repeated Presentation)")
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    plot_path = (
-        "/Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff/random_walk_fig4.png"
+    plot_path = str(
+        Path(__file__).resolve().parents[2] / "figures" / "random_walk_fig4.png"
     )
+    Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
     plt.show()

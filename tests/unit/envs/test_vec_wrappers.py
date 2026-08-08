@@ -1,8 +1,8 @@
 import gymnasium as gym
 import numpy as np
 
-from envs.wrappers.normalization import VecNormalize, VecTransformObservation
-from envs.wrappers.pomdp import VecFlickeringObservation
+from atomic_rl.envs.wrappers.normalization import VecNormalize, VecTransformObservation
+from atomic_rl.envs.wrappers.pomdp import VecFlickeringObservation
 
 
 class DummyVectorEnv:
@@ -42,14 +42,18 @@ class DummyVectorEnv:
 
 
 def test_vec_normalize_transforms_final_observation_without_stat_update():
-    env = VecNormalize(DummyVectorEnv(), norm_obs=True, norm_reward=False, training=False)
+    env = VecNormalize(
+        DummyVectorEnv(), norm_obs=True, norm_reward=False, training=False
+    )
     env.obs_rms.mean = np.array([1.0, 2.0])
     env.obs_rms.var = np.array([4.0, 9.0])
 
     obs, rewards, terminated, truncated, info = env.step(np.array([0, 1]))
 
     np.testing.assert_allclose(obs, np.array([[1.0, 1.0], [0.0, 0.0]]), atol=1e-6)
-    np.testing.assert_allclose(info["final_observation"][1], np.array([2.0, 2.0]), atol=1e-6)
+    np.testing.assert_allclose(
+        info["final_observation"][1], np.array([2.0, 2.0]), atol=1e-6
+    )
     assert info["final_observation"][0] is None
     np.testing.assert_array_equal(rewards, np.array([1.0, 2.0], dtype=np.float32))
     np.testing.assert_array_equal(terminated, np.array([False, False]))
@@ -72,5 +76,7 @@ def test_vec_flickering_observation_transforms_final_observation():
     obs, _, _, _, info = env.step(np.array([0, 1]))
 
     np.testing.assert_allclose(obs, np.zeros((2, 2), dtype=np.float32))
-    np.testing.assert_allclose(info["final_observation"][1], np.zeros(2, dtype=np.float32))
+    np.testing.assert_allclose(
+        info["final_observation"][1], np.zeros(2, dtype=np.float32)
+    )
     assert info["final_observation"][0] is None

@@ -14,7 +14,7 @@ which uses a wider architecture (2 hidden layers of 2000 units), the Adam optimi
 and a larger batch size of 64.
 """
 
-from functional.initialization import make_gnt_init
+from atomic_rl.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -23,22 +23,26 @@ import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-from envs.streams.permuted_mnist import make_permuted_mnist_stream
-from functional.plasticity import (
-    apply_selective_weight_reinitialization,
+from atomic_rl.envs.streams.permuted_mnist import make_permuted_mnist_stream
+from atomic_rl.plasticity import (
+    apply_selective_weight_reinitialization_,
     init_cbp_state,
-    apply_continual_backprop,
+    apply_continual_backprop_,
 )
-from functional.metrics import (
+from atomic_rl.metrics import (
     compute_dead_units_proportion,
     compute_average_weight_magnitude,
     compute_average_gradient_magnitude,
     compute_stable_rank,
 )
-from functional.visualization import (
+from atomic_rl.metrics import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
+from pathlib import Path
+
+FIGURES_DIR = Path(__file__).resolve().parents[2] / "figures"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Standardized initialization for GnT methods (SWR/CBP): Weights use Kaiming Uniform, Biases use Zero
 init_weights_kaiming = make_gnt_init(
@@ -146,7 +150,7 @@ def run_permuted_mnist(mode: str, num_tasks: int = 50):
 
             # 3. Apply Plasticity Method
             if mode == "swr" and (global_step + 1) % reinit_frequency == 0:
-                apply_selective_weight_reinitialization(
+                apply_selective_weight_reinitialization_(
                     parameters=hidden_params,
                     optimizer=optimizer,
                     init_fn=init_weights_kaiming,
@@ -158,7 +162,7 @@ def run_permuted_mnist(mode: str, num_tasks: int = 50):
             optimizer.step()
 
             if mode == "cbp":
-                apply_continual_backprop(
+                apply_continual_backprop_(
                     layer_pairs=layer_pairs,
                     activations=[a1, a2, a3],
                     cbp_states=cbp_states,
@@ -211,7 +215,7 @@ def main():
         title="Permuted MNIST: Average Online Accuracy (SWR Paper Fig 1)",
         xlabel="Permutation Number (Task)",
         ylabel="Accuracy (%)",
-        save_path="swr_permuted_mnist_accuracy.png",
+        save_path=str(FIGURES_DIR / "swr_permuted_mnist_accuracy.png"),
     )
 
     # 2. Plot Figure 10: Plasticity Correlates
@@ -226,7 +230,7 @@ def main():
             "SWR": swr_metrics,
             "CBP": cbp_metrics,
         },
-        save_path="swr_permuted_mnist_correlates.png",
+        save_path=str(FIGURES_DIR / "swr_permuted_mnist_correlates.png"),
     )
 
 

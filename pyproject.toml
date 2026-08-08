@@ -29,14 +29,8 @@ dependencies = [
     "gymnasium",
     "tensordict",
     "matplotlib",
-    "pillow",
-    "imageio",
-    "einops",
     "wandb",
     "tqdm",
-    "pyyaml",
-    "typing_extensions",
-    "pandas",
     "pygame",
 ]
 
@@ -49,7 +43,6 @@ envs = [
     "pettingzoo",
     "catanatron",
     "rlcard",
-    "easydict",
 ]
 examples = [
     "ray",
@@ -71,7 +64,7 @@ plot = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["functional", "networks", "envs", "envs.*"]
+include = ["atomic_rl", "networks", "envs", "envs.*"]
 
 [tool.setuptools]
 exclude-package-data = { envs = ["wrappers/deprecated/*", "custom/setup.py"] }
@@ -82,7 +75,7 @@ python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 
 [tool.coverage.run]
-source = ["functional", "networks"]
+source = ["atomic_rl", "networks"]
 omit = [
     "**/deprecated/**",
     "tests/**",

@@ -1,6 +1,6 @@
 import pytest
 import torch
-from networks.cnn import Transpose, AtariCNN, Conv2dBackbone
+from atomic_rl.networks.cnn import Transpose, AtariCNN, Conv2dBackbone
 
 pytestmark = pytest.mark.unit
 

@@ -104,15 +104,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple, List, Dict
 from tensordict import TensorDict
-from networks import ResNetBlock
+from atomic_rl.networks import ResNetBlock
 import wandb
 
-from functional.mcts import mcts_search, get_mcts_visit_policy
-from functional.losses import cross_entropy_loss, mse_loss
-from functional.action_selection import argmax_selector, sample_distribution
-from functional.replay_buffer import (
+from atomic_rl.search import mcts_search, get_mcts_visit_policy
+from atomic_rl.losses import cross_entropy_loss, mse_loss
+from atomic_rl.action_selection import argmax_selector, sample_distribution
+from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
     BufferState,
 )
@@ -319,7 +319,7 @@ def encode_action_plane(action_idx: int, device: torch.device) -> torch.Tensor:
 # 3. MuZero MCTS Search Engine Helper Stubs
 # ============================================================================
 
-# TODO: implement complete MuZero latent dynamics MCTS search engine in functional/mcts.py
+# TODO: implement complete MuZero latent dynamics MCTS search engine in atomic_rl/mcts.py
 # TODO: confirm that this behaviour for question 4 is correct (min-max Q normalization across search tree edges)
 # TODO: confirm that this behaviour for question 28 is correct (legal action masking applied only at root node)
 # TODO: confirm that this behaviour for question 29 is correct (absorbing terminal states during search unrolls)
@@ -614,7 +614,7 @@ def train_muzero_tictactoe():
                 },
                 batch_size=[len(new_samples)],
             ).to(device)
-            replay_buffer_state, _ = circular_write_strategy(
+            replay_buffer_state, _ = circular_write_strategy_(
                 replay_buffer_state, batch_td
             )
 

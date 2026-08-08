@@ -30,16 +30,16 @@ import torch.multiprocessing as mp
 from tensordict import TensorDict
 import wandb
 
-from functional.mcts import mcts_search, get_mcts_visit_policy
-from functional.losses import cross_entropy_loss, mse_loss
-from functional.action_selection import argmax_selector, sample_distribution
-from functional.replay_buffer import (
+from atomic_rl.search import mcts_search, get_mcts_visit_policy
+from atomic_rl.losses import cross_entropy_loss, mse_loss
+from atomic_rl.action_selection import argmax_selector, sample_distribution
+from atomic_rl.buffers.replay import (
     init_buffer,
-    circular_write_strategy,
+    circular_write_strategy_,
     uniform_sample,
     BufferState,
 )
-from envs.functions.tictactoe import (
+from atomic_rl.envs.functions.tictactoe import (
     check_tictactoe_winner,
     tictactoe_dynamics_fn,
     get_canonical_obs,
@@ -148,7 +148,7 @@ class SharedReplayBuffer:
             self.buffer_state.pointer = self._pointer.value
             self.buffer_state.size = self._size.value
 
-            self.buffer_state, _ = circular_write_strategy(
+            self.buffer_state, _ = circular_write_strategy_(
                 self.buffer_state, samples_td
             )
 
@@ -211,7 +211,7 @@ def actor_worker(
         root_embed = boards.new_zeros(envs_per_actor, 3, 3, 2)
         root_embed[..., 0] = boards
         root_embed[..., 1] = players.view(-1, 1, 1).expand(-1, 3, 3).float()
-        root_legal_mask = (boards.view(envs_per_actor, -1) == 0)
+        root_legal_mask = boards.view(envs_per_actor, -1) == 0
 
         def expansion_fn(embeddings):
             with torch.no_grad():

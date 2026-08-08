@@ -9,7 +9,7 @@ The main idea of the paper was that there had been several incremental improveme
 6. Noisy Nets
 """
 
-from functional.initialization import set_seed
+from atomic_rl.initialization import set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,30 +21,30 @@ import random
 import wandb
 from functools import partial
 
-from functional.replay_buffer import (
+from atomic_rl.buffers.replay import (
     init_per_buffer,
     sample_per,
     update_priorities,
-    circular_write_strategy,
+    circular_write_strategy_,
     with_per_tracking,
     make_n_step_accumulator,
 )
-from functional.schedules import get_linear_schedule
-from functional.losses import with_per_weights, cross_entropy_loss
-from functional.td import compute_categorical_q_td_target
-from functional.action_selection import (
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.losses import with_per_weights, cross_entropy_loss
+from atomic_rl.td import compute_categorical_q_td_target
+from atomic_rl.action_selection import (
     argmax_selector,
     expected_value,
     gather_q_values,
 )
-from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network_
-from functional.visualization import log_distributional_metrics
-from functional.utils import (
+from atomic_rl.optimizer import apply_gradients_
+from atomic_rl.update_target_net import hard_update_target_network_
+from atomic_rl.metrics import log_distributional_metrics
+from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
 )
-from networks.noisy_linear import NoisyLinear
+from atomic_rl.networks.noisy_linear import NoisyLinear
 
 # --- Constants ---
 BATCH_SIZE = 128
@@ -71,10 +71,10 @@ SUPPORT = torch.linspace(V_MIN, V_MAX, ATOM_SIZE)
 # Multi-step
 N_STEPS = 3
 
+
 # Seeding for reproducibility
 # TODO/NOTE: figure out if we want to make a network component for these in networks/
 class RainbowNetwork(nn.Module):
-
     """
     Rainbow DQN Network: Combines Dueling architecture, Noisy Nets, and Distributional RL.
     """
@@ -166,7 +166,7 @@ buffer_state = init_per_buffer(
     },
     device=device,
 )
-per_add_transition = with_per_tracking(circular_write_strategy)
+per_add_transition = with_per_tracking(circular_write_strategy_)
 
 # Initialize N-Step Accumulator
 accumulate_n_step, reset_accumulator = make_n_step_accumulator(
@@ -293,7 +293,7 @@ for step in range(MAX_STEPS):
         loss, info_dict = per_loss_fn(pred_sa_logits, td_target)
 
         # Apply Gradients
-        optimizer = apply_gradients(optimizer, loss)
+        optimizer = apply_gradients_(optimizer, loss)
 
         # Update PER Priorities
         buffer_state = update_priorities(

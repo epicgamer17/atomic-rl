@@ -8,7 +8,7 @@ Key Ideas:
 
 # TODO: results seem slightly noisier/worse than normal DQN. in some ways like my PPO+lstm results. should add a comparison on the flickering env of DQN and DRQN.
 
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init_, set_seed
 import random
 from typing import Tuple, Optional
 
@@ -19,25 +19,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import wandb
-from einops import rearrange
 from tensordict import TensorDict
 
-from functional.action_selection import (
+from atomic_rl.action_selection import (
     argmax_selector,
     gather_q_values,
     with_epsilon_greedy,
 )
-from functional.losses import mse_loss, with_sequence_mask
-from functional.network import hard_update_target_network_
-from functional.replay_buffer import (
-    circular_write_strategy,
+from atomic_rl.losses import mse_loss, with_sequence_mask
+from atomic_rl.update_target_net import hard_update_target_network_
+from atomic_rl.buffers.replay import (
+    circular_write_strategy_,
     init_buffer,
     make_padded_chunk_accumulator,
     uniform_sample,
 )
-from functional.schedules import get_linear_schedule
-from functional.td import compute_q_td_target
-from functional.utils import to_tensor
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.td import compute_q_td_target
+from atomic_rl.utils import to_tensor
 
 # Constants
 BATCH_SIZE = 32
@@ -71,13 +70,13 @@ class RecurrentDQN(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         self.feature_extractor = nn.Sequential(
-            layer_init(nn.Linear(obs_dim, hidden_size)),
+            layer_init_(nn.Linear(obs_dim, hidden_size)),
             nn.ReLU(),
         )
 
         # Using batch_first=True makes shape tracking (B, T, Features) much easier
         self.lstm = nn.LSTM(hidden_size, hidden_size, batch_first=True)
-        self.q_head = layer_init(nn.Linear(hidden_size, action_dim), std=1.0)
+        self.q_head = layer_init_(nn.Linear(hidden_size, action_dim), std=1.0)
 
     def forward(
         self,
@@ -100,7 +99,7 @@ class RecurrentDQN(nn.Module):
         # (B, T, ObsDim) -> (B*T, HiddenSize)
         flat_obs = obs_sequence.flatten(0, 1)
         features = self.feature_extractor(flat_obs)
-        features = rearrange(features, "(b t) h -> b t h", b=batch_size, t=seq_len)
+        features = features.view(batch_size, seq_len, -1)
 
         # lstm_out: (B, T, HiddenSize)
         lstm_out, new_hidden_state = self.lstm(features, hidden_state)
@@ -240,7 +239,7 @@ def train():
 
         if ready_chunks.batch_size[0] > 0:
             # Write full sequences to buffer
-            buffer_state, _ = circular_write_strategy(buffer_state, ready_chunks)
+            buffer_state, _ = circular_write_strategy_(buffer_state, ready_chunks)
 
         # Update Recurrent State
         obs = next_obs
