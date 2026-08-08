@@ -1,6 +1,6 @@
 import pytest
 from tensordict import TensorDict
-from atomic_rl.mcts import mcts_search
+from atomic_rl.search import mcts_search
 import torch
 
 pytestmark = pytest.mark.smoke

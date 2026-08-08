@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from typing import Iterable
@@ -76,3 +77,21 @@ def compute_stable_rank(activations: torch.Tensor) -> float:
         return 0.0
 
     return squared_sv.sum().item() / max_sq_sv
+
+
+def compute_explained_variance(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Computes the explained variance of a regression problem.
+    Formula: 1 - Var(y_true - y_pred) / Var(y_true)
+
+    Args:
+        y_true (np.ndarray): The ground truth returns.
+        y_pred (np.ndarray): The predicted values.
+
+    Returns:
+        float: The explained variance. 1.0 is perfect prediction, 0.0 or less means it is bad.
+    """
+    var_y = np.var(y_true)
+    if var_y == 0:
+        return np.nan
+    return 1 - np.var(y_true - y_pred) / var_y

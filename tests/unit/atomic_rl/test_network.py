@@ -6,7 +6,6 @@ from atomic_rl.network import (
     hard_update_target_network_,
     soft_update_target_network_,
     unroll_rnn,
-    make_burn_in_evaluator,
 )
 
 pytestmark = pytest.mark.unit
@@ -153,39 +152,3 @@ def test_unroll_rnn_mid_sequence_resets():
     h_t1, c_t1 = cell.recorded_states[1]
     assert torch.all(h_t1[:, 0, :] == 0.0)  # Batch element 0 reset
     assert torch.all(h_t1[:, 1, :] == 1.0)  # Batch element 1 preserved
-
-
-# ==========================================
-# Tests for make_burn_in_evaluator
-# ==========================================
-
-
-def test_make_burn_in_evaluator_execution():
-    """Verify state initialization and parameter pipeline inside the higher-order closure."""
-    model = DummyDRQN(num_layers=2, hidden_size=8)
-    dones = torch.zeros(2, 4)
-    batch_size = 2
-
-    evaluator = make_burn_in_evaluator(model, dones, batch_size)
-    obs = torch.randn(batch_size, 4)
-
-    q_values = evaluator(obs)
-
-    # Validate correct structure mappings
-    assert q_values.shape == (2, 3)
-
-    # Verify the automatic generation of fresh zeroed states for burn-in tasks
-    h0, c0 = model.recorded_forward_args["lstm_state"]
-    assert h0.shape == (2, 2, 8)  # [num_layers, batch_size, hidden_size]
-    assert torch.all(h0 == 0.0)
-    assert torch.all(c0 == 0.0)
-
-
-def test_make_burn_in_evaluator_fail_fast():
-    """Verify that the closure enforces input dimensionality matching rules immediately."""
-    model = DummyDRQN()
-    evaluator = make_burn_in_evaluator(model, torch.zeros(1), batch_size=1)
-
-    # Passing an unbatched/flat scalar input (0D tensor) should trigger the assertion error
-    with pytest.raises(AssertionError, match="Expected flat batched obs"):
-        evaluator(torch.tensor(1.5))

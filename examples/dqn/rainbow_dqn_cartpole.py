@@ -21,7 +21,7 @@ import random
 import wandb
 from functools import partial
 
-from atomic_rl.replay_buffer import (
+from atomic_rl.buffers.replay import (
     init_per_buffer,
     sample_per,
     update_priorities,
@@ -39,7 +39,7 @@ from atomic_rl.action_selection import (
 )
 from atomic_rl.optimizer import apply_gradients
 from atomic_rl.network import hard_update_target_network_
-from atomic_rl.visualization import log_distributional_metrics
+from atomic_rl.metrics import log_distributional_metrics
 from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,

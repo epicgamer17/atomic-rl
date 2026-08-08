@@ -41,6 +41,7 @@ def hard_update_target_network_(model: nn.Module, target_model: nn.Module) -> No
 # NOTE: EfficientZero Reward LSTM uses similar to PPO, fixed horizon that resets periodically (every 5 or 3 steps), despite being an offline/off-policy algorithm.
 # TODO: should R2D2 have an initial LSTM state from the buffer to kick off the burn in?
 # TODO: what is BPTT?
+# TODO: should the user handle the unrolling?
 def unroll_rnn(
     cell: nn.Module,
     inputs: torch.Tensor,
@@ -98,41 +99,3 @@ def unroll_rnn(
     # .contiguous() is fundamentally required here because the transpose makes the sequence-major output non-contiguous.
     # If the caller attempts to .view() or flatten the sequence dimensions for MLP processing, it will trigger a RuntimeError.
     return torch.cat(outputs, dim=0).transpose(0, 1).contiguous(), state
-
-    # NOTE/TODO: there are many ways of handling recurrent states in learning. they tend to differ between online and offline. online simply uses the hidden states from the collection steps, so no burn in is requred. the below method is one way of handling this for offline learning which requires a burn in. Make this more clear.
-    # TODO: thoughts on this API:
-    # hidden_state = online_net.init_hidden(batch_size, batch.device)
-    # target_hidden_state = target_net.init_hidden(batch_size, batch.device)
-    # and having the user sort of handle the unrolling?
-
-
-def make_burn_in_evaluator(
-    model: torch.nn.Module, dones: torch.Tensor, batch_size: int
-) -> Callable[[torch.Tensor], torch.Tensor]:
-    """
-    Higher-order function that creates a stateless evaluator for Q-learning.
-    It automatically initializes the zeroed hidden states required to correctly do the burn in phase for offline recurrent learning algorithms (like DRQN) and handles the recurrent forward pass.
-    """
-
-    def evaluator(obs: torch.Tensor) -> torch.Tensor:
-        # Fail Fast: Ensure we have the flat tensor expected
-        assert obs.ndim >= 2, f"Expected flat batched obs, got {obs.shape}"
-
-        # Dynamically pull dimensions from the model's LSTM
-        num_layers = model.lstm.num_layers
-        hidden_size = model.lstm.hidden_size
-        device = obs.device
-
-        # Initialize zero states (DRQN Bootstrapped Random Update rule)
-        zero_state = (
-            obs.new_zeros(num_layers, batch_size, hidden_size),
-            obs.new_zeros(num_layers, batch_size, hidden_size),
-        )
-
-        # Forward pass
-        q_values, _ = model(
-            x=obs, lstm_state=zero_state, dones=dones, batch_size=batch_size
-        )
-        return q_values
-
-    return evaluator

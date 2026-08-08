@@ -22,8 +22,8 @@ from atomic_rl.optimizer import apply_gradients
 from atomic_rl.returns import compute_n_step_returns
 from atomic_rl.losses import policy_gradient_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
-from atomic_rl.visualization import compute_explained_variance
-from atomic_rl.rollout_buffer import (
+from atomic_rl.metrics import compute_explained_variance
+from atomic_rl.buffers.rollout import (
     init_rollout_buffer,
     store_rollout_step_,
     flatten_rollout_buffer,

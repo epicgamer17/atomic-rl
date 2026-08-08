@@ -28,7 +28,7 @@ from atomic_rl.action_selection import (
 )
 from atomic_rl.losses import mse_loss, with_sequence_mask
 from atomic_rl.network import hard_update_target_network_
-from atomic_rl.replay_buffer import (
+from atomic_rl.buffers.replay import (
     circular_write_strategy,
     init_buffer,
     make_padded_chunk_accumulator,

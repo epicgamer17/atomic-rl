@@ -34,6 +34,8 @@ NOTE: Focus of the library (when it comes to search based algos) is not on Alpha
 TODO: some hyperparameter tuning. it works well, but still loses sometimes to a random bot, which i remember when i had muzero working on the older library never happened. I imagine alphazero should be better.
 
 TODO: training on a similarly sized model takes way longer than it did before. figure out why and how the current system can be improved and optimized to run faster. a training run used to take about 20 minutes for 20k steps on MuZero with 3 Resnet blocks per component and 24 filters each, batch size 8, 25 simulations, 3 torch mp actor processes, and batched mcts with a search batch size of 5, also unroll of 5. now its well over an hour, probably over 2 with the alphazero params which should be faster in terms of wall clock time. on mac on cpu
+
+TODO: why didn't we use any of our returns.py or returns/ folder or whatever (compute_mc_return fn). is it because we are not working on whole game sequences? should we update to use that?
 """
 
 import copy
@@ -45,10 +47,10 @@ import torch.nn.functional as F
 from typing import Tuple, List, Dict
 from tensordict import TensorDict
 import wandb
-from atomic_rl.mcts import mcts_search, get_mcts_visit_policy
+from atomic_rl.search import mcts_search, get_mcts_visit_policy
 from atomic_rl.losses import cross_entropy_loss, mse_loss
 from atomic_rl.action_selection import argmax_selector, sample_distribution
-from atomic_rl.replay_buffer import (
+from atomic_rl.buffers.replay import (
     init_buffer,
     circular_write_strategy,
     uniform_sample,
@@ -197,7 +199,7 @@ def run_self_play_game(
 
     while True:
         move_count += 1
-        action_mask = (board.view(-1) == 0)
+        action_mask = board.view(-1) == 0
 
         canonical_obs = get_canonical_obs(board, player)
 
@@ -421,7 +423,7 @@ def train_alphazero_tictactoe():
         learner_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
 
-    # Initialize Replay Buffer using atomic_rl.replay_buffer
+    # Initialize Replay Buffer using atomic_rl.buffers.replay
     buffer_shapes = {
         "state": (3, 3, 3),
         "target_policy": (9,),
@@ -509,7 +511,7 @@ def train_alphazero_tictactoe():
         if replay_buffer_state.size < MIN_BUFFER_SIZE:
             continue
 
-        # 2. Continuous 1-Step Network SGD Optimization using uniform_sample from atomic_rl.replay_buffer
+        # 2. Continuous 1-Step Network SGD Optimization using uniform_sample from atomic_rl.buffers.replay
         minibatch = uniform_sample(replay_buffer_state, rng_key, BATCH_SIZE)
         states = minibatch["state"]
         target_policies = minibatch["target_policy"]

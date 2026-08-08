@@ -27,7 +27,7 @@ import wandb
 from tensordict import TensorDict
 from functools import partial
 
-from atomic_rl.replay_buffer import (
+from atomic_rl.buffers.replay import (
     init_buffer,
     circular_write_strategy,
     uniform_sample,

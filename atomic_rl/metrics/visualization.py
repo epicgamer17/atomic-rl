@@ -5,24 +5,8 @@ import matplotlib.pyplot as plt
 from typing import Optional
 
 
-def compute_explained_variance(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """
-    Computes the explained variance of a regression problem.
-    Formula: 1 - Var(y_true - y_pred) / Var(y_true)
-
-    Args:
-        y_true (np.ndarray): The ground truth returns.
-        y_pred (np.ndarray): The predicted values.
-
-    Returns:
-        float: The explained variance. 1.0 is perfect prediction, 0.0 or less means it is bad.
-    """
-    var_y = np.var(y_true)
-    if var_y == 0:
-        return np.nan
-    return 1 - np.var(y_true - y_pred) / var_y
-
-
+# TODO: Rename these to be consistent. maybe to start with plot?
+# TODO: fix the horrible mix of matplot and wandb. how do we do this.
 @torch.no_grad()
 def log_distributional_metrics(
     info_dict: dict, support: torch.Tensor, step: int, log_chart: bool = False

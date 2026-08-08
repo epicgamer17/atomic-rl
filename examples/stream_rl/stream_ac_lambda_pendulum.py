@@ -44,7 +44,7 @@ from atomic_rl.utils import (
     to_numpy_action,
     update_welford_stats,
 )
-from atomic_rl.visualization import compute_explained_variance
+from atomic_rl.metrics import compute_explained_variance
 from envs.wrappers.normalization import (
     WelfordNormalizeObservation,
     WelfordNormalizeReward,

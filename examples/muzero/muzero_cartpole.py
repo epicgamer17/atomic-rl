@@ -81,10 +81,10 @@ from typing import Tuple, List, Dict
 from tensordict import TensorDict
 import wandb
 
-from atomic_rl.mcts import mcts_search, get_mcts_visit_policy
+from atomic_rl.search import mcts_search, get_mcts_visit_policy
 from atomic_rl.losses import cross_entropy_loss, mse_loss
 from atomic_rl.action_selection import argmax_selector, sample_distribution
-from atomic_rl.replay_buffer import (
+from atomic_rl.buffers.replay import (
     init_buffer,
     circular_write_strategy,
     uniform_sample,

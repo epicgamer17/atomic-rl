@@ -33,7 +33,7 @@ from tensordict import TensorDict
 from functools import partial
 from atomic_rl.utils import to_numpy_action
 
-from atomic_rl.replay_buffer import (
+from atomic_rl.buffers.replay import (
     init_buffer,
     circular_write_strategy,
     uniform_sample,
@@ -48,7 +48,7 @@ from atomic_rl.action_selection import (
 from atomic_rl.schedules import get_linear_schedule
 from atomic_rl.optimizer import apply_gradients
 from atomic_rl.network import hard_update_target_network_
-from atomic_rl.visualization import log_distributional_metrics
+from atomic_rl.metrics import log_distributional_metrics
 
 from atomic_rl.td import compute_categorical_q_td_target
 

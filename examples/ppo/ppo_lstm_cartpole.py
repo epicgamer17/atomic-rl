@@ -20,9 +20,9 @@ from atomic_rl.losses import (
     clipped_mse_loss,
 )
 from torch.optim.lr_scheduler import LinearLR
-from atomic_rl.visualization import compute_explained_variance
+from atomic_rl.metrics import compute_explained_variance
 from atomic_rl.network import unroll_rnn
-from atomic_rl.rollout_buffer import (
+from atomic_rl.buffers.rollout import (
     init_rollout_buffer,
     store_rollout_step_,
     flatten_rollout_buffer,

@@ -6,29 +6,29 @@ except PackageNotFoundError:
     __version__ = "0.1.0"
 
 from . import action_selection
+from . import buffers
 from . import initialization
 from . import losses
-from . import mcts
+from . import metrics
 from . import network
 from . import optimizer
-from . import replay_buffer
 from . import returns
-from . import rollout_buffer
 from . import schedules
+from . import search
 from . import td
 from . import utils
 
 __all__ = [
     "action_selection",
+    "buffers",
     "initialization",
     "losses",
-    "mcts",
+    "metrics",
     "network",
     "optimizer",
-    "replay_buffer",
     "returns",
-    "rollout_buffer",
     "schedules",
+    "search",
     "td",
     "utils",
 ]
