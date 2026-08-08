@@ -39,6 +39,10 @@ from atomic_rl.metrics import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
+from pathlib import Path
+
+FIGURES_DIR = Path(__file__).resolve().parents[2] / "figures"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Standardized initialization for GnT methods (SWR/CBP): Weights use Kaiming Uniform, Biases use Zero
 init_weights_kaiming = make_gnt_init(
@@ -211,7 +215,7 @@ def main():
         title="Permuted MNIST: Average Online Accuracy (SWR Paper Fig 1)",
         xlabel="Permutation Number (Task)",
         ylabel="Accuracy (%)",
-        save_path="swr_permuted_mnist_accuracy.png",
+        save_path=str(FIGURES_DIR / "swr_permuted_mnist_accuracy.png"),
     )
 
     # 2. Plot Figure 10: Plasticity Correlates
@@ -226,7 +230,7 @@ def main():
             "SWR": swr_metrics,
             "CBP": cbp_metrics,
         },
-        save_path="swr_permuted_mnist_correlates.png",
+        save_path=str(FIGURES_DIR / "swr_permuted_mnist_correlates.png"),
     )
 
 

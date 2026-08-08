@@ -60,8 +60,11 @@ def main():
             alphas_history[step // log_interval] = alphas.numpy()
 
     # 4. Visualize Results
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    save_path = os.path.join(script_dir, "idbd_feature_selection.png")
+    figures_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "figures"
+    )
+    os.makedirs(figures_dir, exist_ok=True)
+    save_path = os.path.join(figures_dir, "idbd_feature_selection.png")
 
     plot_learning_rate_traces(
         alphas_history=alphas_history,

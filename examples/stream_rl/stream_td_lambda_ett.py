@@ -30,6 +30,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import wandb
+from pathlib import Path
 
 from tqdm import tqdm
 from atomic_rl.initialization import set_seed, lecun_uniform_, make_sparse_init
@@ -358,6 +359,9 @@ def main():
     )
     args = parser.parse_args()
 
+    figures_dir = Path(__file__).resolve().parents[2] / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+
     # Determine device: use GPU if available and requested, otherwise cpu
     device = torch.device("cpu")
     print(f"Running on device: {device}")
@@ -539,19 +543,19 @@ def main():
         else:
             plt.ylim(40, 80)
             plt.xlim(start_idx, stop_idx)
-        plt.savefig(save_filename, dpi=300, bbox_inches="tight")
+        plt.savefig(figures_dir / save_filename, dpi=300, bbox_inches="tight")
         plt.close()
-        print(f"Saved plot: {save_filename}")
+        print(f"Saved plot: {figures_dir / save_filename}")
 
     # Save combined plot
     fig.tight_layout()
-    combined_filename = "ett_prediction_comparison.png"
+    combined_filename = figures_dir / "ett_prediction_comparison.png"
     fig.savefig(combined_filename, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"Saved combined plot: {combined_filename}")
 
     if args.wandb:
-        wandb.log({"ett_prediction_comparison": wandb.Image(combined_filename)})
+        wandb.log({"ett_prediction_comparison": wandb.Image(str(combined_filename))})
         wandb.finish()
 
 

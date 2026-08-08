@@ -147,7 +147,8 @@ def plot_results(
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    plot_path = str(Path(__file__).parent / filename)
+    plot_path = str(Path(__file__).resolve().parents[2] / "figures" / filename)
+    Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
     plt.show()

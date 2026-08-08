@@ -430,7 +430,8 @@ def main():
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    save_path = Path("examples/alberta_plan/ablation_results.png")
+    save_path = Path(__file__).resolve().parents[2] / "figures" / "ablation_results.png"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, dpi=300)
     print(f"Results saved to {save_path.absolute()}")
 

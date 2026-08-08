@@ -266,7 +266,8 @@ def plot_results(
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    plot_path = str(Path(__file__).parent / filename)
+    plot_path = str(Path(__file__).resolve().parents[2] / "figures" / filename)
+    Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
     plt.show()
@@ -284,9 +285,10 @@ def plot_batch_results(results: List[float]):
     plt.title("Replication of Sutton (1988) Figure 4\n(Repeated Presentation)")
     plt.grid(True, linestyle="--", alpha=0.7)
 
-    plot_path = (
-        "/Users/jonathanlamontange-kratz/Documents/GitHub/rl-stuff/random_walk_fig4.png"
+    plot_path = str(
+        Path(__file__).resolve().parents[2] / "figures" / "random_walk_fig4.png"
     )
+    Path(plot_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(plot_path)
     print(f"Plot saved to {plot_path}")
     plt.show()

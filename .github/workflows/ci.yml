@@ -58,7 +58,7 @@ jobs:
       with:
         name: failed-training-graphs
         # Uploads any .png files generated during the failed test
-        path: ./*.png 
+        path: figures/*.png 
         retention-days: 5
   # Job 3: Automated Performance Dashboard
   performance-benchmarks:

@@ -21,6 +21,10 @@ from atomic_rl.metrics import (
     plot_continual_learning_performance,
 )
 from envs.streams.permuted_mnist import make_permuted_mnist_stream
+from pathlib import Path
+
+FIGURES_DIR = Path(__file__).resolve().parents[2] / "figures"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
 HIDDEN, RHO, ETA, MATURITY, LR = 2000, 1e-4, 0.99, 1000, 0.01
 
@@ -145,7 +149,7 @@ plot_continual_learning_performance(
         "CBP": metrics_cbp["Accuracy"],
     },
     title="Permuted MNIST: Online Accuracy",
-    save_path="cbp_mnist_accuracy.png",
+    save_path=str(FIGURES_DIR / "cbp_mnist_accuracy.png"),
 )
 
 # Remove Accuracy for correlates plot
@@ -154,5 +158,5 @@ acc_cbp = metrics_cbp.pop("Accuracy")
 
 plot_plasticity_correlates(
     metrics_dict={"Standard Adam": metrics_std, "CBP": metrics_cbp},
-    save_path="cbp_mnist_correlates.png",
+    save_path=str(FIGURES_DIR / "cbp_mnist_correlates.png"),
 )

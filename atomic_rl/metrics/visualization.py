@@ -1,3 +1,4 @@
+import os
 import torch
 import wandb
 import numpy as np
@@ -100,6 +101,7 @@ def plot_learning_rate_traces(
     ax.legend()
 
     if save_path:
+        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         plt.savefig(save_path, bbox_inches="tight")
         print(f"Plot saved to {save_path}")
 
@@ -141,6 +143,7 @@ def plot_continual_learning_performance(
     ax.legend(loc="lower left")
 
     if save_path:
+        os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
         plt.savefig(save_path, bbox_inches="tight")
         print(f"Plot saved to {save_path}")
 
@@ -148,7 +151,7 @@ def plot_continual_learning_performance(
 
 
 def plot_plasticity_correlates(
-    metrics_dict: dict, save_path: str = "plasticity_correlates.png"
+    metrics_dict: dict, save_path: str = "figures/plasticity_correlates.png"
 ):
     """
     Dynamically plots up to 4 metrics from the provided dictionary in a 2x2 grid.
@@ -206,9 +209,10 @@ def plot_plasticity_correlates(
         if "Dead Units" in key:
             ticks = ax.get_yticks()
             ax.set_yticks(ticks)
-            ax.set_yticklabels([f"{y*100:.0f}%" for y in ticks])
+            ax.set_yticklabels([f"{y * 100:.0f}%" for y in ticks])
 
     plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
     plt.savefig(save_path, dpi=150)
     print(f"Plot saved to {save_path}")
     plt.close()  # Close figure to prevent memory leaks in loops

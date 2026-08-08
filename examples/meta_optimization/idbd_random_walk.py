@@ -209,8 +209,11 @@ def main():
     plt.grid(True, alpha=0.3)
     plt.legend()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    save_path = os.path.join(script_dir, "idbd_random_walk_reproduction.png")
+    figures_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "figures"
+    )
+    os.makedirs(figures_dir, exist_ok=True)
+    save_path = os.path.join(figures_dir, "idbd_random_walk_reproduction.png")
 
     plt.savefig(save_path)
     print(f"Plot saved to {save_path}")

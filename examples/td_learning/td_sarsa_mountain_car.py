@@ -20,6 +20,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import concurrent.futures
 from typing import Tuple
+from pathlib import Path
 
 from atomic_rl.td import true_online_td_update_, semi_gradient_td_update_
 from atomic_rl.traces import (
@@ -427,6 +428,12 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.title("Recreation of Sutton (2014) Figure 4 (Mountain Car Control)")
-    plt.savefig("true_online_sarsa_mountain_car.png", dpi=300)
+    plot_path = (
+        Path(__file__).resolve().parents[2]
+        / "figures"
+        / "true_online_sarsa_mountain_car.png"
+    )
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(plot_path, dpi=300)
 
-    print("Experiment complete! Saved plot to true_online_sarsa_mountain_car.png")
+    print(f"Experiment complete! Saved plot to {plot_path}")
