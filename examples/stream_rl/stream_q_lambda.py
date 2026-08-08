@@ -54,7 +54,7 @@ from atomic_rl.utils import (
 from atomic_rl.schedules import get_linear_schedule
 from atomic_rl.td import compute_q_td_target
 
-from envs.wrappers.normalization import (
+from atomic_rl.envs.wrappers.normalization import (
     WelfordNormalizeObservation,
     WelfordNormalizeReward,
 )

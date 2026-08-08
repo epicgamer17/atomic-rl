@@ -44,7 +44,7 @@ from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
 )
-from networks.noisy_linear import NoisyLinear
+from atomic_rl.networks.noisy_linear import NoisyLinear
 
 # --- Constants ---
 BATCH_SIZE = 128
@@ -71,10 +71,10 @@ SUPPORT = torch.linspace(V_MIN, V_MAX, ATOM_SIZE)
 # Multi-step
 N_STEPS = 3
 
+
 # Seeding for reproducibility
 # TODO/NOTE: figure out if we want to make a network component for these in networks/
 class RainbowNetwork(nn.Module):
-
     """
     Rainbow DQN Network: Combines Dueling architecture, Noisy Nets, and Distributional RL.
     """

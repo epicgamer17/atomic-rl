@@ -1,7 +1,7 @@
 import numpy as np
 import gymnasium as gym
 
-from envs.wrappers.normalization import VecTransformObservation
+from atomic_rl.envs.wrappers.normalization import VecTransformObservation
 
 
 class FlickeringObservation(gym.ObservationWrapper):

@@ -104,7 +104,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Tuple, List, Dict
 from tensordict import TensorDict
-from networks import ResNetBlock
+from atomic_rl.networks import ResNetBlock
 import wandb
 
 from atomic_rl.search import mcts_search, get_mcts_visit_policy

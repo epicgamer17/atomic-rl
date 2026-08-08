@@ -39,7 +39,7 @@ from atomic_rl.buffers.replay import (
     uniform_sample,
     BufferState,
 )
-from envs.functions.tictactoe import (
+from atomic_rl.envs.functions.tictactoe import (
     check_tictactoe_winner,
     tictactoe_dynamics_fn,
     get_canonical_obs,
@@ -211,7 +211,7 @@ def actor_worker(
         root_embed = boards.new_zeros(envs_per_actor, 3, 3, 2)
         root_embed[..., 0] = boards
         root_embed[..., 1] = players.view(-1, 1, 1).expand(-1, 3, 3).float()
-        root_legal_mask = (boards.view(envs_per_actor, -1) == 0)
+        root_legal_mask = boards.view(envs_per_actor, -1) == 0
 
         def expansion_fn(embeddings):
             with torch.no_grad():

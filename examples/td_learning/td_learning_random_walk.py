@@ -35,7 +35,7 @@ import random
 from typing import List, Tuple
 from pathlib import Path
 
-from envs.mdp.random_walk import RandomWalkEnv
+from atomic_rl.envs.mdp.random_walk import RandomWalkEnv
 from atomic_rl.td import semi_gradient_td_update_
 from atomic_rl.traces import compute_accumulating_traces
 

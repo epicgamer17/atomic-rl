@@ -20,7 +20,7 @@ from atomic_rl.metrics import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )
-from envs.streams.permuted_mnist import make_permuted_mnist_stream
+from atomic_rl.envs.streams.permuted_mnist import make_permuted_mnist_stream
 from pathlib import Path
 
 FIGURES_DIR = Path(__file__).resolve().parents[2] / "figures"

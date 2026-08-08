@@ -32,7 +32,7 @@ import torch
 from atomic_rl.initialization import layer_init_, set_seed
 from atomic_rl.action_selection import argmax_selector, with_epsilon_greedy
 from atomic_rl.td import compute_v_td_target
-from networks.resnet import ResNetBlock
+from atomic_rl.networks.resnet import ResNetBlock
 
 set_seed(42)
 

@@ -162,7 +162,7 @@ class TicTacToeNet(nn.Module):
         return policy_logits, value
 
 
-from envs.functions.tictactoe import (
+from atomic_rl.envs.functions.tictactoe import (
     check_tictactoe_winner,
     tictactoe_dynamics_fn,
     get_canonical_obs,

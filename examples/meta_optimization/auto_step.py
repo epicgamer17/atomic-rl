@@ -24,7 +24,7 @@ from atomic_rl.optimizer.metaoptimization import (
     IDBD,
     Autostep,
 )
-from envs.streams.random_walk import make_random_walk_tracking_task
+from atomic_rl.envs.streams.random_walk import make_random_walk_tracking_task
 
 
 def evaluate_algorithm(

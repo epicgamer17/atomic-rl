@@ -27,7 +27,7 @@ from atomic_rl.schedules import get_linear_schedule
 from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.bptt.unroll_rnn import unroll_rnn
 from atomic_rl.update_target_net import hard_update_target_network_
-from envs.wrappers import FlickeringObservation
+from atomic_rl.envs.wrappers import FlickeringObservation
 
 # TODO: make this be more like PPO + LSTM. First fix the TODOs in PPO + LSTM relating to LSTM stuff.
 # TODO: make this use the sequence storage sort of like R2D2.

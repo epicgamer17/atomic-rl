@@ -37,7 +37,11 @@ from atomic_rl.utils import (
     to_numpy_action,
     extract_vector_env_final_obs,
 )
-from envs.wrappers import FlickeringObservation, NormalizeObservation, VecNormalize
+from atomic_rl.envs.wrappers import (
+    FlickeringObservation,
+    NormalizeObservation,
+    VecNormalize,
+)
 
 # TODO: is this working PPO + LSTM fails to learn MDP cartpole (it performs worse than vanilla PPO)
 

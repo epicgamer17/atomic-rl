@@ -39,7 +39,7 @@ from atomic_rl.utils import (
     to_numpy_action,
 )
 from tensordict import TensorDict
-from envs.wrappers import VecNormalize
+from atomic_rl.envs.wrappers import VecNormalize
 
 # Constants
 LEARNING_RATE = 3e-4
@@ -235,8 +235,12 @@ for iteration in range(MAX_ITERATIONS):
                     record_truncations_(
                         buffer=buffer,
                         step=step,
-                        truncated_envs=torch.as_tensor(env_indices[trunc_mask], dtype=torch.long, device=device),
-                        final_observations=torch.as_tensor(final_obs[trunc_mask], dtype=torch.float32, device=device),
+                        truncated_envs=torch.as_tensor(
+                            env_indices[trunc_mask], dtype=torch.long, device=device
+                        ),
+                        final_observations=torch.as_tensor(
+                            final_obs[trunc_mask], dtype=torch.float32, device=device
+                        ),
                     )
 
             if "final_info" in info:

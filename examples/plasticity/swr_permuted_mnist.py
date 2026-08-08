@@ -23,7 +23,7 @@ import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-from envs.streams.permuted_mnist import make_permuted_mnist_stream
+from atomic_rl.envs.streams.permuted_mnist import make_permuted_mnist_stream
 from atomic_rl.plasticity import (
     apply_selective_weight_reinitialization_,
     init_cbp_state,

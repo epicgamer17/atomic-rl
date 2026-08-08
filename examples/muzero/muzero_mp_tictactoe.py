@@ -38,7 +38,7 @@ from atomic_rl.buffers.replay import (
     uniform_sample,
     BufferState,
 )
-from envs.functions.tictactoe import check_tictactoe_winner, get_canonical_obs
+from atomic_rl.envs.functions.tictactoe import check_tictactoe_winner, get_canonical_obs
 from pettingzoo.classic import tictactoe_v3
 
 
@@ -158,9 +158,15 @@ class MuZeroTicTacToeNet(nn.Module):
         for block in self.representation_res:
             s0 = block(s0)
 
-        min_s0 = s0.view(s0.shape[0], -1).min(dim=-1, keepdim=True).values.view(-1, 1, 1, 1)
-        max_s0 = s0.view(s0.shape[0], -1).max(dim=-1, keepdim=True).values.view(-1, 1, 1, 1)
-        span = torch.where(max_s0 - min_s0 > 1e-5, max_s0 - min_s0, torch.ones_like(max_s0))
+        min_s0 = (
+            s0.view(s0.shape[0], -1).min(dim=-1, keepdim=True).values.view(-1, 1, 1, 1)
+        )
+        max_s0 = (
+            s0.view(s0.shape[0], -1).max(dim=-1, keepdim=True).values.view(-1, 1, 1, 1)
+        )
+        span = torch.where(
+            max_s0 - min_s0 > 1e-5, max_s0 - min_s0, torch.ones_like(max_s0)
+        )
         s0_scaled = (s0 - min_s0) / span
 
         policy_logits = self.policy_head(s0_scaled)
@@ -175,9 +181,15 @@ class MuZeroTicTacToeNet(nn.Module):
         for block in self.dynamics_res:
             sk = block(sk)
 
-        min_sk = sk.view(sk.shape[0], -1).min(dim=-1, keepdim=True).values.view(-1, 1, 1, 1)
-        max_sk = sk.view(sk.shape[0], -1).max(dim=-1, keepdim=True).values.view(-1, 1, 1, 1)
-        span = torch.where(max_sk - min_sk > 1e-5, max_sk - min_sk, torch.ones_like(max_sk))
+        min_sk = (
+            sk.view(sk.shape[0], -1).min(dim=-1, keepdim=True).values.view(-1, 1, 1, 1)
+        )
+        max_sk = (
+            sk.view(sk.shape[0], -1).max(dim=-1, keepdim=True).values.view(-1, 1, 1, 1)
+        )
+        span = torch.where(
+            max_sk - min_sk > 1e-5, max_sk - min_sk, torch.ones_like(max_sk)
+        )
         sk_scaled = (sk - min_sk) / span
 
         reward = self.reward_head(sk_scaled)
@@ -278,7 +290,7 @@ def actor_worker(
             dim=0,
         )
 
-        root_legal_mask = (boards.view(envs_per_actor, -1) == 0)
+        root_legal_mask = boards.view(envs_per_actor, -1) == 0
 
         with torch.no_grad():
             s0_batch, _, _ = local_model.initial_inference(obs_batch)

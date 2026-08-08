@@ -40,7 +40,7 @@ from atomic_rl.utils import (
     compute_welford_stats,
 )
 from atomic_rl.metrics import compute_explained_variance
-from envs.wrappers.normalization import (
+from atomic_rl.envs.wrappers.normalization import (
     WelfordNormalizeObservation,
     WelfordNormalizeReward,
 )

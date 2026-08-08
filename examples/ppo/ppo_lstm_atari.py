@@ -39,8 +39,8 @@ from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
 )
-from envs.wrappers import FireResetEnv
-from networks import AtariCNN
+from atomic_rl.envs.wrappers import FireResetEnv
+from atomic_rl.networks import AtariCNN
 from tensordict import TensorDict
 
 # Constants
@@ -68,7 +68,7 @@ torch.manual_seed(SEED)
 class ActorCriticLSTM(nn.Module):
     def __init__(self, num_actions: int):
         super().__init__()
-        # Nature CNN feature extractor from networks layer
+        # Nature CNN feature extractor from atomic_rl.networks layer
         self.network = AtariCNN(in_channels=4, out_features=512, scale_inputs=False)
 
         # 2. LSTM Layer

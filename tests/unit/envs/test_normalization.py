@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from envs.wrappers.normalization import (
+from atomic_rl.envs.wrappers.normalization import (
     WelfordNormalizeObservation,
     WelfordNormalizeReward,
 )

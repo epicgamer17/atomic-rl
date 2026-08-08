@@ -36,8 +36,8 @@ from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
 )
-from envs.wrappers import FireResetEnv
-from networks import AtariCNN
+from atomic_rl.envs.wrappers import FireResetEnv
+from atomic_rl.networks import AtariCNN
 from tensordict import TensorDict
 
 # Constants
@@ -63,7 +63,7 @@ set_seed(SEED)
 class ActorCritic(nn.Module):
     def __init__(self, num_actions: int):
         super().__init__()
-        # Nature CNN feature extractor from networks layer
+        # Nature CNN feature extractor from atomic_rl.networks layer
         self.network = AtariCNN(in_channels=4, out_features=512, scale_inputs=True)
         self.actor = layer_init_(nn.Linear(512, num_actions), std=0.01)
         self.critic = layer_init_(nn.Linear(512, 1), std=1.0)

@@ -40,7 +40,7 @@ from atomic_rl.action_selection import (
 )
 from atomic_rl.optimizer import apply_gradients_
 from atomic_rl.update_target_net import hard_update_target_network_
-from networks.noisy_linear import NoisyLinear
+from atomic_rl.networks.noisy_linear import NoisyLinear
 
 # Constants
 BATCH_SIZE = 128

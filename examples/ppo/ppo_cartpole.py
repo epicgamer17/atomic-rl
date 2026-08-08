@@ -63,7 +63,7 @@ from atomic_rl.utils import (
     to_numpy_action,
 )
 from tensordict import TensorDict
-from envs.wrappers import VecNormalizeObservation
+from atomic_rl.envs.wrappers import VecNormalizeObservation
 
 # Constants
 LEARNING_RATE = 2.5e-4

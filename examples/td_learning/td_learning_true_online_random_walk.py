@@ -12,7 +12,7 @@ import random
 from typing import List, Tuple
 from pathlib import Path
 
-from envs.mdp.random_walk import RandomWalkEnv
+from atomic_rl.envs.mdp.random_walk import RandomWalkEnv
 from atomic_rl.td import true_online_td_update_
 from atomic_rl.traces import compute_true_online_traces
 
