@@ -21,14 +21,14 @@ import matplotlib.pyplot as plt
 import concurrent.futures
 from typing import Tuple
 
-from functional.td import true_online_td_update_, semi_gradient_td_update_
-from functional.traces import (
+from atomic_rl.td import true_online_td_update_, semi_gradient_td_update_
+from atomic_rl.traces import (
     update_true_online_traces,
     update_replacing_traces,
     update_accumulating_traces,
 )
-from functional.utils import compute_tile_coding_features
-from functional.action_selection import with_epsilon_greedy, argmax_selector
+from atomic_rl.utils import compute_tile_coding_features
+from atomic_rl.action_selection import with_epsilon_greedy, argmax_selector
 
 epsilon_greedy_selector = with_epsilon_greedy(argmax_selector)
 

@@ -4,13 +4,13 @@ This directory maintains a mapping between the research papers in this folder an
 
 ### Missing / Future Work:
 - **Distributional Rainbow (IQN/QR-DQN)**: While C51 is implemented, modern distributional methods like Implicit Quantile Networks (IQN) or Quantile Regression DQN (QR-DQN) are currently missing.
-- **R2D2**: [r2d2.pdf](r2d2.pdf). While the core building blocks (recurrent unrolling, burn-in) are available in `functional/network.py` and DRQN is implemented, a full R2D2 agent with prioritized sequences and overlapping burn-in is still pending.
+- **R2D2**: [r2d2.pdf](r2d2.pdf). While the core building blocks (recurrent unrolling, burn-in) are available in `atomic_rl/network.py` and DRQN is implemented, a full R2D2 agent with prioritized sequences and overlapping burn-in is still pending.
 - **NGU / Agent 57**: Never Give Up and Agent 57.
 - **IMPALA**: High-throughput distributed AC.
 - **TRPO** (Schulman et al., 2015): Folder exists in `examples/trpo/` but is currently empty.
 - **SAC** (Haarnoja et al., 2018): Folder exists in `examples/sac/` but is currently empty.
 - **Batch MCTS**: [batch_mcts.pdf](batch_mcts.pdf). Vectorized MCTS for efficient batched inference. Different than vectorized envs, about searching mutliple branches at once for one state. 
-- **Gumbel MuZero**: [gumbel_muzero.pdf](gumbel_muzero.pdf). Planned for `functional/mcts.py` to allow policy improvement without high simulation counts.
+- **Gumbel MuZero**: [gumbel_muzero.pdf](gumbel_muzero.pdf). Planned for `atomic_rl/mcts.py` to allow policy improvement without high simulation counts.
 - **Stochastic MuZero**: [stochastic_muzero.pdf](stochastic_muzero.pdf). Needed for handling environments with inherent randomness (like Catan).
 - **EfficientZero**: [efficientzero.pdf](efficientzero.pdf). Sample efficient offline MuZero variant. Possible improvements on MuZero.
 - **Efficient Zero V2**: [efficientzero_v2.pdf](efficientzero_v2.pdf). V2 of EfficientZero. 
@@ -77,7 +77,7 @@ This directory maintains a mapping between the research papers in this folder an
 - **Divide and Conquer Monte Carlo Tree Search for Goal Directed Planning**
 - **Plan2Explore** 
 - **Player of Games**
-- **Stream Deep RL Finally Works** (Mohamed Elsayed 2024): [stream_rl.pdf](stream_rl.pdf). Implemented in `examples/stream_rl/` and `functional/optimizer.py`.
+- **Stream Deep RL Finally Works** (Mohamed Elsayed 2024): [stream_rl.pdf](stream_rl.pdf). Implemented in `examples/stream_rl/` and `atomic_rl/optimizer.py`.
 - **Emphatic TD**
 - **Temporal Abstraction in TD Networks** 
 - **Between MDPs and Semi-MDPs: Learning, Planning, and Representing Knowledge at Multiple Temporal Scales** (Maybe read more) (LONG)
@@ -154,7 +154,7 @@ For Agent 57, we are missing:
 | **DQN** (Mnih et al., 2013/2015) | [dqn.pdf](dqn.pdf) | Done | `examples/dqn/dqn_cartpole.py` | Basic DQN with experience replay and target networks. |
 | **Double DQN** (Van Hasselt et al., 2015) | [double_dqn.pdf](double_dqn.pdf) | Done | `examples/dqn/ddqn_cartpole.py` | Implements decoupled action selection and evaluation to reduce bias. |
 | **Dueling DQN** (Wang et al., 2015) | [dueling_dqn.pdf](dueling_dqn.pdf) | Done | `examples/dqn/dueling_dqn_cartpole.py` | Uses separate Value and Advantage streams. |
-| **Prioritized Experience Replay** (Schaul et al., 2015) | [per.pdf](per.pdf) | Done | `examples/dqn/prioritized_replay_dqn_cartpole.py` | Backed by a high-performance SumTree in `functional/replay_buffer.py`. |
+| **Prioritized Experience Replay** (Schaul et al., 2015) | [per.pdf](per.pdf) | Done | `examples/dqn/prioritized_replay_dqn_cartpole.py` | Backed by a high-performance SumTree in `atomic_rl/replay_buffer.py`. |
 | **Categorical DQN (C51)** (Bellemare et al., 2017) | [categorical_dqn.pdf](categorical_dqn.pdf) | Done | `examples/dqn/categorical_dqn_cartpole.py` | Implements distributional RL by predicting a discrete value distribution. |
 | **Noisy DQN** (Fortunato et al., 2017) | [noisy_dqn.pdf](noisy_dqn.pdf) | Done | `examples/dqn/noisy_dqn_cartpole.py` | Replaces epsilon-greedy with learnable noise in Linear layers. |
 | **N-Step DQN** | [td_learning.pdf](td_learning.pdf) | Done | `examples/dqn/n_step_dqn_cartpole.py` | Uses n-step returns to bootstrap future rewards. |
@@ -181,8 +181,8 @@ For Agent 57, we are missing:
 
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **AlphaZero** (Silver et al., 2017) | [alphazero.pdf](alphazero.pdf) | Done | `examples/alphazero/alphazero_tictactoe.py`, `functional/mcts.py` | Vectorized MCTS with PUCT action selection, Dirichlet noise, and policy-value head joint learning. |
-| **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Done | `examples/muzero/muzero_tictactoe.py`, `examples/muzero/muzero_cartpole.py`, `functional/mcts.py` | Model-based RL using learned representation, dynamics, and prediction networks with recurrent MCTS unrolling. Work in progress at the moment, some details pending. |
+| **AlphaZero** (Silver et al., 2017) | [alphazero.pdf](alphazero.pdf) | Done | `examples/alphazero/alphazero_tictactoe.py`, `atomic_rl/mcts.py` | Vectorized MCTS with PUCT action selection, Dirichlet noise, and policy-value head joint learning. |
+| **MuZero** (Schrittwieser et al., 2019) | [muzero.pdf](muzero.pdf) | Done | `examples/muzero/muzero_tictactoe.py`, `examples/muzero/muzero_cartpole.py`, `atomic_rl/mcts.py` | Model-based RL using learned representation, dynamics, and prediction networks with recurrent MCTS unrolling. Work in progress at the moment, some details pending. |
 
 ---
 
@@ -192,14 +192,14 @@ This repository heavily focuses on the **Alberta Plan** (Sutton et al., 2022) an
 
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Alberta Plan** (Sutton et al., 2022) | [AlbertaPlan.pdf](AlbertaPlan.pdf) / [Report](AlbertaPlanReport.pdf) | Building Blocks | `functional/plasticity.py` | Serves as the philosophical guide for the `functional/` module. |
+| **Alberta Plan** (Sutton et al., 2022) | [AlbertaPlan.pdf](AlbertaPlan.pdf) / [Report](AlbertaPlanReport.pdf) | Building Blocks | `atomic_rl/plasticity.py` | Serves as the philosophical guide for the `atomic_rl/` module. |
 Step 1: ___ ?
-| **Stream Deep RL** (Elsayed et al., 2024) | [stream_rl.pdf](stream_rl.pdf) | Done | `examples/stream_rl/`, `functional/optimizer.py` | Implements Stream AC(λ), Stream Q(λ), and Early Temporal Termination (ETT) with Adaptive ObGD optimizers. |
-| **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [autostep.pdf](autostep.pdf) | Done | `functional/meta_optimization.py` | Meta-gradient learning rates. Reproduced in `examples/meta_optimization/`. |
-| **K1 / K2 Algorithms** | [idbd_b.pdf](idbd_b.pdf) | Done | `functional/meta_optimization.py` | O(n) approximations of the Kalman Filter for adaptive step-sizes. |
+| **Stream Deep RL** (Elsayed et al., 2024) | [stream_rl.pdf](stream_rl.pdf) | Done | `examples/stream_rl/`, `atomic_rl/optimizer.py` | Implements Stream AC(λ), Stream Q(λ), and Early Temporal Termination (ETT) with Adaptive ObGD optimizers. |
+| **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [autostep.pdf](autostep.pdf) | Done | `atomic_rl/meta_optimization.py` | Meta-gradient learning rates. Reproduced in `examples/meta_optimization/`. |
+| **K1 / K2 Algorithms** | [idbd_b.pdf](idbd_b.pdf) | Done | `atomic_rl/meta_optimization.py` | O(n) approximations of the Kalman Filter for adaptive step-sizes. |
 Step 2: ___ ?
-| **Continual Backprop** | [cbp_1.pdf](cbp_1.pdf) / [cbp_2.pdf](cbp_2.pdf) | Done | `functional/plasticity.py` | Implements the generate-and-test plasticity mechanism. Reproduced in `examples/plasticity/`. |
-| **SWR** (Selective Weight Reinit) | [selective_weight_reinit.pdf](selective_weight_reinit.pdf) | Done | `functional/plasticity.py` | Utility-based reinitialization. Reproduced in `examples/plasticity/`. |
+| **Continual Backprop** | [cbp_1.pdf](cbp_1.pdf) / [cbp_2.pdf](cbp_2.pdf) | Done | `atomic_rl/plasticity.py` | Implements the generate-and-test plasticity mechanism. Reproduced in `examples/plasticity/`. |
+| **SWR** (Selective Weight Reinit) | [selective_weight_reinit.pdf](selective_weight_reinit.pdf) | Done | `atomic_rl/plasticity.py` | Utility-based reinitialization. Reproduced in `examples/plasticity/`. |
 | **Alberta Plan Integration** | [AlbertaPlan.pdf](AlbertaPlan.pdf) | In Progress | `examples/alberta_plan/ablation_study.py` | Ablation study combining NN backbone + CBP + AutoStep/IDBD + True Online TD on a drifting random walk. |
 
 ---
@@ -210,10 +210,10 @@ Core temporal credit assignment and gradient-based TD methods for linear and fun
 
 | Paper | PDF | Implementation | Location | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **TD Learning** (Sutton, 1988) | [td_learning.pdf](td_learning.pdf) | Done | `functional/td.py` | Introduced TD(lambda) and eligibility traces. Reproduced in `examples/td_learning/`. |
-| **True Online TD(lambda)** (Sutton & van Seijen, 2014) | [true_online_td.pdf](true_online_td.pdf) | Done | `functional/td.py`, `functional/traces.py` | True Online TD update with Dutch traces. Reproduced in `examples/td_learning/td_learning_true_online_random_walk.py`. |
-| **GTD(0)** (Sutton et al., 2009) | [gtd.pdf](gtd.pdf) | Done | `functional/td.py` | Gradient TD method for off-policy learning stability. Not GTD2, there is no correction. |
-| **Fast-GTD / TDC** (Sutton et al., 2009) | [fast_gtd.pdf](fast_gtd.pdf) | Done | `functional/td.py` | Temporal Difference with Gradient Correction (TDC). GTD2 is not implemented. |
+| **TD Learning** (Sutton, 1988) | [td_learning.pdf](td_learning.pdf) | Done | `atomic_rl/td.py` | Introduced TD(lambda) and eligibility traces. Reproduced in `examples/td_learning/`. |
+| **True Online TD(lambda)** (Sutton & van Seijen, 2014) | [true_online_td.pdf](true_online_td.pdf) | Done | `atomic_rl/td.py`, `atomic_rl/traces.py` | True Online TD update with Dutch traces. Reproduced in `examples/td_learning/td_learning_true_online_random_walk.py`. |
+| **GTD(0)** (Sutton et al., 2009) | [gtd.pdf](gtd.pdf) | Done | `atomic_rl/td.py` | Gradient TD method for off-policy learning stability. Not GTD2, there is no correction. |
+| **Fast-GTD / TDC** (Sutton et al., 2009) | [fast_gtd.pdf](fast_gtd.pdf) | Done | `atomic_rl/td.py` | Temporal Difference with Gradient Correction (TDC). GTD2 is not implemented. |
 
 ---
 
@@ -229,14 +229,14 @@ Core temporal credit assignment and gradient-based TD methods for linear and fun
 
 | Topic | PDF | Paper Ref | Location |
 | :--- | :--- | :--- | :--- |
-| **N-Step Returns** | [td_learning.pdf](td_learning.pdf) | Sutton (1988) | `functional/returns.py` |
-| **GAE** | - | Schulman et al. (2016) | `functional/returns.py` |
-| **TD(lambda) Returns** | [td_learning.pdf](td_learning.pdf) | Sutton (1988) | `functional/returns.py` |
-| **Eligibility Traces** | [td_learning.pdf](td_learning.pdf) | Various | `functional/traces.py` |
-| **True Online Traces** | [true_online_td.pdf](true_online_td.pdf) | Sutton & van Seijen (2014) | `functional/traces.py` |
-| **Loss Functions** | - | Various | `functional/losses.py` |
-| **Replay Buffers** | - | Various | `functional/replay_buffer.py` |
-| **Optimizers (ObGD)** | [stream_rl.pdf](stream_rl.pdf) | Elsayed et al. (2024) | `functional/optimizer.py` |
+| **N-Step Returns** | [td_learning.pdf](td_learning.pdf) | Sutton (1988) | `atomic_rl/returns.py` |
+| **GAE** | - | Schulman et al. (2016) | `atomic_rl/returns.py` |
+| **TD(lambda) Returns** | [td_learning.pdf](td_learning.pdf) | Sutton (1988) | `atomic_rl/returns.py` |
+| **Eligibility Traces** | [td_learning.pdf](td_learning.pdf) | Various | `atomic_rl/traces.py` |
+| **True Online Traces** | [true_online_td.pdf](true_online_td.pdf) | Sutton & van Seijen (2014) | `atomic_rl/traces.py` |
+| **Loss Functions** | - | Various | `atomic_rl/losses.py` |
+| **Replay Buffers** | - | Various | `atomic_rl/replay_buffer.py` |
+| **Optimizers (ObGD)** | [stream_rl.pdf](stream_rl.pdf) | Elsayed et al. (2024) | `atomic_rl/optimizer.py` |
 
 ---
 

@@ -29,10 +29,10 @@ import torch.multiprocessing as mp
 from tensordict import TensorDict
 import wandb
 
-from functional.mcts import mcts_search, get_mcts_visit_policy
-from functional.losses import cross_entropy_loss, mse_loss
-from functional.action_selection import argmax_selector, sample_distribution
-from functional.replay_buffer import (
+from atomic_rl.mcts import mcts_search, get_mcts_visit_policy
+from atomic_rl.losses import cross_entropy_loss, mse_loss
+from atomic_rl.action_selection import argmax_selector, sample_distribution
+from atomic_rl.replay_buffer import (
     init_buffer,
     circular_write_strategy,
     uniform_sample,

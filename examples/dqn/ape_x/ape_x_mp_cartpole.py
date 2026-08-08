@@ -4,7 +4,7 @@ APE-X DQN implemented with torch.multiprocessing.
 
 # TODO: attempt a cleanup if possible
 
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init
 import os
 import time
 import torch
@@ -20,7 +20,7 @@ from tensordict import TensorDict
 from functools import partial
 from typing import Tuple, Dict, Any, Callable, List
 
-from functional.replay_buffer import (
+from atomic_rl.replay_buffer import (
     init_per_buffer,
     sample_per,
     update_priorities,
@@ -29,15 +29,15 @@ from functional.replay_buffer import (
     make_n_step_accumulator,
     PERBufferState,
 )
-from functional.losses import huber_loss
-from functional.td import compute_q_td_target
-from functional.action_selection import (
+from atomic_rl.losses import huber_loss
+from atomic_rl.td import compute_q_td_target
+from atomic_rl.action_selection import (
     argmax_selector,
     gather_q_values,
 )
-from functional.schedules import get_ape_x_epsilon
-from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network_
+from atomic_rl.schedules import get_ape_x_epsilon
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.network import hard_update_target_network_
 
 # --- Constants ---
 ENV_NAME = "CartPole-v1"

@@ -1,7 +1,7 @@
 import pytest
 import torch
 import torch.nn as nn
-from functional.losses import (
+from atomic_rl.losses import (
     mse_loss,
     huber_loss,
     cross_entropy_loss,

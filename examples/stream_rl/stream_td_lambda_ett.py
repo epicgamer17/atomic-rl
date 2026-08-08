@@ -32,11 +32,11 @@ import matplotlib.pyplot as plt
 import wandb
 
 from tqdm import tqdm
-from functional.initialization import set_seed, lecun_uniform_, make_sparse_init
-from functional.optimizer import AdaptiveObGD, apply_gradients
-from functional.td import compute_v_td_target
-from functional.traces import update_accumulating_traces
-from functional.utils import to_tensor, update_welford_stats
+from atomic_rl.initialization import set_seed, lecun_uniform_, make_sparse_init
+from atomic_rl.optimizer import AdaptiveObGD, apply_gradients
+from atomic_rl.td import compute_v_td_target
+from atomic_rl.traces import update_accumulating_traces
+from atomic_rl.utils import to_tensor, update_welford_stats
 from envs.streams.ett import make_ettm2_stream
 
 # ---------------------------------------------------------------------------

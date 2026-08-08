@@ -1,6 +1,6 @@
 import pytest
 import math
-from functional.schedules import (
+from atomic_rl.schedules import (
     get_linear_schedule,
     get_exponential_schedule,
     get_ape_x_epsilon,

@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from functional.optimizer import (
+from atomic_rl.optimizer import (
     ObGD,
     apply_gradients,
     obgd_td_update_,
@@ -261,7 +261,7 @@ def test_obgd_step_no_grads_noop():
 
 def test_adaptive_obgd_td_step_basic():
     """Verify second-moment accumulation, bias correction, and adaptive step in AdaptiveObGD.td_step."""
-    from functional.optimizer import AdaptiveObGD
+    from atomic_rl.optimizer import AdaptiveObGD
 
     p = nn.Parameter(torch.tensor([1.0, 2.0]))
     opt = AdaptiveObGD([p], lr=1.0, scaling_factor=1.0, beta=0.9, eps=1e-8)
@@ -293,7 +293,7 @@ def test_adaptive_obgd_td_step_basic():
 
 def test_adaptive_obgd_step_supervised():
     """Verify supervised AdaptiveObGD.step updates parameters via bias-corrected second moments."""
-    from functional.optimizer import AdaptiveObGD
+    from atomic_rl.optimizer import AdaptiveObGD
 
     p = nn.Parameter(torch.tensor([3.0, -1.0]))
     opt = AdaptiveObGD([p], lr=0.5, scaling_factor=2.0, beta=0.9, eps=1e-8)

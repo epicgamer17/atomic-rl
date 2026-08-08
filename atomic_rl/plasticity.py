@@ -21,7 +21,7 @@ TODO: add CBP Notes.
 import torch
 import torch.nn as nn
 from typing import Callable, Iterable, Optional
-from functional.utils import ema_update, ema_update_
+from .utils import ema_update, ema_update_
 
 # TODO: some messy is instance checks. these are necessary for IDBD and linear value heads and stuff, but maybe there is a cleaner way to do this.
 
@@ -176,13 +176,13 @@ def apply_selective_weight_reinitialization(
         parameters: Iterable of parameters (e.g., model.parameters()).
         optimizer: The optimizer being used to train the parameters.
         init_fn: A function that applies the desired reinitialization (e.g., orthogonal init) to a tensor.
-            TIP: Use `functional.utils.make_gnt_init` to ensure biases are correctly zeroed.
+            TIP: Use `atomic_rl.utils.make_gnt_init` to ensure biases are correctly zeroed.
         k: The reinitialization factor/threshold multiplier.
         utility_type: "gradient" or "magnitude".
         prune_type: "threshold" or "proportional".
 
     Example:
-        >>> from functional.utils import make_gnt_init
+        >>> from atomic_rl.utils import make_gnt_init
         >>> init_fn = make_gnt_init(nn.init.orthogonal_)
         >>> masks_applied = apply_selective_weight_reinitialization(model.parameters(), optimizer, init_fn)
     """
@@ -338,13 +338,13 @@ def apply_continual_backprop(
         cbp_states: Dictionary mapping a layer's `weight` tensor to its state dictionary (from `init_cbp_state`).
         optimizer: The optimizer being used to train the parameters.
         init_fn: A function that applies the desired reinitialization to a tensor.
-            NOTE: Use `functional.utils.make_gnt_init` to ensure biases are correctly zeroed. TODO can we do this automatically for the user or somehow enforce Fail Fast on this.
+            NOTE: Use `atomic_rl.utils.make_gnt_init` to ensure biases are correctly zeroed. TODO can we do this automatically for the user or somehow enforce Fail Fast on this.
         eta: Decay rate for running averages.
         maturity_threshold: Minimum age before a unit is eligible for replacement.
         replacement_rate: The fraction of units to replace per step (rho).
 
     Example:
-        >>> from functional.utils import make_gnt_init
+        >>> from atomic_rl.utils import make_gnt_init
         >>> init_fn = make_gnt_init(nn.init.orthogonal_)
         >>> apply_continual_backprop(layer_pairs, activations, cbp_states, optimizer, init_fn)
 

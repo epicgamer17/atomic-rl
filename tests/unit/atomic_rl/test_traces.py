@@ -1,6 +1,6 @@
 import pytest
 import torch
-from functional.traces import update_accumulating_traces, update_replacing_traces
+from atomic_rl.traces import update_accumulating_traces, update_replacing_traces
 
 pytestmark = pytest.mark.unit
 

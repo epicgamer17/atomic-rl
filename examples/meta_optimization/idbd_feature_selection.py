@@ -15,8 +15,8 @@ import os
 import numpy as np
 from tqdm import tqdm
 
-from functional.meta_optimization import IDBD
-from functional.visualization import plot_learning_rate_traces
+from atomic_rl.meta_optimization import IDBD
+from atomic_rl.visualization import plot_learning_rate_traces
 from envs.streams.drifting_concept import make_drifting_concept_task
 
 

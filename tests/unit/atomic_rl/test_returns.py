@@ -1,6 +1,6 @@
 import pytest
 import torch
-from functional.returns import (
+from atomic_rl.returns import (
     compute_mc_returns,
     compute_n_step_returns,
     compute_gae,

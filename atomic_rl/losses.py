@@ -4,8 +4,8 @@ import torch.nn.functional as F
 import torch.distributions as D
 from tensordict import TensorDict
 from typing import Callable, Tuple, Optional, Union
-from functional.action_selection import argmax_selector
-from functional.td import compute_v_td_target
+from .action_selection import argmax_selector
+from .td import compute_v_td_target
 
 
 def mse_loss(
@@ -23,9 +23,9 @@ def mse_loss(
 
     Expects flat tensors [B].
     """
-    assert (
-        predictions.shape == targets.shape
-    ), f"Shape mismatch: {predictions.shape} vs {targets.shape}"
+    assert predictions.shape == targets.shape, (
+        f"Shape mismatch: {predictions.shape} vs {targets.shape}"
+    )
     raw_losses = F.mse_loss(predictions, targets, reduction="none")
     # Priorities are usually the absolute TD error
     priorities = torch.abs(predictions - targets).detach()
@@ -52,9 +52,9 @@ def cross_entropy_loss(
 
     Expects [B, Atoms] or [B, Actions].
     """
-    assert (
-        predictions.shape == targets.shape
-    ), f"Shape mismatch: {predictions.shape} vs {targets.shape}"
+    assert predictions.shape == targets.shape, (
+        f"Shape mismatch: {predictions.shape} vs {targets.shape}"
+    )
     log_probs = F.log_softmax(predictions, dim=-1)
     # Cross-entropy: - sum(p_target * log(p_online))
     raw_losses = -(targets * log_probs).sum(dim=-1)
@@ -83,9 +83,9 @@ def huber_loss(
 
     Expects flat tensors [B].
     """
-    assert (
-        predictions.shape == targets.shape
-    ), f"Shape mismatch: {predictions.shape} vs {targets.shape}"
+    assert predictions.shape == targets.shape, (
+        f"Shape mismatch: {predictions.shape} vs {targets.shape}"
+    )
     raw_losses = F.huber_loss(predictions, targets, reduction="none", delta=delta)
     priorities = torch.abs(predictions - targets).detach()
 
@@ -113,9 +113,9 @@ def policy_gradient_loss(
 
     Expects flat tensors [B * T] or [B].
     """
-    assert (
-        advantages.shape == log_probs.shape
-    ), f"Shape mismatch: {advantages.shape} vs {log_probs.shape}"
+    assert advantages.shape == log_probs.shape, (
+        f"Shape mismatch: {advantages.shape} vs {log_probs.shape}"
+    )
     # PG Loss: -log_prob * advantage (Advantage is treated as constant)
     loss = -log_probs * advantages.detach()
     # NOTE: no priorities, PG is on-policy and so PER doesn't really apply.abs
@@ -266,9 +266,9 @@ def probability_ratio(
 
     Expects flat tensors [B * T] or [B].
     """
-    assert (
-        old_log_probs.shape == new_log_probs.shape
-    ), f"Shape mismatch: {old_log_probs.shape} vs {new_log_probs.shape}"
+    assert old_log_probs.shape == new_log_probs.shape, (
+        f"Shape mismatch: {old_log_probs.shape} vs {new_log_probs.shape}"
+    )
     return torch.exp(new_log_probs - old_log_probs.detach())
 
 
@@ -291,9 +291,9 @@ def clipped_surrogate_loss(
         Tuple containing the loss tensor and an info dictionary for logging.
     """
     # FAIL FAST: Prevent catastrophic broadcasting
-    assert (
-        ratio.shape == advantages.shape
-    ), f"Shape mismatch: ratio {ratio.shape} vs adv {advantages.shape}"
+    assert ratio.shape == advantages.shape, (
+        f"Shape mismatch: ratio {ratio.shape} vs adv {advantages.shape}"
+    )
 
     # Calculate the objective
     # TODO: should this be its own function?
@@ -349,9 +349,9 @@ def clipped_mse_loss(
     Returns:
         Tuple[torch.Tensor, dict]: The clipped MSE loss (raw) and logging info.
     """
-    assert (
-        predictions.shape == old_predictions.shape == targets.shape
-    ), f"Shape mismatch: pred {predictions.shape}, old {old_predictions.shape}, targets {targets.shape}"
+    assert predictions.shape == old_predictions.shape == targets.shape, (
+        f"Shape mismatch: pred {predictions.shape}, old {old_predictions.shape}, targets {targets.shape}"
+    )
 
     # Explicitly detach old_predictions to prevent gradient leak
     old_predictions = old_predictions.detach()

@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn as nn
 from typing import Tuple
-from functional.network import (
+from atomic_rl.network import (
     hard_update_target_network_,
     soft_update_target_network_,
     unroll_rnn,

@@ -5,7 +5,7 @@ Essentially REINFORCE + a value function for the baseline to compute advantages.
 NOTE: very similar to A2C/A3C
 """
 
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,16 +17,16 @@ import random
 import wandb
 from functools import partial
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_mc_returns
-from functional.losses import policy_gradient_loss, mse_loss
-from functional.utils import (
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.returns import compute_mc_returns
+from atomic_rl.losses import policy_gradient_loss, mse_loss
+from atomic_rl.utils import (
     standardize_tensor,
     to_tensor,
     to_numpy_action,
 )
-from functional.visualization import compute_explained_variance
+from atomic_rl.visualization import compute_explained_variance
 
 # Constants
 LEARNING_RATE = 1e-3

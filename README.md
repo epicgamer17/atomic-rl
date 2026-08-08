@@ -25,13 +25,13 @@ pip install -e ".[envs,examples,plot,test]"
 
 ## 🚀 Quickstart
 
-The library ships as three flat, top-level import packages: `functional` (pure mathematical primitives), `networks` (network building blocks), and `envs` (environments, streams, and wrappers).
+The library ships as three flat, top-level import packages: `atomic_rl` (pure mathematical primitives), `networks` (network building blocks), and `envs` (environments, streams, and wrappers).
 
 ```python
 import torch
-from functional.initialization import layer_init, set_seed
-from functional.action_selection import argmax_selector, with_epsilon_greedy
-from functional.td import compute_v_td_target
+from atomic_rl.initialization import layer_init, set_seed
+from atomic_rl.action_selection import argmax_selector, with_epsilon_greedy
+from atomic_rl.td import compute_v_td_target
 from networks.resnet import ResNetBlock
 
 set_seed(42)

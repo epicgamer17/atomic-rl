@@ -5,7 +5,7 @@ from torch.optim.optimizer import Optimizer
 
 # TODO: CHANGE THE OPTIMIZER API HERE TO MATCH WITH IDBD, CBP, and ObGD for adam and SGD
 # TODO: Modern PyTorch actually implements its optimizers using a functional core (available via torch.optim._functional or by directly using the stateless operations). You can create lightweight functional wrappers for Adam and SGD that perfectly match the signature of your adaptive_obgd_update_ without sacrificing PyTorch's C++ speed.
-# TODO: Because functional optimizers require explicit state initialization (which torch.optim.Adam hides from you), you can create a single helper function in functional/initialization.py or functional/utils.py to instantiate these states, ensuring you don't violate the "Minimize the amount of code a person has to write" rule.
+# TODO: Because functional optimizers require explicit state initialization (which torch.optim.Adam hides from you), you can create a single helper function in atomic_rl/initialization.py or atomic_rl/utils.py to instantiate these states, ensuring you don't violate the "Minimize the amount of code a person has to write" rule.
 
 # The authors' official implementation of ObGD / AdaptiveObGD is in
 # https://github.com/mohmdelsayed/streaming-drl/blob/main/src/optim.py — use it as a
@@ -337,7 +337,7 @@ class AdaptiveObGD(Optimizer):
 
     NOTE (reference vs. paper): We intentionally match the authors' released code (https://github.com/mohmdelsayed/streaming-drl/blob/main/src/optim.py) rather than the algorithm as written in the paper. The reference `AdaptiveObGD.step` applies a bias correction v_hat = v / (1 - beta^step) to the EMA second moment before normalizing; this correction is NOT in paper Algorithm 11. We follow the reference and apply it — a conscious and intentional decision for parity.
 
-    NOTE (intentional divergence from the reference): The reference keeps eligibility traces internally (constructor takes gamma, lamda, kappa) and exposes a single .step(); we intentionally split trace management into functional.traces + td_step(error, traces).
+    NOTE (intentional divergence from the reference): The reference keeps eligibility traces internally (constructor takes gamma, lamda, kappa) and exposes a single .step(); we intentionally split trace management into atomic_rl.traces + td_step(error, traces).
     """
 
     def __init__(

@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 import math
-from functional.action_selection import (
+from atomic_rl.action_selection import (
     expected_value,
     argmax_selector,
     sample_distribution,
@@ -228,7 +228,7 @@ def test_sample_distribution_not_implemented():
 
 
 def test_apply_action_mask():
-    from functional.action_selection import apply_action_mask
+    from atomic_rl.action_selection import apply_action_mask
 
     logits = torch.tensor([[1.0, 2.0, 3.0]])
     mask = torch.tensor([[1, 0, 1]])
@@ -238,7 +238,7 @@ def test_apply_action_mask():
 
 
 def test_compute_masked_entropy():
-    from functional.action_selection import compute_masked_entropy
+    from atomic_rl.action_selection import compute_masked_entropy
 
     logits = torch.tensor([[-0.6931, -1e8, -0.6931]])
     probs = torch.tensor([[0.5, 0.0, 0.5]])
@@ -255,7 +255,7 @@ def test_compute_masked_entropy():
 
 
 def test_gather_q_values_2d():
-    from functional.action_selection import gather_q_values
+    from atomic_rl.action_selection import gather_q_values
 
     # q_values: [B, A] -> [2, 3]
     q_values = torch.tensor([[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]])
@@ -272,7 +272,7 @@ def test_gather_q_values_2d():
 
 
 def test_gather_q_values_3d():
-    from functional.action_selection import gather_q_values
+    from atomic_rl.action_selection import gather_q_values
 
     # q_values: [B, A, Atoms] -> [2, 2, 3]
     q_values = torch.tensor(
@@ -291,7 +291,7 @@ def test_gather_q_values_3d():
 
 
 def test_gather_q_values_assertions():
-    from functional.action_selection import gather_q_values
+    from atomic_rl.action_selection import gather_q_values
 
     # Invalid q_values dimensions (4D)
     with pytest.raises(AssertionError, match="Expected 2D or 3D q_values"):

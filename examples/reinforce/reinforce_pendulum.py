@@ -5,7 +5,7 @@ REINFORCE adapted for continuous action spaces using a Gaussian policy.
 The Actor outputs the mean (mu) and has a learnable log standard deviation (log_std).
 """
 
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,11 +16,11 @@ import numpy as np
 import random
 import wandb
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_mc_returns
-from functional.losses import policy_gradient_loss
-from functional.utils import (
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.returns import compute_mc_returns
+from atomic_rl.losses import policy_gradient_loss
+from atomic_rl.utils import (
     ema_update_,
     standardize_tensor,
     scale_tensor_by_std,

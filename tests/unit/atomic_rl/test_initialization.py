@@ -1,5 +1,5 @@
 import pytest
-from functional.initialization import (
+from atomic_rl.initialization import (
     _allocate_tensordict,
     make_gnt_init,
     layer_init,

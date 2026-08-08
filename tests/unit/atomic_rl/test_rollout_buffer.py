@@ -2,7 +2,7 @@ import pytest
 import torch
 import numpy as np
 from tensordict import TensorDict
-from functional.rollout_buffer import (
+from atomic_rl.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step_,
     record_truncations_,

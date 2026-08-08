@@ -13,7 +13,7 @@ Note this is implemented inline with common Rainbow Implementations and may not 
 TODO: Can this be applied to any feature prediction or only q values? Or is it only predicting tensors of features or something? Can this be expanded beyond q values to something more general?
 """
 
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,23 +25,23 @@ import random
 import wandb
 from tensordict import TensorDict
 from functools import partial
-from functional.utils import to_numpy_action
+from atomic_rl.utils import to_numpy_action
 
-from functional.replay_buffer import (
+from atomic_rl.replay_buffer import (
     init_buffer,
     circular_write_strategy,
     uniform_sample,
 )
-from functional.losses import mse_loss
-from functional.td import compute_q_td_target
-from functional.action_selection import (
+from atomic_rl.losses import mse_loss
+from atomic_rl.td import compute_q_td_target
+from atomic_rl.action_selection import (
     argmax_selector,
     gather_q_values,
     with_epsilon_greedy,
 )
-from functional.schedules import get_linear_schedule
-from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network_
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.network import hard_update_target_network_
 
 # Constants
 BATCH_SIZE = 128

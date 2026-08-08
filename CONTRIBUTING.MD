@@ -6,7 +6,7 @@ Documentation by Signature: A well-named function with a clean signature and typ
 
 Spin straw into gold: Try to make the code as readable and understandable as possible, fully implement features to the best of your ability (following this philosophy) before moving on to the next feature. Maximum utilty per feature/commit.
 
-*functional/*
+*atomic_rl/*
 This layer contains "pure" mathematical functions. 
 These functions should be stateless, have no side effects, and strictly avoid guessing the shapes of incoming tensors wherever possible. Exceptions are permitted for standard ML conventions that inherently require state (e.g., in-place network updates or buffer history closures), provided they are clearly documented. 
 If a function expects a batch dimension, it must receive a batch dimension. On top of this, shapes and expectations should aim to make it so reshaping is rarely needed and if it is, it should be explicit. 
@@ -68,6 +68,8 @@ If a function fundamentally requires a contiguous block of memory (common when r
 
 TorchRL-like conventions
 Never blindly zero-out values using a generic done mask. If an episode is Truncated (hit a time limit), the state still has a bootstrap value, and masking it to 0 artificially corrupts the value function. Your functional TD-learning and return functions must explicitly expect terminated masks, not generic done masks
+
+Relative imports (from .utils import ...) internally is the production best practice. PyTorch does exactly this — torch/nn/modules/linear.py uses from .module import Module, from ..parameter import Parameter. 
 
 *examples/*
 This layer contains examples of how to use the functions in the functional layer.

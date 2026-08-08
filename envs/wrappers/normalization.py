@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from functional.utils import update_welford_stats
+from atomic_rl.utils import update_welford_stats
 
 # Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
 #   The authors' wrappers (NormalizeObservation, ScaleReward, ObservationTraces,
@@ -274,7 +274,7 @@ class WelfordNormalizeObservation(gym.ObservationWrapper):
     Single-environment observation normalization using Welford's online algorithm.
 
     Backed by ``update_welford_stats`` from
-    ``functional.utils`` so that examples share a single canonical implementation.
+    ``atomic_rl.utils`` so that examples share a single canonical implementation.
 
     Reference: https://github.com/mohmdelsayed/streaming-drl/blob/main/src/normalization_wrappers.py
         See the authors' `NormalizeObservation` for their equivalent.

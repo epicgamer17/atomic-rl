@@ -2,7 +2,7 @@
 # TODO: compare with 37 implementation details of PPO results
 # TODO: attempt a cleanup if possible
 # TODO: notes on multi discrete
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -14,22 +14,22 @@ import wandb
 from tensordict import TensorDict
 from functools import partial
 
-from functional.action_selection import (
+from atomic_rl.action_selection import (
     sample_distribution,
     apply_action_mask,
     compute_masked_entropy,
 )
-from functional.optimizer import apply_gradients
-from functional.returns import compute_gae
-from functional.losses import (
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.returns import compute_gae
+from atomic_rl.losses import (
     clipped_surrogate_loss,
     probability_ratio,
     clipped_mse_loss,
     mse_loss,
 )
 from torch.optim.lr_scheduler import LinearLR
-from functional.visualization import compute_explained_variance
-from functional.rollout_buffer import (
+from atomic_rl.visualization import compute_explained_variance
+from atomic_rl.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step_,
     flatten_rollout_buffer,
@@ -37,7 +37,7 @@ from functional.rollout_buffer import (
     get_rollout_next_values,
     yield_shuffled_minibatches,
 )
-from functional.utils import (
+from atomic_rl.utils import (
     ema_update,
     standardize_tensor,
     to_tensor,
@@ -239,7 +239,7 @@ for iteration in range(MAX_ITERATIONS):
 
             # 4. Handle Truncations (Gymnasium auto-resets)
             if "final_observation" in info:
-                from functional.utils import extract_vector_env_final_obs
+                from atomic_rl.utils import extract_vector_env_final_obs
 
                 env_indices, final_obs = extract_vector_env_final_obs(info)
                 # Filter to only record environments that were truncated

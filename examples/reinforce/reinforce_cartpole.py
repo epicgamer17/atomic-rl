@@ -8,7 +8,7 @@ Introduces policy gradient, simply put increase the probability of playing "good
 On-Policy Algorithm so it can't store old data. Simple places for inovation and changes, data efficiency, baseline methods/advantage computation, adding a value network, more efficient data collection, allowing for trajectories instead of only episodes, relying on Monte Carlo returns (high variance), allowing for offline data, among many others.
 """
 
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,11 +20,11 @@ import random
 import wandb
 from functools import partial
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_mc_returns
-from functional.losses import policy_gradient_loss
-from functional.utils import (
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.returns import compute_mc_returns
+from atomic_rl.losses import policy_gradient_loss
+from atomic_rl.utils import (
     ema_update_,
     standardize_tensor,
     scale_tensor_by_std,

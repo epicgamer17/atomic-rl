@@ -19,7 +19,7 @@ This paradigm/approach of treating q value estimation, value estimation, or rewa
 NOTE: the below DQN implementation is not the same as used in the paper (it does not use dueling DQN, double DQN, etc).
 """
 
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,26 +31,26 @@ import random
 import wandb
 from tensordict import TensorDict
 from functools import partial
-from functional.utils import to_numpy_action
+from atomic_rl.utils import to_numpy_action
 
-from functional.replay_buffer import (
+from atomic_rl.replay_buffer import (
     init_buffer,
     circular_write_strategy,
     uniform_sample,
 )
-from functional.losses import cross_entropy_loss
-from functional.action_selection import (
+from atomic_rl.losses import cross_entropy_loss
+from atomic_rl.action_selection import (
     argmax_selector,
     expected_value,
     gather_q_values,
     with_epsilon_greedy,
 )
-from functional.schedules import get_linear_schedule
-from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network_
-from functional.visualization import log_distributional_metrics
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.network import hard_update_target_network_
+from atomic_rl.visualization import log_distributional_metrics
 
-from functional.td import compute_categorical_q_td_target
+from atomic_rl.td import compute_categorical_q_td_target
 
 # Constants
 BATCH_SIZE = 128

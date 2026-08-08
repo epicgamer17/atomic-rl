@@ -8,7 +8,7 @@ Key Ideas:
 
 # TODO: results seem slightly noisier/worse than normal DQN. in some ways like my PPO+lstm results. should add a comparison on the flickering env of DQN and DRQN.
 
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init, set_seed
 import random
 from typing import Tuple, Optional
 
@@ -21,22 +21,22 @@ import torch.optim as optim
 import wandb
 from tensordict import TensorDict
 
-from functional.action_selection import (
+from atomic_rl.action_selection import (
     argmax_selector,
     gather_q_values,
     with_epsilon_greedy,
 )
-from functional.losses import mse_loss, with_sequence_mask
-from functional.network import hard_update_target_network_
-from functional.replay_buffer import (
+from atomic_rl.losses import mse_loss, with_sequence_mask
+from atomic_rl.network import hard_update_target_network_
+from atomic_rl.replay_buffer import (
     circular_write_strategy,
     init_buffer,
     make_padded_chunk_accumulator,
     uniform_sample,
 )
-from functional.schedules import get_linear_schedule
-from functional.td import compute_q_td_target
-from functional.utils import to_tensor
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.td import compute_q_td_target
+from atomic_rl.utils import to_tensor
 
 # Constants
 BATCH_SIZE = 32

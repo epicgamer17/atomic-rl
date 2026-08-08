@@ -3,7 +3,7 @@ import torch
 from tensordict import TensorDict
 from unittest.mock import Mock
 
-from functional.mcts import (
+from atomic_rl.mcts import (
     mcts_search,
     init_mcts_tree,
     normalize_q_values,

@@ -9,7 +9,7 @@ The main idea of the paper was that there had been several incremental improveme
 6. Noisy Nets
 """
 
-from functional.initialization import set_seed
+from atomic_rl.initialization import set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,7 +21,7 @@ import random
 import wandb
 from functools import partial
 
-from functional.replay_buffer import (
+from atomic_rl.replay_buffer import (
     init_per_buffer,
     sample_per,
     update_priorities,
@@ -29,18 +29,18 @@ from functional.replay_buffer import (
     with_per_tracking,
     make_n_step_accumulator,
 )
-from functional.schedules import get_linear_schedule
-from functional.losses import with_per_weights, cross_entropy_loss
-from functional.td import compute_categorical_q_td_target
-from functional.action_selection import (
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.losses import with_per_weights, cross_entropy_loss
+from atomic_rl.td import compute_categorical_q_td_target
+from atomic_rl.action_selection import (
     argmax_selector,
     expected_value,
     gather_q_values,
 )
-from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network_
-from functional.visualization import log_distributional_metrics
-from functional.utils import (
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.network import hard_update_target_network_
+from atomic_rl.visualization import log_distributional_metrics
+from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
 )

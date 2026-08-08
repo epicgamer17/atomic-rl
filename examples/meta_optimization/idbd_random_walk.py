@@ -11,7 +11,7 @@ Task:
 - Seed reset at the beginning of each algorithm/parameter run.
 """
 
-from functional.initialization import set_seed
+from atomic_rl.initialization import set_seed
 import torch
 import math
 import os
@@ -21,7 +21,7 @@ from typing import Tuple
 
 # TODO: find better ranges for params and U shaped curves.
 
-from functional.meta_optimization import (
+from atomic_rl.meta_optimization import (
     IDBD,
     K1,
     K2,

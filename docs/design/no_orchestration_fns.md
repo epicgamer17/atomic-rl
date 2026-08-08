@@ -7,7 +7,7 @@ this allows for slightly more explicit readable code in the examples that abstra
 This may be a larger problem with our algorithm agnosticism and avoidance of combinatorial explosions which stops us making functions like double_dqn_loss and categorical_dqn_loss and rainbow_loss. 
 
 it could be possible to add something back later. a sort of orchestration function, something like: 
-# functional/losses.py
+# atomic_rl/losses.py
 def compute_q_td_loss(
     q_predict_fn: Callable[[], torch.Tensor],      # <--- Changed from nn.Module
     q_target_fn: Callable[[], torch.Tensor],       # <--- Changed from nn.Module

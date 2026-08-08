@@ -6,7 +6,7 @@ import math
 import matplotlib.pyplot as plt
 from unittest.mock import MagicMock, patch
 
-from functional.visualization import (
+from atomic_rl.visualization import (
     create_wandb_lr_plot,
     plot_learning_rate_traces,
     plot_continual_learning_performance,

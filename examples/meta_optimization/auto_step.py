@@ -13,14 +13,14 @@ range of meta_lr values, whereas IDBD will heavily depend on tuning meta_lr
 depending on the task's variance scale.
 """
 
-from functional.initialization import set_seed
+from atomic_rl.initialization import set_seed
 import torch
 import math
 import os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from functional.meta_optimization import (
+from atomic_rl.meta_optimization import (
     IDBD,
     Autostep,
 )

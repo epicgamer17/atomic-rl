@@ -87,7 +87,7 @@ TODO: learn the gradient math of AdaGain better.
 # TODO: make stateful or pass args around.
 # TODO: Adam-HD? is this even desired?
 # TODO extend to non linear case
-# TODO: merge with functional/optimizer.py potentially.
+# TODO: merge with atomic_rl/optimizer.py potentially.
 # TODO: a little messy and hard to use/drop in, try and clean up the code.
 # TODO: more work needed to make this actually useful/general. Work up to MetaOptize from Sutton.
 

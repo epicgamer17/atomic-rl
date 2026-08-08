@@ -183,7 +183,7 @@ As you can see there is a lot of algorithms I want to try and so I need to be ab
 IN A FEW SENTENCE: Monolitic approach but with functions for stuff that is reused often. No routing code, that is handled by the monolithic shell. Then I can possibly add back validation systems later if I want to. More work on buffers, but in comparison with the Graph Approach I get the persistent layer simply in my files global variables, rather than havin to do graph work. User controls plotting, user makes evaluation loops. 
 
 ROUGH PLAN ON LAYERS?: 
-    Functional Core (rl.functional/)
+    Functional Core (rl.atomic_rl/)
     Replay Buffers (rl.buffers/)
     Search Algorithms (rl.search/)?? (possibly included in functional, and would just call other functional code), possibly define in the monolithic shell?
     Validation Systems (rl.validation/)??

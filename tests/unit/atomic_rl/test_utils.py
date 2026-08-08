@@ -1,7 +1,7 @@
 import pytest
 import torch
 import numpy as np
-from functional.utils import (
+from atomic_rl.utils import (
     ema_update,
     ema_update_,
     standardize_tensor,
@@ -104,7 +104,7 @@ def test_utils_assertions():
 def test_extract_vector_env_final_obs():
     """Test extraction of final observations from Gymnasium info dict."""
     import numpy as np
-    from functional.utils import extract_vector_env_final_obs
+    from atomic_rl.utils import extract_vector_env_final_obs
 
     # 1. No final observations
     info_none = {}
@@ -146,7 +146,7 @@ def test_extract_vector_env_final_obs():
 def test_extract_vector_env_final_obs_edge_cases():
     """Test edge cases for extract_vector_env_final_obs."""
     import numpy as np
-    from functional.utils import extract_vector_env_final_obs
+    from atomic_rl.utils import extract_vector_env_final_obs
 
     # 1. Info is not a dict (e.g., PufferLib list)
     info_list = ["some", "data"]
@@ -167,7 +167,7 @@ def test_extract_vector_env_final_obs_edge_cases():
 
 
 def test_add_dirichlet_noise():
-    from functional.utils import add_dirichlet_noise
+    from atomic_rl.utils import add_dirichlet_noise
 
     probs = torch.tensor([[1.0, 0.0], [0.5, 0.5]])
     epsilon = 0.25

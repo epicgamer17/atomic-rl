@@ -14,7 +14,7 @@ which uses a wider architecture (2 hidden layers of 2000 units), the Adam optimi
 and a larger batch size of 64.
 """
 
-from functional.initialization import make_gnt_init
+from atomic_rl.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -24,18 +24,18 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 from envs.streams.permuted_mnist import make_permuted_mnist_stream
-from functional.plasticity import (
+from atomic_rl.plasticity import (
     apply_selective_weight_reinitialization,
     init_cbp_state,
     apply_continual_backprop,
 )
-from functional.metrics import (
+from atomic_rl.metrics import (
     compute_dead_units_proportion,
     compute_average_weight_magnitude,
     compute_average_gradient_magnitude,
     compute_stable_rank,
 )
-from functional.visualization import (
+from atomic_rl.visualization import (
     plot_plasticity_correlates,
     plot_continual_learning_performance,
 )

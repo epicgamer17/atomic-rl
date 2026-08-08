@@ -3,7 +3,7 @@ import torch
 import random
 import math
 from tensordict import TensorDict
-from functional.replay_buffer import (
+from atomic_rl.replay_buffer import (
     init_buffer,
     init_per_buffer,
     circular_write_strategy,

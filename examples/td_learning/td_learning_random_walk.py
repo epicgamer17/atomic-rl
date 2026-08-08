@@ -36,8 +36,8 @@ from typing import List, Tuple
 from pathlib import Path
 
 from envs.mdp.random_walk import RandomWalkEnv
-from functional.td import semi_gradient_td_update_
-from functional.traces import update_accumulating_traces
+from atomic_rl.td import semi_gradient_td_update_
+from atomic_rl.traces import update_accumulating_traces
 
 # --- CONSTANTS ---
 NUM_NON_TERMINAL_STATES = 5

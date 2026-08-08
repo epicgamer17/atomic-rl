@@ -45,10 +45,10 @@ import torch.nn.functional as F
 from typing import Tuple, List, Dict
 from tensordict import TensorDict
 import wandb
-from functional.mcts import mcts_search, get_mcts_visit_policy
-from functional.losses import cross_entropy_loss, mse_loss
-from functional.action_selection import argmax_selector, sample_distribution
-from functional.replay_buffer import (
+from atomic_rl.mcts import mcts_search, get_mcts_visit_policy
+from atomic_rl.losses import cross_entropy_loss, mse_loss
+from atomic_rl.action_selection import argmax_selector, sample_distribution
+from atomic_rl.replay_buffer import (
     init_buffer,
     circular_write_strategy,
     uniform_sample,
@@ -236,7 +236,7 @@ def run_self_play_game(
             root_visits.unsqueeze(0), temperature=temp
         ).squeeze(0)
 
-        # Sample action using functional.action_selection helpers
+        # Sample action using atomic_rl.action_selection helpers
         if temp > 0.0:
             dist = torch.distributions.Categorical(probs=action_policy)
             action_idx_tensor, _ = sample_distribution(dist, explore=True)
@@ -421,7 +421,7 @@ def train_alphazero_tictactoe():
         learner_model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
     )
 
-    # Initialize Replay Buffer using functional.replay_buffer
+    # Initialize Replay Buffer using atomic_rl.replay_buffer
     buffer_shapes = {
         "state": (3, 3, 3),
         "target_policy": (9,),
@@ -509,7 +509,7 @@ def train_alphazero_tictactoe():
         if replay_buffer_state.size < MIN_BUFFER_SIZE:
             continue
 
-        # 2. Continuous 1-Step Network SGD Optimization using uniform_sample from functional.replay_buffer
+        # 2. Continuous 1-Step Network SGD Optimization using uniform_sample from atomic_rl.replay_buffer
         minibatch = uniform_sample(replay_buffer_state, rng_key, BATCH_SIZE)
         states = minibatch["state"]
         target_policies = minibatch["target_policy"]

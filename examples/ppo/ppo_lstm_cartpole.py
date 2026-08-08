@@ -1,4 +1,4 @@
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,19 +10,19 @@ import random
 import wandb
 from tensordict import TensorDict
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_gae
-from functional.losses import (
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.returns import compute_gae
+from atomic_rl.losses import (
     clipped_surrogate_loss,
     entropy_loss,
     probability_ratio,
     clipped_mse_loss,
 )
 from torch.optim.lr_scheduler import LinearLR
-from functional.visualization import compute_explained_variance
-from functional.network import unroll_rnn
-from functional.rollout_buffer import (
+from atomic_rl.visualization import compute_explained_variance
+from atomic_rl.network import unroll_rnn
+from atomic_rl.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step_,
     flatten_rollout_buffer,
@@ -31,7 +31,7 @@ from functional.rollout_buffer import (
     yield_shuffled_minibatches,
     yield_sequential_minibatches,
 )
-from functional.utils import (
+from atomic_rl.utils import (
     standardize_tensor,
     to_tensor,
     to_numpy_action,

@@ -2,7 +2,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from functional.metrics import (
+from atomic_rl.metrics import (
     compute_dead_units_proportion,
     compute_average_weight_magnitude,
     compute_average_gradient_magnitude,

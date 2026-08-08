@@ -19,7 +19,7 @@ Architectural Design & Behavior Notes:
 import torch
 import torch.nn as nn
 from typing import Tuple, Sequence, Optional
-from functional.initialization import layer_init
+from atomic_rl.initialization import layer_init
 
 
 class Transpose(nn.Module):

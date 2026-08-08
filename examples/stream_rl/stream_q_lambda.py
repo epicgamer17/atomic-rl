@@ -9,7 +9,7 @@ Key Details:
 - Leverages custom Welford Gym wrappers for inline real-time scaling.
 - Follows Watkins's Q(λ): eligibility traces are reset to zero BEFORE taking
   an environment step if a non-greedy action is selected.
-- Integrates the canonical functional.traces core engine.
+- Integrates the canonical atomic_rl.traces core engine.
 
 NOTE: We chose to use AdaptiveObGD over the standard ObGD. The reference code
 (github.com/mohmdelsayed/streaming-drl) uses plain ObGD for all released stream
@@ -34,25 +34,25 @@ import torch.nn.functional as F
 import numpy as np
 import wandb
 
-from functional.action_selection import (
+from atomic_rl.action_selection import (
     with_epsilon_greedy,
     argmax_selector,
     gather_q_values,
 )
-from functional.initialization import (
+from atomic_rl.initialization import (
     set_seed,
     lecun_uniform_,
     make_sparse_init,
 )
-from functional.optimizer import AdaptiveObGD
-from functional.traces import update_accumulating_traces
-from functional.utils import (
+from atomic_rl.optimizer import AdaptiveObGD
+from atomic_rl.traces import update_accumulating_traces
+from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
     update_welford_stats,
 )
-from functional.schedules import get_linear_schedule
-from functional.td import compute_q_td_target
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.td import compute_q_td_target
 
 from envs.wrappers.normalization import (
     WelfordNormalizeObservation,

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from typing import Any, Optional, Tuple, Callable
-from functional.utils import ema_update
+from .utils import ema_update
 
 
 # NOTE: This is a stateful function which is not ideal for the functional paradigm but follows standard pytorch and ml conventions.

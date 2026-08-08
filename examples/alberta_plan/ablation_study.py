@@ -8,18 +8,18 @@
 Idea of this example is to attempt to combine the Alberta Plan Related papers i have created so far.
 
 Step 1:
-Online Normalization: [functional/utils.py]
-Meta-Learned Step-Sizes: IDBD or AutoStep [functional/meta_optimization.py]
+Online Normalization: [atomic_rl/utils.py]
+Meta-Learned Step-Sizes: IDBD or AutoStep [atomic_rl/meta_optimization.py]
 Feature Relevance Tracking: This is handled by both Meta Optimization Methods (IDBD and AutoStep) and Generate and Test methods (CBP and SWR).
     In CBP/SWR, it's the utilities tensor (tracking how much a feature contributes to the output).
     In IDBD/AutoStep, it's the h trace (tracking the correlation of recent gradients).
-Generate-and-Test Mechanics: [functional/plasticity.py] (e.g. SWR, CBP). In combination with Meta Optimization Methods high learning rate features are not pruned, low learning rate features are pruned, and a new feature is generated.
+Generate-and-Test Mechanics: [atomic_rl/plasticity.py] (e.g. SWR, CBP). In combination with Meta Optimization Methods high learning rate features are not pruned, low learning rate features are pruned, and a new feature is generated.
 Resource Budgeting: Controlled by: k (SWR) or replacement_rate (CBP).
 
 """
 
 # TODO: should this use ema?
-from functional.initialization import make_gnt_init
+from atomic_rl.initialization import make_gnt_init
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,10 +29,10 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from pathlib import Path
 
-from functional.td import true_online_td_update_, semi_gradient_td_update_
-from functional.traces import update_true_online_traces
-from functional.meta_optimization import update_autostep_rates_, update_idbd_rates_
-from functional.plasticity import apply_continual_backprop, init_cbp_state
+from atomic_rl.td import true_online_td_update_, semi_gradient_td_update_
+from atomic_rl.traces import update_true_online_traces
+from atomic_rl.meta_optimization import update_autostep_rates_, update_idbd_rates_
+from atomic_rl.plasticity import apply_continual_backprop, init_cbp_state
 
 # Configuration
 NUM_STATES = 19

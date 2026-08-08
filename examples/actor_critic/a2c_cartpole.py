@@ -20,7 +20,7 @@ NOTE: perhaps this should be in VPG?
 NOTE: This does not implement the LSTM version which was also described in the A3C Paper or the equivalent Sarsa and DQN versions of the A3C algorithm.
 """
 
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -32,20 +32,20 @@ import random
 import wandb
 from functools import partial
 
-from functional.action_selection import sample_distribution
-from functional.optimizer import apply_gradients
-from functional.returns import compute_n_step_returns
-from functional.losses import policy_gradient_loss, huber_loss, mse_loss, entropy_loss
+from atomic_rl.action_selection import sample_distribution
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.returns import compute_n_step_returns
+from atomic_rl.losses import policy_gradient_loss, huber_loss, mse_loss, entropy_loss
 from torch.optim.lr_scheduler import LinearLR
-from functional.visualization import compute_explained_variance
-from functional.rollout_buffer import (
+from atomic_rl.visualization import compute_explained_variance
+from atomic_rl.rollout_buffer import (
     init_rollout_buffer,
     store_rollout_step_,
     flatten_rollout_buffer,
     record_truncations_,
     get_rollout_next_values,
 )
-from functional.utils import (
+from atomic_rl.utils import (
     standardize_tensor,
     to_tensor,
     to_numpy_action,
@@ -179,7 +179,7 @@ for iteration in range(MAX_ITERATIONS):
 
             # 4. Handle Truncations (Gymnasium auto-resets)
             if "final_observation" in info:
-                from functional.utils import extract_vector_env_final_obs
+                from atomic_rl.utils import extract_vector_env_final_obs
 
                 env_indices, final_obs = extract_vector_env_final_obs(info)
                 # Filter to only record environments that were truncated

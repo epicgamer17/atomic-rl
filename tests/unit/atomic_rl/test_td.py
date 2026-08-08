@@ -1,6 +1,6 @@
 import pytest
 import torch
-from functional.td import (
+from atomic_rl.td import (
     compute_q_td_target,
     compute_categorical_q_td_target,
 )
@@ -102,7 +102,7 @@ def test_compute_categorical_q_td_target_terminal():
 
 
 def test_compute_v_td_target():
-    from functional.td import compute_v_td_target
+    from atomic_rl.td import compute_v_td_target
 
     next_values = torch.tensor([3.0, 4.0])
     rewards = torch.tensor([0.5, 1.0])
@@ -117,7 +117,7 @@ def test_compute_v_td_target():
 
 
 def test_td_assertions():
-    from functional.td import (
+    from atomic_rl.td import (
         compute_v_td_target,
         compute_q_td_target,
         compute_categorical_q_td_target,

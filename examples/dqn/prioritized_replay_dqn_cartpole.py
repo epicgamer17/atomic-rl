@@ -18,7 +18,7 @@ In summary, PER is a simple but effective technique that can significantly impro
 NOTE: below we only implement the TD error based priority method for simplicity.
 """
 
-from functional.initialization import layer_init, set_seed
+from atomic_rl.initialization import layer_init, set_seed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -31,27 +31,27 @@ import wandb
 from tensordict import TensorDict
 from functools import partial
 
-from functional.replay_buffer import (
+from atomic_rl.replay_buffer import (
     init_per_buffer,
     sample_per,
     update_priorities,
     circular_write_strategy,
     with_per_tracking,
 )
-from functional.schedules import get_linear_schedule
-from functional.losses import with_per_weights, mse_loss
-from functional.td import compute_q_td_target
-from functional.action_selection import (
+from atomic_rl.schedules import get_linear_schedule
+from atomic_rl.losses import with_per_weights, mse_loss
+from atomic_rl.td import compute_q_td_target
+from atomic_rl.action_selection import (
     argmax_selector,
     gather_q_values,
     with_epsilon_greedy,
 )
-from functional.utils import (
+from atomic_rl.utils import (
     to_tensor,
     to_numpy_action,
 )
-from functional.optimizer import apply_gradients
-from functional.network import hard_update_target_network_
+from atomic_rl.optimizer import apply_gradients
+from atomic_rl.network import hard_update_target_network_
 
 # Constants
 BATCH_SIZE = 128
