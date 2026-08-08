@@ -20,7 +20,7 @@ import os
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from atomic_rl.meta_optimization import (
+from atomic_rl.optimizer.metaoptimization import (
     IDBD,
     Autostep,
 )

@@ -55,6 +55,12 @@ Functional core, OOP wrapper
 
 
 Torch-like conventions
+Usability over Performance. The primary goal is useability, the secondary goal is reasonable performance. (From PyTorch)
+Explicit is better than implicit (From PyTorch and Zen of Python)
+Simple is better than complex (From PyTorch)
+Python First with Best In Class Language Interoperability (From PyTorch)
+
+
 Follow PyTorch naming conventions. For example, if using inplace operations the function name should end with an underscore (_)
 Functions should never hardcode device='cuda' or device='cpu', nor should they default to float32 unless absolutely mathematically necessary.
 When creating new tensors inside a functional block, use .new_zeros(), .new_empty(), or torch.zeros_like(tensor) on an incoming tensor to inherently match its device and dtype. This prevents silent device-mismatch crashes during distributed training or when swapping from CPU to GPU.

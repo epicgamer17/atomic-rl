@@ -21,7 +21,7 @@ from typing import Tuple
 
 # TODO: find better ranges for params and U shaped curves.
 
-from atomic_rl.meta_optimization import (
+from atomic_rl.optimizer.metaoptimization import (
     IDBD,
     K1,
     K2,
@@ -51,9 +51,13 @@ def run_tracking_experiment(
     if algorithm == "IDBD":
         optimizer = IDBD([weights], initial_lr=1.0 / num_features, meta_lr=param)
     elif algorithm == "K1":
-        optimizer = K1([weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true)
+        optimizer = K1(
+            [weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true
+        )
     elif algorithm == "K2":
-        optimizer = K2([weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true)
+        optimizer = K2(
+            [weights], initial_lr=1.0 / num_features, meta_lr=param, r_hat=r_true
+        )
 
     # State for LS (RLS)
     # Parameter 'param' is the initialization P(0) = param * I

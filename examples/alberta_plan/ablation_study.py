@@ -9,7 +9,7 @@ Idea of this example is to attempt to combine the Alberta Plan Related papers i 
 
 Step 1:
 Online Normalization: [atomic_rl/utils.py]
-Meta-Learned Step-Sizes: IDBD or AutoStep [atomic_rl/meta_optimization.py]
+Meta-Learned Step-Sizes: IDBD or AutoStep [atomic_rl/optimizer/metaoptimization/]
 Feature Relevance Tracking: This is handled by both Meta Optimization Methods (IDBD and AutoStep) and Generate and Test methods (CBP and SWR).
     In CBP/SWR, it's the utilities tensor (tracking how much a feature contributes to the output).
     In IDBD/AutoStep, it's the h trace (tracking the correlation of recent gradients).
@@ -31,7 +31,10 @@ from pathlib import Path
 
 from atomic_rl.td import true_online_td_update_, semi_gradient_td_update_
 from atomic_rl.traces import update_true_online_traces
-from atomic_rl.meta_optimization import update_autostep_rates_, update_idbd_rates_
+from atomic_rl.optimizer.metaoptimization import (
+    update_autostep_rates_,
+    update_idbd_rates_,
+)
 from atomic_rl.plasticity import apply_continual_backprop, init_cbp_state
 
 # Configuration
@@ -173,12 +176,15 @@ def run_experiment(config: str):
             backbone.fc2.weight: init_cbp_state(backbone.fc2.weight),
         }
         layer_pairs = [
-            (backbone.fc1.weight, backbone.fc1.bias, backbone.fc2.weight, backbone.fc2.bias),
-            (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None)
+            (
+                backbone.fc1.weight,
+                backbone.fc1.bias,
+                backbone.fc2.weight,
+                backbone.fc2.bias,
+            ),
+            (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None),
         ]
-        init_fn = make_gnt_init(
-            lambda t: nn.init.kaiming_uniform_(t, a=math.sqrt(5))
-        )
+        init_fn = make_gnt_init(lambda t: nn.init.kaiming_uniform_(t, a=math.sqrt(5)))
     else:
         cbp_states = None
         layer_pairs = None
@@ -299,7 +305,12 @@ def run_experiment(config: str):
             # TODO: is theta is updated out-of-place? we assume it is so we dynamically reconstruct
             # the layer pairs to avoid a "stale reference" bug where CBP refers to the step 0 theta.
             current_layer_pairs = [
-                (backbone.fc1.weight, backbone.fc1.bias, backbone.fc2.weight, backbone.fc2.bias),
+                (
+                    backbone.fc1.weight,
+                    backbone.fc1.bias,
+                    backbone.fc2.weight,
+                    backbone.fc2.bias,
+                ),
                 (backbone.fc2.weight, backbone.fc2.bias, theta.unsqueeze(0), None),
             ]
             replacement_masks = apply_continual_backprop(

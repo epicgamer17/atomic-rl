@@ -3,7 +3,7 @@ import torch
 import math
 from torch.nn import Parameter
 
-from atomic_rl.meta_optimization import (
+from atomic_rl.optimizer.metaoptimization import (
     update_idbd_rates_,
     update_k1_rates_,
     update_k2_rates_,

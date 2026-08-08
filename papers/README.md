@@ -77,7 +77,7 @@ This directory maintains a mapping between the research papers in this folder an
 - **Divide and Conquer Monte Carlo Tree Search for Goal Directed Planning**
 - **Plan2Explore** 
 - **Player of Games**
-- **Stream Deep RL Finally Works** (Mohamed Elsayed 2024): [stream_rl.pdf](stream_rl.pdf). Implemented in `examples/stream_rl/` and `atomic_rl/optimizer.py`.
+- **Stream Deep RL Finally Works** (Mohamed Elsayed 2024): [stream_rl.pdf](stream_rl.pdf). Implemented in `examples/stream_rl/` and `atomic_rl/optimizer/`.
 - **Emphatic TD**
 - **Temporal Abstraction in TD Networks** 
 - **Between MDPs and Semi-MDPs: Learning, Planning, and Representing Knowledge at Multiple Temporal Scales** (Maybe read more) (LONG)
@@ -194,9 +194,9 @@ This repository heavily focuses on the **Alberta Plan** (Sutton et al., 2022) an
 | :--- | :--- | :--- | :--- | :--- |
 | **Alberta Plan** (Sutton et al., 2022) | [AlbertaPlan.pdf](AlbertaPlan.pdf) / [Report](AlbertaPlanReport.pdf) | Building Blocks | `atomic_rl/plasticity.py` | Serves as the philosophical guide for the `atomic_rl/` module. |
 Step 1: ___ ?
-| **Stream Deep RL** (Elsayed et al., 2024) | [stream_rl.pdf](stream_rl.pdf) | Done | `examples/stream_rl/`, `atomic_rl/optimizer.py` | Implements Stream AC(λ), Stream Q(λ), and Early Temporal Termination (ETT) with Adaptive ObGD optimizers. |
-| **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [autostep.pdf](autostep.pdf) | Done | `atomic_rl/meta_optimization.py` | Meta-gradient learning rates. Reproduced in `examples/meta_optimization/`. |
-| **K1 / K2 Algorithms** | [idbd_b.pdf](idbd_b.pdf) | Done | `atomic_rl/meta_optimization.py` | O(n) approximations of the Kalman Filter for adaptive step-sizes. |
+| **Stream Deep RL** (Elsayed et al., 2024) | [stream_rl.pdf](stream_rl.pdf) | Done | `examples/stream_rl/`, `atomic_rl/optimizer/` | Implements Stream AC(λ), Stream Q(λ), and Early Temporal Termination (ETT) with Adaptive ObGD optimizers. |
+| **IDBD / Autostep** | [idbd_a.pdf](idbd_a.pdf) / [autostep.pdf](autostep.pdf) | Done | `atomic_rl/optimizer/metaoptimization/` | Meta-gradient learning rates. Reproduced in `examples/meta_optimization/`. |
+| **K1 / K2 Algorithms** | [idbd_b.pdf](idbd_b.pdf) | Done | `atomic_rl/optimizer/metaoptimization/` | O(n) approximations of the Kalman Filter for adaptive step-sizes. |
 Step 2: ___ ?
 | **Continual Backprop** | [cbp_1.pdf](cbp_1.pdf) / [cbp_2.pdf](cbp_2.pdf) | Done | `atomic_rl/plasticity.py` | Implements the generate-and-test plasticity mechanism. Reproduced in `examples/plasticity/`. |
 | **SWR** (Selective Weight Reinit) | [selective_weight_reinit.pdf](selective_weight_reinit.pdf) | Done | `atomic_rl/plasticity.py` | Utility-based reinitialization. Reproduced in `examples/plasticity/`. |
@@ -236,7 +236,7 @@ Core temporal credit assignment and gradient-based TD methods for linear and fun
 | **True Online Traces** | [true_online_td.pdf](true_online_td.pdf) | Sutton & van Seijen (2014) | `atomic_rl/traces.py` |
 | **Loss Functions** | - | Various | `atomic_rl/losses.py` |
 | **Replay Buffers** | - | Various | `atomic_rl/replay_buffer.py` |
-| **Optimizers (ObGD)** | [stream_rl.pdf](stream_rl.pdf) | Elsayed et al. (2024) | `atomic_rl/optimizer.py` |
+| **Optimizers (ObGD)** | [stream_rl.pdf](stream_rl.pdf) | Elsayed et al. (2024) | `atomic_rl/optimizer/` |
 
 ---
 
